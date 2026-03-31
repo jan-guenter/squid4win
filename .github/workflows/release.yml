@@ -36,9 +36,6 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Build tray app
-        run: dotnet build .\Squid4Win.slnx -c Release --nologo
-
       - name: Resolve build automation configuration
         id: build-config
         run: |
@@ -56,7 +53,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.build-config.outputs.conan_home }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conan/**', 'requirements-automation.txt') }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
           restore-keys: |
             ${{ runner.os }}-conan-
 
@@ -141,12 +138,6 @@ jobs:
       - name: Smoke test Squid
         run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release
 
-      - name: Publish tray app
-        id: tray
-        run: |
-          $trayPublishRoot = .\scripts\Publish-TrayApp.ps1 -Configuration Release
-          "tray_publish_root=$trayPublishRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
       - name: Detect MSI packaging inputs
         id: packaging
         run: |
@@ -174,7 +165,6 @@ jobs:
         run: |
           $payload = .\scripts\Stage-ReleasePayload.ps1 `
             -Configuration Release `
-            -TrayPublishRoot '${{ steps.tray.outputs.tray_publish_root }}' `
             -CreatePortableZip
 
           "installer_payload_root=$($payload.InstallPayloadRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8

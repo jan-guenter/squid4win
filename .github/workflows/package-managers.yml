@@ -18,6 +18,42 @@ on:
         description: GitHub repository to read release assets from
         required: false
         default: ""
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to package
+        required: false
+        type: string
+        default: ""
+      version:
+        description: Package version override
+        required: false
+        type: string
+        default: ""
+      repository:
+        description: GitHub repository to read release assets from
+        required: false
+        type: string
+        default: ""
+    outputs:
+      repository:
+        description: Repository used to resolve release assets
+        value: ${{ jobs.generate.outputs.repository }}
+      tag:
+        description: Release tag used for package metadata
+        value: ${{ jobs.generate.outputs.tag }}
+      version:
+        description: Package version used for generated metadata
+        value: ${{ jobs.generate.outputs.version }}
+      output_root:
+        description: Output directory for generated package manager metadata
+        value: ${{ jobs.generate.outputs.output_root }}
+      msi_sha256:
+        description: MSI SHA256 used in generated metadata
+        value: ${{ jobs.generate.outputs.msi_sha256 }}
+      portable_zip_sha256:
+        description: Portable zip SHA256 used in generated metadata
+        value: ${{ jobs.generate.outputs.portable_zip_sha256 }}
 
 permissions:
   contents: read
@@ -26,6 +62,13 @@ jobs:
   generate:
     name: Generate feed metadata
     runs-on: windows-2022
+    outputs:
+      repository: ${{ steps.release.outputs.repository }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      output_root: ${{ steps.manifests.outputs.output_root }}
+      msi_sha256: ${{ steps.manifests.outputs.msi_sha256 }}
+      portable_zip_sha256: ${{ steps.manifests.outputs.portable_zip_sha256 }}
     defaults:
       run:
         shell: pwsh
@@ -126,16 +169,16 @@ jobs:
           $summaryLines = @(
             '## Package manager metadata',
             '',
-            ('- Repository: `${0}`' -f '${{ steps.release.outputs.repository }}'),
-            ('- Tag: `${0}`' -f '${{ steps.release.outputs.tag }}'),
-            ('- Version: `${0}`' -f '${{ steps.release.outputs.version }}'),
-            ('- MSI SHA256: `${0}`' -f '${{ steps.manifests.outputs.msi_sha256 }}'),
-            ('- Portable zip SHA256: `${0}`' -f '${{ steps.manifests.outputs.portable_zip_sha256 }}'),
+            ('- Repository: `{0}`' -f '${{ steps.release.outputs.repository }}'),
+            ('- Tag: `{0}`' -f '${{ steps.release.outputs.tag }}'),
+            ('- Version: `{0}`' -f '${{ steps.release.outputs.version }}'),
+            ('- MSI SHA256: `{0}`' -f '${{ steps.manifests.outputs.msi_sha256 }}'),
+            ('- Portable zip SHA256: `{0}`' -f '${{ steps.manifests.outputs.portable_zip_sha256 }}'),
             '',
-            'Live publication still needs repository secrets and feed accounts:',
-            '- `WINGET_GITHUB_TOKEN` for PRs to `microsoft/winget-pkgs`',
-            '- `CHOCO_API_KEY` for Chocolatey publication',
-            '- `SCOOP_GITHUB_TOKEN` plus a target bucket repository for Scoop'
+            'Live publication is handled separately through `package-manager-publish.yml`.',
+            '- `WINGET_GITHUB_TOKEN` plus optional `WINGET_TARGET_REPOSITORY` and `WINGET_TARGET_BRANCH`',
+            '- `CHOCO_API_KEY` plus optional `CHOCO_PUSH_SOURCE_URL` and `CHOCO_QUERY_SOURCE_URL`',
+            '- `SCOOP_GITHUB_TOKEN`, `SCOOP_BUCKET_REPOSITORY`, and optional `SCOOP_BUCKET_BRANCH`'
           )
 
           $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

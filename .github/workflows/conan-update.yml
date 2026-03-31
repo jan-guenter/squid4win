@@ -43,7 +43,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.build-config.outputs.conan_home }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conan/**', 'requirements-automation.txt') }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
           restore-keys: |
             ${{ runner.os }}-conan-
 

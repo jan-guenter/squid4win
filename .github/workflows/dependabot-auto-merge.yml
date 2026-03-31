@@ -14,11 +14,10 @@ permissions:
 
 jobs:
   enable-automerge:
-    if: ${{ (github.actor == 'dependabot[bot]' || startsWith(github.head_ref, 'automation/')) && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check changed files
-        id: changed-files
+      - name: Evaluate pull request trust and changed files
+        id: pull-request-policy
         uses: actions/github-script@v8
         with:
           script: |
@@ -31,6 +30,11 @@ jobs:
               'conan/squid-release.json',
               'requirements-automation.txt'
             ];
+            const pullRequest = (await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number
+            })).data;
             const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -40,13 +44,26 @@ jobs:
             const onlyAllowed = files.every((file) =>
               allowed.some((entry) => file.filename === entry || file.filename.startsWith(entry))
             );
+            const trustedAuthor = pullRequest.user?.login === 'dependabot[bot]';
+            const trustedAutomationBranch =
+              pullRequest.head.repo?.full_name === `${context.repo.owner}/${context.repo.repo}` &&
+              pullRequest.head.ref.startsWith('automation/');
+            const trustedOrigin = trustedAuthor || trustedAutomationBranch;
+            const shouldEnable = !pullRequest.draft && trustedOrigin && onlyAllowed;
+
             if (!onlyAllowed) {
               core.warning(`Skipping auto-merge because unexpected files changed: ${files.map((file) => file.filename).join(', ')}`);
             }
+            if (!trustedOrigin) {
+              core.notice(`Skipping auto-merge because the pull request origin is not trusted: author=${pullRequest.user?.login ?? 'unknown'}, head=${pullRequest.head.label}`);
+            }
+
             core.setOutput('only_allowed', String(onlyAllowed));
+            core.setOutput('trusted_origin', String(trustedOrigin));
+            core.setOutput('should_enable', String(shouldEnable));
 
       - name: Enable auto-merge
-        if: ${{ steps.changed-files.outputs.only_allowed == 'true' }}
+        if: ${{ steps.pull-request-policy.outputs.should_enable == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}

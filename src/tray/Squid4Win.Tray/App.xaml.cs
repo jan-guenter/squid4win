@@ -7,6 +7,7 @@ namespace Squid4Win.Tray;
 
 public partial class App : System.Windows.Application, IDisposable
 {
+    private bool disposed;
     private TrayIconHost? trayIconHost;
     private WindowsServiceSquidServiceController? serviceController;
 
@@ -34,8 +35,25 @@ public partial class App : System.Windows.Application, IDisposable
 
     public void Dispose()
     {
-        trayIconHost?.Dispose();
-        serviceController?.Dispose();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        if (disposing)
+        {
+            trayIconHost?.Dispose();
+            serviceController?.Dispose();
+            trayIconHost = null;
+            serviceController = null;
+        }
+
+        disposed = true;
     }
 }

@@ -20,35 +20,29 @@ templates.
 - Pinned upstream release: Squid `7.5` with tag `SQUID_7_5`
 - Native build direction: MSYS2 + MinGW-w64 on Windows
 - Conan rule: keep `CONAN_HOME` repo-local at `.\.conan2`
-- Current native source patch hook: `scripts\Apply-SquidSourcePatches.ps1`
-  carries the MinGW `crtd_message.h` `ERROR`-macro fix, the
-  `src\dns\rfc1035.cc` unused-parameter workaround, the MinGW `pipe()`,
-  `kill()`, signal-constant, `syslog()`, and wait-status compatibility shims,
-  the `DiskThreads\aiops_win32.cc` allocator and local maperror fixes, the
-  RADIUS helper Winsock-link fix, the `src\ip\QosConfig.cc` Winsock
-  `setsockopt()` argument-cast workaround, the
-  `src\ipc\TypedMsgHdr.cc` first-control-message workaround for MinGW
-  `CMSG_FIRSTHDR`, the
-  `src\security\cert_generators\file\certificate_db.cc` MinGW lock-path fix,
-  the `security_file_certgen` helper-local `fatalf()` fallback and MinGW
-  link-library fix, the Win32 globals/OS-enum exposure and `src\ipc_win32.cc`
-  Winsock adapter fixes, the MinGW Windows-service guard fixes, the MinGW
-  user/group compatibility shims, the `src\cbdata.cc` pointer-width cookie
-  fix, the global MinGW `_PATH_DEVNULL` fallback, the generated-`configure`
-  strict-error/dependency-tracking workarounds, the `src\fd.cc` WSAMSG-backed
-  `recvmsg()`/`sendmsg()` bridge, the `src\main.cc` MinGW-as-Windows startup
-  guards, the `src\tools.cc` and `src\comm.cc` Winsock/nonblocking fixes, the
-  MinGW-local `WIN32_maperror()`/`dbg_mutex` support in `src\win32.cc`, and the
-  `src\DiskIO\AIO` Win32 guard plus pointer-width fixes needed for native link
-  and install completion
-- `scripts\Invoke-SquidBuild.ps1` now extracts Squid into a build-scoped source
-  root and takes an exclusive lock per build profile/configuration so one local
-  troubleshooting run cannot silently invalidate another
-- `scripts\Invoke-SquidBuild.ps1` now also adds `/usr/bin/core_perl` to the
-  MSYS2 `PATH` because Squid still invokes `pod2man` during `make` and
-  `make install`
-- `scripts\Publish-TrayApp.ps1` and `scripts\Build-Installer.ps1` now route
-  `dotnet` output to the host so callers capture only the final return value
+- Current native source patch set lives in `conandata.yml` plus the ordered
+  patch series under `conan\patches\squid\0001-mingw-compat-core-shims.patch`
+  through `0007-mingw-main-and-service-integration.patch`. Keep that series
+  logically grouped by concern (core shims, build/link flags, disk I/O,
+  socket/IPC wrappers, Win32 runtime helpers, certificate tooling, and
+  runtime/service integration) instead of collapsing it back into one monolith.
+- `scripts\Invoke-SquidBuild.ps1` is now a Conan-first wrapper: it exports the
+  repo-local recipes, refreshes or consumes the lockfile, takes an exclusive
+  build lock per profile/configuration, and hands off source/build work to the
+  root `conanfile.py`
+- `scripts\Publish-TrayApp.ps1` is now a Conan-backed convenience wrapper for
+  `conan\recipes\tray-app`; do not reintroduce direct `dotnet publish` as the
+  authoritative tray packaging path
+- The root `conanfile.py` now owns Squid source retrieval, `conandata.yml`
+  patch application, the native MSYS2 build, autoconf header repair, and final
+  bundle assembly
+- The tray app now has a dedicated Conan application recipe under
+  `conan\recipes\tray-app`, and the root product recipe consumes it when
+  assembling the staged bundle
+- The build recipe still adds `/usr/bin/core_perl` to the MSYS2 `PATH` because
+  Squid still invokes `pod2man` during `make` and `make install`
+- `scripts\Build-Installer.ps1` routes `dotnet` output to the host so callers
+  capture only the final return value
 - The current MinGW Windows profile explicitly restricts Negotiate auth to
   `SSPI` because the upstream `wrapper` helper uses `fork()`, and it omits the
   current LDAP-dependent helper family because Squid's native LDAP probes still
@@ -69,7 +63,9 @@ templates.
   current scan plus quality-gate enforcement
 - Package-manager metadata generation now lives in
   `scripts\Export-PackageManagerMetadata.ps1` and
-  `.github\workflows\package-managers.yml`
+  `.github\workflows\package-managers.yml`, while credential-gated publication
+  lives in the package-manager publish helpers under `scripts\` and
+  `.github\workflows\package-manager-publish.yml`
 - Current installer state: committed WiX v4 project plus payload-staging scripts
   exist, and the current repo state has now completed a local native `make`,
   `make install`, real payload staging, portable zip creation, and MSI build;
@@ -97,18 +93,24 @@ instead of implying the native build was already proven locally.
 ## Change hygiene
 
 - Keep `README.md`, `AGENTS.md`, and the relevant `.agents\design\*.md` files aligned.
-- Keep `config\squid-version.json` and `conan\squid-release.json` aligned when
-  the Squid release pin changes. Prefer `scripts\Update-SquidVersion.ps1`.
+- Keep `config\squid-version.json`, `conan\squid-release.json`, and
+  `conandata.yml` aligned when the Squid release pin changes. Prefer
+  `scripts\Update-SquidVersion.ps1`.
 - Keep docs truthful about what is scaffolded versus what is production-ready.
 - Keep `.github\workflows\` and `scripts\` synchronized with any contributor
   instructions you add.
 - Keep `.github\copilot-instructions.md` and `.github\instructions\` synchronized
   with workflow, review, or upgrade-process changes.
-- If you change installer behavior, keep `scripts\Stage-ReleasePayload.ps1`,
-  `scripts\Build-Installer.ps1`, and `packaging\wix\` synchronized.
-- If you change feed metadata generation, keep
-  `scripts\Export-PackageManagerMetadata.ps1` and
-  `.github\workflows\package-managers.yml` synchronized.
+- If you change installer behavior, keep `conanfile.py`,
+  `scripts\Stage-ReleasePayload.ps1`, `scripts\Build-Installer.ps1`, and
+  `packaging\wix\` synchronized.
+- If you change native MinGW-linked imports or bundled MSYS2 package
+  composition, keep `config\build-profile.json` `runtimeDlls`, the staged-bundle
+  harvesting in `conanfile.py`, and runtime launch validation synchronized.
+- If you change feed metadata generation or publication, keep
+  `scripts\Export-PackageManagerMetadata.ps1`, the package-manager publish
+  helpers under `scripts\`, `.github\workflows\package-managers.yml`, and
+  `.github\workflows\package-manager-publish.yml` synchronized.
 - Prefer repo-relative paths and repo-local state.
 - Do not introduce secrets, signing material, or machine-specific paths beyond
   documented tool defaults such as `C:\msys64`.
@@ -123,7 +125,8 @@ At minimum, update:
 - the affected ADR under `.agents\design\` if an accepted design changed
 - `.github\copilot-instructions.md` or `.github\instructions\` when review or
   upgrade guidance changes
-- `config\*.json` and `conan\*.json` if version metadata or defaults changed
+- `config\*.json`, `conan\*.json`, and `conandata.yml` if version metadata or
+  defaults changed
 
 Future contributors should be able to understand the current truth of the
 repository without reconstructing it from commit history.

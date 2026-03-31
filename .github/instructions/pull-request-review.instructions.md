@@ -18,8 +18,10 @@ When reviewing or preparing a change in this repository:
   state.
 - Treat `.agents\skills\` as vendored third-party content and avoid incidental
   edits there.
-- If artifact names, release URLs, or package metadata changed, update
-  `scripts\Export-PackageManagerMetadata.ps1` and related workflow/docs in the
+- If artifact names, release URLs, or package metadata/publication behavior
+  changed, update `scripts\Export-PackageManagerMetadata.ps1`, the package-
+  manager publish helpers under `scripts\`, `.github\workflows\package-managers.yml`,
+  `.github\workflows\package-manager-publish.yml`, and the related docs in the
   same change.
 - If a change affects an accepted design decision, update the relevant ADR under
   `.agents\design\`.

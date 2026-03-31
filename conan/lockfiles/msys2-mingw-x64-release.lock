@@ -1,12 +1,16 @@
 {
     "version": "0.5",
-    "requires": [],
+    "requires": [
+        "squid4win_tray/0.1#71f612f291f0763a57b76a2d51e3b4a0%1774943853.9569113"
+    ],
     "build_requires": [
         "mingw-builds/15.1.0#b4d14df3adf20b2dbfa22093b27737fe%1747130387.38",
         "make/4.3#f3747ef6e47bbd049f9f3f14a9e1d8ba%1667424325.767",
         "lzma_sdk/9.20#f1fe20056422603432563a07b25f2ee3%1684929159.374",
         "7zip/19.00#6c39c38a52d3e8271deb7195ccc74fe8%1712741718.982"
     ],
-    "python_requires": [],
+    "python_requires": [
+        "squid4win_recipe_base/1.0#cccc5350cee12b014756fe1b30c8557d%1774943851.621099"
+    ],
     "config_requires": []
 }

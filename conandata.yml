@@ -1,0 +1,36 @@
+sources:
+  "7.5":
+    url: "https://github.com/squid-cache/squid/releases/download/SQUID_7_5/squid-7.5.tar.xz"
+    sha256: "f6058907db0150d2f5d228482b5a9e5678920cf368ae0ccbcecceb2ff4c35106"
+    strip_root: true
+
+patches:
+  "7.5":
+    - patch_file: "conan/patches/squid/0001-mingw-compat-core-shims.patch"
+      patch_description: "Provide foundational MinGW POSIX compatibility shims."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0002-mingw-build-system-flags.patch"
+      patch_description: "Adjust Squid build-system flags and MinGW link libraries."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0003-mingw-disk-io-compat.patch"
+      patch_description: "Teach Squid DiskIO backends to build and run under MinGW."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0004-mingw-socket-and-ipc-compat.patch"
+      patch_description: "Add MinGW-safe Winsock and IPC wrappers."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0005-mingw-win32-runtime-support.patch"
+      patch_description: "Expose the Win32 runtime helpers needed by the MinGW port."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0006-mingw-cert-generator-compat.patch"
+      patch_description: "Fix MinGW certificate helper and certificate DB support."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0007-mingw-main-and-service-integration.patch"
+      patch_description: "Wire MinGW into Squid runtime startup and Windows service paths."
+      base_path: "."
+      strip: 2

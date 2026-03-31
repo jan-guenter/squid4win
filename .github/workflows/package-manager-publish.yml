@@ -1,0 +1,410 @@
+name: Publish package manager feeds
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish
+        required: false
+        default: ""
+      version:
+        description: Package version override
+        required: false
+        default: ""
+      repository:
+        description: GitHub repository to read release assets from
+        required: false
+        default: ""
+      publish_winget:
+        description: Open a winget pull request
+        required: false
+        type: boolean
+        default: false
+      publish_chocolatey:
+        description: Push the Chocolatey package
+        required: false
+        type: boolean
+        default: false
+      publish_scoop:
+        description: Open a Scoop bucket pull request
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate:
+    name: Validate publication request
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Validate requested feeds
+        env:
+          INPUT_WINGET: ${{ inputs.publish_winget }}
+          INPUT_CHOCO: ${{ inputs.publish_chocolatey }}
+          INPUT_SCOOP: ${{ inputs.publish_scoop }}
+        run: |
+          $requestedFeeds = @()
+
+          if ($env:INPUT_WINGET -eq 'true') {
+            $requestedFeeds += 'winget'
+          }
+
+          if ($env:INPUT_CHOCO -eq 'true') {
+            $requestedFeeds += 'Chocolatey'
+          }
+
+          if ($env:INPUT_SCOOP -eq 'true') {
+            $requestedFeeds += 'Scoop'
+          }
+
+          if ($requestedFeeds.Count -eq 0) {
+            throw 'Select at least one feed input before starting package-manager publication.'
+          }
+
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+
+          $summaryLines = @(
+            '## Publication request',
+            '',
+            ('- Feeds: `{0}`' -f ($requestedFeeds -join ', '))
+          )
+
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  metadata:
+    name: Generate feed metadata
+    needs: validate
+    uses: ./.github/workflows/package-managers.yml
+    with:
+      tag: ${{ inputs.tag }}
+      version: ${{ inputs.version }}
+      repository: ${{ inputs.repository }}
+    secrets: inherit
+
+  publish_winget:
+    name: Publish winget manifest
+    needs: metadata
+    if: ${{ inputs.publish_winget }}
+    runs-on: windows-2022
+    environment: package-feeds
+    outputs:
+      changed: ${{ steps.publish.outputs.changed }}
+      pull_request_url: ${{ steps.publish.outputs.pull_request_url }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download package manager artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: squid4win-package-managers
+          path: artifacts\package-managers
+
+      - name: Resolve winget publication settings
+        id: config
+        env:
+          WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+          WINGET_TARGET_REPOSITORY: ${{ vars.WINGET_TARGET_REPOSITORY }}
+          WINGET_TARGET_BRANCH: ${{ vars.WINGET_TARGET_BRANCH }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINGET_GITHUB_TOKEN)) {
+            throw 'WINGET_GITHUB_TOKEN is required to publish winget manifests.'
+          }
+
+          $targetRepository = if ($env:WINGET_TARGET_REPOSITORY) {
+            $env:WINGET_TARGET_REPOSITORY
+          } else {
+            'microsoft/winget-pkgs'
+          }
+
+          $baseBranch = if ($env:WINGET_TARGET_BRANCH) {
+            $env:WINGET_TARGET_BRANCH
+          } else {
+            'master'
+          }
+
+          "target_repository=$targetRepository" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "base_branch=$baseBranch" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish winget manifest
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+        run: |
+          $result = .\scripts\Publish-WingetManifest.ps1 `
+            -Version '${{ needs.metadata.outputs.version }}' `
+            -Tag '${{ needs.metadata.outputs.tag }}' `
+            -Repository '${{ needs.metadata.outputs.repository }}' `
+            -ManifestRoot (Join-Path $PWD.Path 'artifacts\package-managers') `
+            -TargetRepository '${{ steps.config.outputs.target_repository }}' `
+            -BaseBranch '${{ steps.config.outputs.base_branch }}'
+
+          "changed=$($result.Changed.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "pull_request_url=$($result.PullRequestUrl)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Summarize winget publication
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+
+          $summaryLines = @(
+            '## winget publication',
+            '',
+            ('- Target repository: `{0}`' -f '${{ steps.config.outputs.target_repository }}'),
+            ('- Base branch: `{0}`' -f '${{ steps.config.outputs.base_branch }}'),
+            ('- Changed: `{0}`' -f '${{ steps.publish.outputs.changed }}')
+          )
+
+          if ('${{ steps.publish.outputs.pull_request_url }}') {
+            $summaryLines += ('- Pull request: {0}' -f '${{ steps.publish.outputs.pull_request_url }}')
+          } else {
+            $summaryLines += '- Pull request: not created because the target repository already matched the generated manifests.'
+          }
+
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  publish_chocolatey:
+    name: Publish Chocolatey package
+    needs: metadata
+    if: ${{ inputs.publish_chocolatey }}
+    runs-on: windows-2022
+    environment: package-feeds
+    outputs:
+      already_published: ${{ steps.publish.outputs.already_published }}
+      package_path: ${{ steps.publish.outputs.package_path }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download package manager artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: squid4win-package-managers
+          path: artifacts\package-managers
+
+      - name: Resolve Chocolatey publication settings
+        id: config
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+          CHOCO_PUSH_SOURCE_URL: ${{ vars.CHOCO_PUSH_SOURCE_URL }}
+          CHOCO_QUERY_SOURCE_URL: ${{ vars.CHOCO_QUERY_SOURCE_URL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CHOCO_API_KEY)) {
+            throw 'CHOCO_API_KEY is required to publish Chocolatey packages.'
+          }
+
+          $pushSource = if ($env:CHOCO_PUSH_SOURCE_URL) {
+            $env:CHOCO_PUSH_SOURCE_URL
+          } else {
+            'https://push.chocolatey.org/'
+          }
+
+          $querySource = if ($env:CHOCO_QUERY_SOURCE_URL) {
+            $env:CHOCO_QUERY_SOURCE_URL
+          } else {
+            'https://community.chocolatey.org/api/v2/'
+          }
+
+          "push_source=$pushSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "query_source=$querySource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish Chocolatey package
+        id: publish
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          $result = .\scripts\Publish-ChocolateyPackage.ps1 `
+            -Version '${{ needs.metadata.outputs.version }}' `
+            -PackageRoot (Join-Path $PWD.Path 'artifacts\package-managers\chocolatey') `
+            -PushSource '${{ steps.config.outputs.push_source }}' `
+            -QuerySource '${{ steps.config.outputs.query_source }}'
+
+          "already_published=$($result.AlreadyPublished.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "package_path=$($result.PackagePath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Summarize Chocolatey publication
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+
+          $summaryLines = @(
+            '## Chocolatey publication',
+            '',
+            ('- Push source: `{0}`' -f '${{ steps.config.outputs.push_source }}'),
+            ('- Query source: `{0}`' -f '${{ steps.config.outputs.query_source }}'),
+            ('- Already published: `{0}`' -f '${{ steps.publish.outputs.already_published }}'),
+            ('- Package path: `{0}`' -f '${{ steps.publish.outputs.package_path }}')
+          )
+
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  publish_scoop:
+    name: Publish Scoop manifest
+    needs: metadata
+    if: ${{ inputs.publish_scoop }}
+    runs-on: windows-2022
+    environment: package-feeds
+    outputs:
+      changed: ${{ steps.publish.outputs.changed }}
+      pull_request_url: ${{ steps.publish.outputs.pull_request_url }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download package manager artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: squid4win-package-managers
+          path: artifacts\package-managers
+
+      - name: Resolve Scoop publication settings
+        id: config
+        env:
+          SCOOP_GITHUB_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
+          SCOOP_BUCKET_REPOSITORY: ${{ vars.SCOOP_BUCKET_REPOSITORY }}
+          SCOOP_BUCKET_BRANCH: ${{ vars.SCOOP_BUCKET_BRANCH }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SCOOP_GITHUB_TOKEN)) {
+            throw 'SCOOP_GITHUB_TOKEN is required to publish Scoop manifests.'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:SCOOP_BUCKET_REPOSITORY)) {
+            throw 'SCOOP_BUCKET_REPOSITORY is required to publish Scoop manifests.'
+          }
+
+          $baseBranch = if ($env:SCOOP_BUCKET_BRANCH) {
+            $env:SCOOP_BUCKET_BRANCH
+          } else {
+            'master'
+          }
+
+          "target_repository=$($env:SCOOP_BUCKET_REPOSITORY)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "base_branch=$baseBranch" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish Scoop manifest
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
+        run: |
+          $result = .\scripts\Publish-ScoopManifest.ps1 `
+            -Version '${{ needs.metadata.outputs.version }}' `
+            -Tag '${{ needs.metadata.outputs.tag }}' `
+            -Repository '${{ needs.metadata.outputs.repository }}' `
+            -ManifestRoot (Join-Path $PWD.Path 'artifacts\package-managers') `
+            -TargetRepository '${{ steps.config.outputs.target_repository }}' `
+            -BaseBranch '${{ steps.config.outputs.base_branch }}'
+
+          "changed=$($result.Changed.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "pull_request_url=$($result.PullRequestUrl)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Summarize Scoop publication
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+
+          $summaryLines = @(
+            '## Scoop publication',
+            '',
+            ('- Bucket repository: `{0}`' -f '${{ steps.config.outputs.target_repository }}'),
+            ('- Base branch: `{0}`' -f '${{ steps.config.outputs.base_branch }}'),
+            ('- Changed: `{0}`' -f '${{ steps.publish.outputs.changed }}')
+          )
+
+          if ('${{ steps.publish.outputs.pull_request_url }}') {
+            $summaryLines += ('- Pull request: {0}' -f '${{ steps.publish.outputs.pull_request_url }}')
+          } else {
+            $summaryLines += '- Pull request: not created because the bucket already matched the generated manifest.'
+          }
+
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  summarize:
+    name: Summarize feed publication
+    if: ${{ always() }}
+    needs:
+      - validate
+      - metadata
+      - publish_winget
+      - publish_chocolatey
+      - publish_scoop
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VALIDATE_RESULT: ${{ needs.validate.result }}
+      METADATA_RESULT: ${{ needs.metadata.result }}
+      METADATA_REPOSITORY: ${{ needs.metadata.outputs.repository }}
+      METADATA_TAG: ${{ needs.metadata.outputs.tag }}
+      METADATA_VERSION: ${{ needs.metadata.outputs.version }}
+      WINGET_RESULT: ${{ needs.publish_winget.result }}
+      WINGET_CHANGED: ${{ needs.publish_winget.outputs.changed }}
+      WINGET_PR: ${{ needs.publish_winget.outputs.pull_request_url }}
+      CHOCO_RESULT: ${{ needs.publish_chocolatey.result }}
+      CHOCO_ALREADY_PUBLISHED: ${{ needs.publish_chocolatey.outputs.already_published }}
+      CHOCO_PACKAGE_PATH: ${{ needs.publish_chocolatey.outputs.package_path }}
+      SCOOP_RESULT: ${{ needs.publish_scoop.result }}
+      SCOOP_CHANGED: ${{ needs.publish_scoop.outputs.changed }}
+      SCOOP_PR: ${{ needs.publish_scoop.outputs.pull_request_url }}
+    steps:
+      - name: Summarize feed publication
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+
+          $summaryLines = @(
+            '## Feed publication summary',
+            '',
+            ('- Request validation: `{0}`' -f $(if ($env:VALIDATE_RESULT) { $env:VALIDATE_RESULT } else { 'skipped' })),
+            ('- Metadata generation: `{0}`' -f $(if ($env:METADATA_RESULT) { $env:METADATA_RESULT } else { 'skipped' })),
+            ('- Repository: `{0}`' -f $(if ($env:METADATA_REPOSITORY) { $env:METADATA_REPOSITORY } else { '<not available>' })),
+            ('- Tag: `{0}`' -f $(if ($env:METADATA_TAG) { $env:METADATA_TAG } else { '<not available>' })),
+            ('- Version: `{0}`' -f $(if ($env:METADATA_VERSION) { $env:METADATA_VERSION } else { '<not available>' })),
+            ('- winget job: `{0}`' -f $(if ($env:WINGET_RESULT) { $env:WINGET_RESULT } else { 'skipped' })),
+            ('- Chocolatey job: `{0}`' -f $(if ($env:CHOCO_RESULT) { $env:CHOCO_RESULT } else { 'skipped' })),
+            ('- Scoop job: `{0}`' -f $(if ($env:SCOOP_RESULT) { $env:SCOOP_RESULT } else { 'skipped' }))
+          )
+
+          if ($env:WINGET_RESULT -eq 'success') {
+            $summaryLines += ('- winget changed: `{0}`' -f $(if ($env:WINGET_CHANGED) { $env:WINGET_CHANGED } else { 'false' }))
+            if ($env:WINGET_PR) {
+              $summaryLines += ('- winget PR: {0}' -f $env:WINGET_PR)
+            }
+          }
+
+          if ($env:CHOCO_RESULT -eq 'success') {
+            $summaryLines += ('- Chocolatey already published: `{0}`' -f $(if ($env:CHOCO_ALREADY_PUBLISHED) { $env:CHOCO_ALREADY_PUBLISHED } else { 'false' }))
+            if ($env:CHOCO_PACKAGE_PATH) {
+              $summaryLines += ('- Chocolatey package: `{0}`' -f $env:CHOCO_PACKAGE_PATH)
+            }
+          }
+
+          if ($env:SCOOP_RESULT -eq 'success') {
+            $summaryLines += ('- Scoop changed: `{0}`' -f $(if ($env:SCOOP_CHANGED) { $env:SCOOP_CHANGED } else { 'false' }))
+            if ($env:SCOOP_PR) {
+              $summaryLines += ('- Scoop PR: {0}' -f $env:SCOOP_PR)
+            }
+          }
+
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

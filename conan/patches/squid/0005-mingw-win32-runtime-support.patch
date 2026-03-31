@@ -1,0 +1,249 @@
+diff --git a/pristine/squid-7.5/src/cbdata.cc b/patched/squid-7.5/src/cbdata.cc
+index 6764bfe..0148370 100644
+--- a/pristine/squid-7.5/src/cbdata.cc
++++ b/patched/squid-7.5/src/cbdata.cc
+@@ -18,6 +18,7 @@
+ 
+ #include <climits>
+ #include <cstddef>
++#include <cstdint>
+ 
+ #if WITH_VALGRIND
+ #include <map>
+@@ -67,9 +68,9 @@ public:
+     cbdata_type type;
+ 
+     /* cookie used while debugging */
+-    long cookie;
+-    void check(int) const {assert(cookie == ((long)this ^ Cookie));}
+-    static const long Cookie;
++    std::intptr_t cookie; /* squid4win-mingw-cbdata-cookie */
++    void check(int) const {assert(cookie == (reinterpret_cast<std::intptr_t>(this) ^ Cookie));}
++    static const std::intptr_t Cookie;
+ 
+ #if !WITH_VALGRIND
+     size_t dataSize() const { return sizeof(data);}
+@@ -80,7 +81,7 @@ public:
+ 
+ static_assert(std::is_standard_layout<cbdata>::value, "the behavior of offsetof(cbdata) is defined");
+ 
+-const long cbdata::Cookie((long)0xDEADBEEF);
++const std::intptr_t cbdata::Cookie(static_cast<std::intptr_t>(0xDEADBEEF));
+ 
+ struct CBDataIndex {
+     Mem::Allocator *pool;
+@@ -168,7 +169,7 @@ cbdataInternalAlloc(cbdata_type type)
+     c->type = type;
+     c->valid = 1;
+     c->locks = 0;
+-    c->cookie = (long) c ^ cbdata::Cookie;
++    c->cookie = reinterpret_cast<std::intptr_t>(c) ^ cbdata::Cookie;
+     ++cbdataCount;
+     debugs(45, 9, "Allocating " << p);
+     return p;
+diff --git a/pristine/squid-7.5/src/enums.h b/patched/squid-7.5/src/enums.h
+index f2fef55..ff5a29e 100644
+--- a/pristine/squid-7.5/src/enums.h
++++ b/patched/squid-7.5/src/enums.h
+@@ -202,7 +202,7 @@ typedef enum {
+ } digest_read_state_t;
+ 
+ /* CygWin & Windows NT Port */
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-win32-os-enum */
+ /*
+  * Supported Windows OS types codes
+  */
+diff --git a/pristine/squid-7.5/src/globals.h b/patched/squid-7.5/src/globals.h
+index e66cc4d..d6af901 100644
+--- a/pristine/squid-7.5/src/globals.h
++++ b/patched/squid-7.5/src/globals.h
+@@ -79,10 +79,10 @@ extern int store_swap_high; /* 0 */
+ extern size_t store_pages_max;  /* 0 */
+ extern int64_t store_maxobjsize;    /* 0 */
+ extern int incoming_sockets_accepted;
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-win32-globals */
+ extern unsigned int WIN32_Socks_initialized;    /* 0 */
+ #endif
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-win32-globals */
+ extern unsigned int WIN32_OS_version;   /* 0 */
+ extern char *WIN32_OS_string;           /* NULL */
+ extern char *WIN32_Command_Line;        /* NULL */
+diff --git a/pristine/squid-7.5/src/tools.cc b/patched/squid-7.5/src/tools.cc
+index b6b292f..12950ba 100644
+--- a/pristine/squid-7.5/src/tools.cc
++++ b/patched/squid-7.5/src/tools.cc
+@@ -1179,7 +1179,7 @@ restoreCapabilities(bool keep)
+ pid_t
+ WaitForOnePid(pid_t pid, PidStatus &status, int flags)
+ {
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-tools */
+     return 0; // function not used on Windows
+ #else
+     return waitpid(pid, &status, flags);
+@@ -1198,7 +1198,7 @@ WindowsErrorMessage(DWORD errorId)
+                             nullptr,
+                             errorId,
+                             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+-                            static_cast<LPTSTR>(&rawMessage),
++                            reinterpret_cast<LPTSTR>(&rawMessage) /* squid4win-mingw-tools */,
+                             0,
+                             nullptr);
+     if (!length) {
+diff --git a/pristine/squid-7.5/src/win32.cc b/patched/squid-7.5/src/win32.cc
+index 4d92c7f..909105d 100644
+--- a/pristine/squid-7.5/src/win32.cc
++++ b/patched/squid-7.5/src/win32.cc
+@@ -10,7 +10,7 @@
+ 
+ #include "squid.h"
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-win32-impl */
+ 
+ #include "fde.h"
+ #include "win32.h"
+@@ -27,6 +27,109 @@ SQUIDCEXTERN LPCRITICAL_SECTION dbg_mutex;
+ void WIN32_ExceptionHandlerCleanup(void);
+ static LPTOP_LEVEL_EXCEPTION_FILTER Win32_Old_ExceptionHandler = nullptr;
+ 
++#if _SQUID_MINGW_
++LPCRITICAL_SECTION dbg_mutex = nullptr; /* squid4win-mingw-dbg-mutex */
++
++void
++WIN32_maperror(unsigned long WIN32_oserrno) /* squid4win-mingw-win32-maperror-impl */
++{
++    static const struct {
++        unsigned long win32Code;
++        int posixErrno;
++    } errorTable[] = {
++        {ERROR_INVALID_FUNCTION, EINVAL},
++        {ERROR_FILE_NOT_FOUND, ENOENT},
++        {ERROR_PATH_NOT_FOUND, ENOENT},
++        {ERROR_TOO_MANY_OPEN_FILES, EMFILE},
++        {ERROR_ACCESS_DENIED, EACCES},
++        {ERROR_INVALID_HANDLE, EBADF},
++        {ERROR_ARENA_TRASHED, ENOMEM},
++        {ERROR_NOT_ENOUGH_MEMORY, ENOMEM},
++        {ERROR_INVALID_BLOCK, ENOMEM},
++        {ERROR_BAD_ENVIRONMENT, E2BIG},
++        {ERROR_BAD_FORMAT, ENOEXEC},
++        {ERROR_INVALID_ACCESS, EINVAL},
++        {ERROR_INVALID_DATA, EINVAL},
++        {ERROR_INVALID_DRIVE, ENOENT},
++        {ERROR_CURRENT_DIRECTORY, EACCES},
++        {ERROR_NOT_SAME_DEVICE, EXDEV},
++        {ERROR_NO_MORE_FILES, ENOENT},
++        {ERROR_LOCK_VIOLATION, EACCES},
++        {ERROR_BAD_NETPATH, ENOENT},
++        {ERROR_NETWORK_ACCESS_DENIED, EACCES},
++        {ERROR_BAD_NET_NAME, ENOENT},
++        {ERROR_FILE_EXISTS, EEXIST},
++        {ERROR_CANNOT_MAKE, EACCES},
++        {ERROR_FAIL_I24, EACCES},
++        {ERROR_INVALID_PARAMETER, EINVAL},
++        {ERROR_NO_PROC_SLOTS, EAGAIN},
++        {ERROR_DRIVE_LOCKED, EACCES},
++        {ERROR_BROKEN_PIPE, EPIPE},
++        {ERROR_DISK_FULL, ENOSPC},
++        {ERROR_INVALID_TARGET_HANDLE, EBADF},
++        {ERROR_WAIT_NO_CHILDREN, ECHILD},
++        {ERROR_CHILD_NOT_COMPLETE, ECHILD},
++        {ERROR_DIRECT_ACCESS_HANDLE, EBADF},
++        {ERROR_NEGATIVE_SEEK, EINVAL},
++        {ERROR_SEEK_ON_DEVICE, EACCES},
++        {ERROR_DIR_NOT_EMPTY, ENOTEMPTY},
++        {ERROR_NOT_LOCKED, EACCES},
++        {ERROR_BAD_PATHNAME, ENOENT},
++        {ERROR_MAX_THRDS_REACHED, EAGAIN},
++        {ERROR_LOCK_FAILED, EACCES},
++        {ERROR_ALREADY_EXISTS, EEXIST},
++        {ERROR_FILENAME_EXCED_RANGE, ENOENT},
++        {ERROR_NESTING_NOT_ALLOWED, EAGAIN},
++        {ERROR_NOT_ENOUGH_QUOTA, ENOMEM},
++        {WSAEINTR, EINTR},
++        {WSAEBADF, EBADF},
++        {WSAEACCES, EACCES},
++        {WSAEFAULT, EFAULT},
++        {WSAEINVAL, EINVAL},
++        {WSAEMFILE, EMFILE},
++        {WSAEWOULDBLOCK, EWOULDBLOCK},
++        {WSAEINPROGRESS, EINPROGRESS},
++        {WSAEALREADY, EALREADY},
++        {WSAENOTSOCK, ENOTSOCK},
++        {WSAEDESTADDRREQ, EDESTADDRREQ},
++        {WSAEMSGSIZE, EMSGSIZE},
++        {WSAEPROTOTYPE, EPROTOTYPE},
++        {WSAENOPROTOOPT, ENOPROTOOPT},
++        {WSAEPROTONOSUPPORT, EPROTONOSUPPORT},
++        {WSAEOPNOTSUPP, EOPNOTSUPP},
++        {WSAEAFNOSUPPORT, EAFNOSUPPORT},
++        {WSAEADDRINUSE, EADDRINUSE},
++        {WSAEADDRNOTAVAIL, EADDRNOTAVAIL},
++        {WSAENETDOWN, ENETDOWN},
++        {WSAENETUNREACH, ENETUNREACH},
++        {WSAENETRESET, ENETRESET},
++        {WSAECONNABORTED, ECONNABORTED},
++        {WSAECONNRESET, ECONNRESET},
++        {WSAENOBUFS, ENOBUFS},
++        {WSAEISCONN, EISCONN},
++        {WSAENOTCONN, ENOTCONN},
++        {WSAETIMEDOUT, ETIMEDOUT},
++        {WSAECONNREFUSED, ECONNREFUSED},
++        {WSAEHOSTUNREACH, EHOSTUNREACH}
++    };
++
++    for (const auto &entry : errorTable) {
++        if (WIN32_oserrno == entry.win32Code) {
++            errno = entry.posixErrno;
++            return;
++        }
++    }
++
++    if (WIN32_oserrno >= ERROR_WRITE_PROTECT && WIN32_oserrno <= ERROR_SHARING_BUFFER_EXCEEDED)
++        errno = EACCES;
++    else if (WIN32_oserrno >= ERROR_INVALID_STARTING_CODESEG && WIN32_oserrno <= ERROR_INFLOOP_IN_RELOC_CHAIN)
++        errno = ENOEXEC;
++    else
++        errno = EINVAL;
++}
++#endif
++
++#if _SQUID_WINDOWS_ /* squid4win-mingw-win32-wsafd */
+ int
+ Win32__WSAFDIsSet(int fd, fd_set FAR * set)
+ {
+@@ -35,6 +138,8 @@ Win32__WSAFDIsSet(int fd, fd_set FAR * set)
+ 
+     return __WSAFDIsSet(s, set);
+ }
++#endif
++
+ 
+ LONG CALLBACK WIN32_ExceptionHandler(EXCEPTION_POINTERS* ep)
+ {
+diff --git a/pristine/squid-7.5/src/win32.h b/patched/squid-7.5/src/win32.h
+index b44adb5..bc7e589 100644
+--- a/pristine/squid-7.5/src/win32.h
++++ b/patched/squid-7.5/src/win32.h
+@@ -11,11 +11,16 @@
+ #ifndef SQUID_SRC_WIN32_H
+ #define SQUID_SRC_WIN32_H
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
++void WIN32_maperror(unsigned long WIN32_oserrno); /* squid4win-mingw-win32-maperror */
++#endif
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-win32-declarations */
+ 
+ void WIN32_ExceptionHandlerInit(void);
+ 
++#if _SQUID_WINDOWS_ /* squid4win-mingw-win32-wsafd */
+ int Win32__WSAFDIsSet(int fd, fd_set* set);
++#endif
+ DWORD WIN32_IpAddrChangeMonitorInit();
+ 
+ #endif

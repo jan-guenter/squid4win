@@ -22,6 +22,12 @@
     "mingw-w64-x86_64-pcre2",
     "mingw-w64-x86_64-zlib"
   ],
+  "runtimeDlls": [
+    "libcrypto-3-x64.dll",
+    "libssl-3-x64.dll",
+    "libwinpthread-1.dll",
+    "libgnurx-0.dll"
+  ],
   "hostTriplet": "x86_64-w64-mingw32",
   "compilerCppStd": "gnu17",
   "compilerLibCxx": "libstdc++11",

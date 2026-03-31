@@ -24,16 +24,23 @@ host.
 - Canonical metadata files:
   - `config\squid-version.json`
   - `conan\squid-release.json`
+  - `conandata.yml`
 
-When the upstream pin changes, keep both metadata files aligned. Prefer
+When the upstream pin changes, keep all three metadata files aligned. Prefer
 `scripts\Update-SquidVersion.ps1` over hand-editing one file and forgetting the
-other.
+others.
 
 ## Current project direction
 
 - Native Windows builds use MSYS2 and MinGW-w64 first.
 - Conan 2 is used where it helps, with `CONAN_HOME` isolated to `.\.conan2`.
+- The root `conanfile.py` is the product recipe: it fetches Squid from
+  `conandata.yml`, applies the reviewable patch set under `conan\patches\`, and
+  assembles the staged Windows bundle.
 - The tray app is a separate .NET 8 WPF deliverable under `src\tray\`.
+- The tray app also has its own Conan application recipe under
+  `conan\recipes\tray-app`, and the root product recipe consumes it as a
+  dependency.
 - WiX v4 is the committed MSI toolchain, and the first installer contract
   defaults to `C:\Squid4Win` to avoid known Windows path-with-spaces problems in
   Squid.
@@ -58,7 +65,8 @@ other.
   - CI linting and Windows native build execution
   - SonarQube scan and quality-gate enforcement on CI builds
   - release artifact staging
-  - package-manager metadata generation for winget, Chocolatey, and Scoop
+  - package-manager metadata generation and credential-gated publication for
+    winget, Chocolatey, and Scoop
   - upstream Squid version refresh PRs
   - Conan lockfile refresh PRs
   - Dependabot auto-merge enablement
@@ -78,8 +86,8 @@ other.
 - final release-signing flow
 - runtime license harvesting for every shipped DLL in the final bundle
 - broader installer UX such as configurable install locations or startup policy
-- live package publication to winget, Chocolatey, and Scoop once the required
-  accounts and credentials are available
+- package-feed account provisioning plus a first end-to-end validation of the
+  winget, Chocolatey, and Scoop publish jobs
 - interactive SonarQube issue triage from the MCP server while the current TLS
   handshake problem remains unresolved
 
@@ -188,52 +196,49 @@ Local build and lockfile flow:
 1. `.\scripts\Initialize-NativeToolchain.ps1 -Configuration Release`
 2. `.\scripts\Update-ConanLockfile.ps1 -Configuration Release`
 3. `.\scripts\Invoke-SquidBuild.ps1 -Configuration Release`
-4. `.\scripts\Publish-TrayApp.ps1 -Configuration Release`
-5. `.\scripts\Stage-ReleasePayload.ps1 -Configuration Release -CreatePortableZip`
-6. `.\scripts\Build-Installer.ps1 -Configuration Release`
+4. `.\scripts\Stage-ReleasePayload.ps1 -Configuration Release -CreatePortableZip`
+5. `.\scripts\Build-Installer.ps1 -Configuration Release`
 
 `Invoke-SquidBuild.ps1` now consumes the generated lockfile when present and will
 generate a build-scoped lockfile automatically if a committed one is not
-available yet. The native MSYS2 path also forces the MinGW-host `pkg-config`
-binary and pre-seeds the known x86_64-w64-mingw32 autoconf cache values that
-Squid currently mis-detects under this toolchain. It also reapplies the current
-MinGW-specific upstream source patches during extraction in a build-scoped
-source tree so clean rebuilds do not regress on the Windows `ERROR` macro
-collision in `crtd_message.h`, the `rfc1035.cc` unused-parameter warnings, the
-MinGW `pipe()`, `kill()`, signal-constant, `syslog()`, and wait-status
-compatibility shims plus the `aiops_win32.cc` fixes in `DiskThreads`, the MinGW
-RADIUS Winsock-link workaround, the `QosConfig.cc` Winsock `setsockopt()`
-argument-cast workaround, the `ipc\TypedMsgHdr.cc` first-control-message
-workaround for MinGW `CMSG_FIRSTHDR`, the
-`security\cert_generators\file\certificate_db.cc` MinGW lock-path fix, the
-`security_file_certgen` helper-local `fatalf()` fallback and MinGW link-library
-fix, the Win32 globals/OS-enum exposure and `ipc_win32.cc` Winsock adapter
-fixes, the MinGW Windows-service guard fixes, the MinGW user/group
-compatibility shims, the `cbdata.cc` pointer-width cookie fix, the global MinGW
-`_PATH_DEVNULL` fallback, or the generated-`configure`
-strict-error/dependency-tracking workarounds, the `src\fd.cc` WSAMSG-backed
-`recvmsg()`/`sendmsg()` bridge, the `src\main.cc` MinGW-as-Windows guard and
-`chroot_dir` handling, the `src\tools.cc` and `src\comm.cc` Winsock/nonblocking
-fixes, the MinGW-local `WIN32_maperror()`/`dbg_mutex` support in `src\win32.cc`,
-and the `src\DiskIO\AIO` Win32 guard plus pointer-width fixes needed to link and
-install a native Squid `7.5` build.
-`Invoke-SquidBuild.ps1` also now
-takes an exclusive build lock for the selected profile/configuration so
-concurrent local runs fail fast instead of silently mutating the same work and
-source roots, and it stops immediately when `make` fails instead of falling
-through to `make install`. For native MSYS2 reliability it now defaults to a
+available yet. The wrapper now exports the repo-local `python_requires` and
+tray recipes, runs `conan source`/`conan install`/`conan build`, and keeps an
+exclusive build lock for the selected profile/configuration so concurrent local
+runs fail fast instead of silently mutating the same build root.
+
+`Publish-TrayApp.ps1` is now a thin convenience wrapper around the Conan tray
+recipe: it exports the workspace recipes, runs `conan create` for
+`conan\recipes\tray-app`, and copies the packaged `bin\` payload into the
+requested output folder.
+
+The root Conan recipe now owns the Windows-native build behavior itself. It
+fetches Squid from `conandata.yml`, applies the reviewable patch set under
+`conan\patches\squid\`, pre-seeds the known
+`x86_64-w64-mingw32` autoconf cache values, repairs the generated autoconf
+header after `configure`, builds and installs Squid under the resolved MSYS2
+profile, then consumes the separate `squid4win_tray` package and assembles the
+final staged bundle. `Stage-ReleasePayload.ps1` is now a thin copy-and-archive
+wrapper around that Conan-produced bundle instead of the authoritative payload
+merge step.
+
+`config\build-profile.json` now also carries the `runtimeDlls` contract for the
+native Windows payload. The root recipe harvests that MSYS2 DLL set into each
+staged native executable directory before the bundle is mirrored to
+`build\install\release`, so keep that list aligned with any new MinGW-linked
+imports.
+
+For native MSYS2 reliability, `Invoke-SquidBuild.ps1` still defaults to a
 serial `make -j1`; pass `-MakeJobs` to opt in to a higher parallelism level
 after local validation. The current Windows profile also restricts Negotiate
 auth on native MinGW to `SSPI` because the upstream `wrapper` helper relies on
 `fork()`, and it omits the current LDAP/AD-dependent helper family because
 Squid's helper probes and Windows-specific AD helper sources are not yet
-consistently MinGW-clean in this environment.
-The Windows build profile also disables Automake dependency tracking because the
-generated `am--depfiles` bootstrap currently fails under this MinGW setup, and
-it disables Squid strict error checking so MinGW warning noise does not halt
-native release builds with upstream `-Werror` defaults. It also disables
-Linux-only `netfilter-conntrack` probing to keep the MinGW configure path out of
-an irrelevant feature branch. The build orchestration now also adds
+consistently MinGW-clean in this environment. The Windows build profile still
+disables Automake dependency tracking because the generated `am--depfiles`
+bootstrap is currently unstable under this MinGW setup, it disables Squid
+strict error checking so MinGW warning noise does not halt native release builds
+with upstream `-Werror` defaults, it disables Linux-only
+`netfilter-conntrack` probing, and the build recipe still adds
 `/usr/bin/core_perl` to the MSYS2 `PATH` so Squid's `pod2man`-generated helper
 documentation does not fail during `make` or `make install`.
 
@@ -251,20 +256,24 @@ actually building the installer.
 ## Current automation summary
 
 - `ci.yml` lints Markdown, workflows, PowerShell, and C#, then runs the native
-  Windows build and smoke-test path on GitHub-hosted runners, followed by a
-  SonarQube scan and quality-gate check when the Sonar secrets and variables are
-  configured
-- `release.yml` publishes the tray app, stages a combined install payload,
-  creates the portable zip, and builds the MSI through the WiX SDK project
+  Windows build and smoke-test path on GitHub-hosted runners, builds the tray
+  Conan package independently, and then runs the SonarQube scan and quality-gate
+  check when the Sonar secrets and variables are configured
+- `release.yml` builds the Conan-owned native bundle, stages it to
+  `artifacts\install-root`, creates the portable zip, and builds the MSI
+  through the WiX SDK project
 - `package-managers.yml` downloads release assets and generates winget,
   Chocolatey, and Scoop metadata from the released MSI and portable zip
+- `package-manager-publish.yml` is a manual credential-gated workflow that
+  first reuses the metadata-generation path and then publishes the selected
+  winget, Chocolatey, and Scoop updates
 - `update-upstream.yml` refreshes pinned Squid release metadata
 - `conan-update.yml` refreshes Conan lockfiles because Dependabot does not manage
   Conan 2 package graphs directly
 - Latest local validation on this repo state completed a native MSYS2/MinGW
-  `make`, `make install`, `Stage-ReleasePayload.ps1 -CreatePortableZip`, and
-  `Build-Installer.ps1`, producing `artifacts\squid4win.msi` from a real native
-  Squid install tree
+  `make`, `make install`, Conan-owned bundle assembly,
+  `Stage-ReleasePayload.ps1 -CreatePortableZip`, and `Build-Installer.ps1`,
+  producing `artifacts\squid4win.msi` from a real native Squid install tree
 
 These workflows exist in the repository now, but the presence of a workflow file
 should not be described as proof that the full native build and installed
@@ -275,20 +284,39 @@ running `squid.exe` process.
 
 ## Feed publication prerequisites
 
-Future live publication to downstream package feeds will need:
+The repository now keeps metadata generation in `package-managers.yml` and the
+live feed hand-off in the separate manual `package-manager-publish.yml`
+workflow.
+
+Run `package-manager-publish.yml` with one or more of the `publish_winget`,
+`publish_chocolatey`, and `publish_scoop` inputs enabled when you actually want
+to push downstream updates. The publish workflow first regenerates the metadata
+for the selected release and then runs only the explicitly requested feed jobs.
+
+Configure the optional `package-feeds` GitHub Actions environment, or the
+equivalent repository-level secrets and variables, with:
 
 - winget:
-  - a GitHub identity that can open PRs against `microsoft/winget-pkgs`
-  - a GitHub token with permission to fork, push, and open pull requests
+  - secret `WINGET_GITHUB_TOKEN` with permission to fork, push, and open pull
+    requests against the target repository
+  - optional variable `WINGET_TARGET_REPOSITORY` (defaults to
+    `microsoft/winget-pkgs`)
+  - optional variable `WINGET_TARGET_BRANCH` (defaults to `master`)
 - Chocolatey:
-  - a Chocolatey account
-  - a Chocolatey API key stored as a GitHub Actions secret
+  - secret `CHOCO_API_KEY`
+  - optional variable `CHOCO_PUSH_SOURCE_URL` (defaults to
+    `https://push.chocolatey.org/`)
+  - optional variable `CHOCO_QUERY_SOURCE_URL` (defaults to
+    `https://community.chocolatey.org/api/v2/`)
 - Scoop:
-  - a GitHub identity that can push to the target Scoop bucket repository
-  - a token with contents-write permission to that bucket
+  - secret `SCOOP_GITHUB_TOKEN` with permission to push a branch and open a
+    pull request against the bucket repository
+  - variable `SCOOP_BUCKET_REPOSITORY`
+  - optional variable `SCOOP_BUCKET_BRANCH` (defaults to `master`)
 
-Until those credentials exist, the repository generates feed manifests and keeps
-the publish path credential-gated instead of attempting a blind live push.
+Without that configuration, `package-managers.yml` still generates feed
+manifests safely, while `package-manager-publish.yml` fails fast for any
+selected feed that is missing its required credentials or repository variables.
 
 ## Contributor conventions
 

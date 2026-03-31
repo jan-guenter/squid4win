@@ -35,72 +35,6 @@ function Get-AbsolutePath {
 
     return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
 }
-
-function Convert-ToMsysPath {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path
-    )
-
-    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
-
-    if ($resolvedPath -match '^(?<drive>[A-Za-z]):(?<rest>.*)$') {
-        $drive = $Matches.drive.ToLowerInvariant()
-        $rest = ($Matches.rest -replace '\\', '/')
-        return "/$drive$rest"
-    }
-
-    return ($resolvedPath -replace '\\', '/')
-}
-
-function Convert-ToBashLiteral {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Value
-    )
-
-    $escapedValue = $Value.Replace('\', '\\').Replace('"', '\"').Replace('$', '\$').Replace('`', '\`')
-    return '"' + $escapedValue + '"'
-}
-
-function Get-GeneratedScriptPath {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Root,
-        [Parameter(Mandatory = $true)]
-        [string]$FileName,
-        [string[]]$PreferredRoots = @(),
-        [switch]$Required
-    )
-
-    foreach ($preferredRoot in @($PreferredRoots)) {
-        if ([string]::IsNullOrWhiteSpace($preferredRoot) -or -not (Test-Path -LiteralPath $preferredRoot)) {
-            continue
-        }
-
-        $candidatePath = Join-Path $preferredRoot $FileName
-        if (Test-Path -LiteralPath $candidatePath) {
-            return $candidatePath
-        }
-    }
-
-    $generatedScriptMatches = @(Get-ChildItem -Path $Root -Recurse -Filter $FileName -File -ErrorAction SilentlyContinue | Sort-Object FullName)
-    if ($generatedScriptMatches.Count -eq 0) {
-        if ($Required) {
-            $searchedRoots = @($PreferredRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            if ($searchedRoots.Count -gt 0) {
-                throw "Unable to locate generated Conan script '$FileName' under $Root. Preferred locations: $($searchedRoots -join ', ')"
-            }
-
-            throw "Unable to locate generated Conan script '$FileName' under $Root."
-        }
-
-        return $null
-    }
-
-    return $generatedScriptMatches[0].FullName
-}
-
 function Enter-BuildLock {
     param(
         [Parameter(Mandatory = $true)]
@@ -145,6 +79,7 @@ $resolvedRepositoryRoot = Get-AbsolutePath -Path $RepositoryRoot -BasePath (Get-
 $resolvedBuildRoot = Get-AbsolutePath -Path $BuildRoot -BasePath $resolvedRepositoryRoot
 $resolvedBuildProfilePath = Get-AbsolutePath -Path $BuildProfilePath -BasePath $resolvedRepositoryRoot
 $resolvedMetadataPath = Get-AbsolutePath -Path $MetadataPath -BasePath $resolvedRepositoryRoot
+$metadata = Get-Content -Raw -LiteralPath $resolvedMetadataPath | ConvertFrom-Json
 $buildProfile = & (Join-Path $PSScriptRoot 'Get-SquidBuildProfile.ps1') -ConfigPath $resolvedBuildProfilePath
 $layout = & (Join-Path $PSScriptRoot 'Resolve-SquidBuildLayout.ps1') `
     -Configuration $Configuration `
@@ -174,51 +109,35 @@ if ($null -eq $conanCommand) {
     throw 'The conan CLI is not available on PATH. Install requirements-automation.txt first.'
 }
 
-$conanHome = $toolchainState.ConanHome
-$bashPath = [string]$toolchainState.BashPath
-$metadata = Get-Content -Raw -LiteralPath $resolvedMetadataPath | ConvertFrom-Json
 $configurationLabel = $Configuration.ToLowerInvariant()
-$downloadsRoot = [string]$layout.DownloadsRoot
-$sourcesRoot = [string]$layout.SourcesRoot
 $installRoot = [string]$layout.StageRoot
-$workRoot = [string]$layout.WorkRoot
 $conanOutputRoot = [string]$layout.ConanOutputRoot
-$conanGeneratorsRoot = [string]$layout.ConanGeneratorsRoot
 $buildLockPath = [string]$layout.BuildLockPath
-$bootstrapMarkerPath = Join-Path $workRoot 'squid4win-bootstrap-ran'
-$lockfileBaseName = '{0}-{1}.lock' -f [string]$buildProfile.conanProfileName, $configurationLabel
 $repoLockfilePath = [string]$layout.RepoLockfilePath
 $resolvedLockfilePath = if ($LockfilePath) {
     Get-AbsolutePath -Path $LockfilePath -BasePath $resolvedRepositoryRoot
 } elseif (Test-Path -LiteralPath $repoLockfilePath) {
     $repoLockfilePath
 } else {
-    Join-Path $conanOutputRoot "lockfiles\$lockfileBaseName"
+    Join-Path $conanOutputRoot "lockfiles\$([string]$buildProfile.conanProfileName)-$configurationLabel.lock"
 }
-$archiveName = Split-Path -Leaf $metadata.assets.source_archive
-$archivePath = Join-Path $downloadsRoot $archiveName
-$sourceRoot = Join-Path $sourcesRoot "squid-$($metadata.version)"
 $buildLock = $null
+$hadMakeJobs = Test-Path Env:SQUID4WIN_MAKE_JOBS
+$previousMakeJobs = $env:SQUID4WIN_MAKE_JOBS
+$hadConfigureArgs = Test-Path Env:SQUID4WIN_CONFIGURE_ARGS_JSON
+$previousConfigureArgs = $env:SQUID4WIN_CONFIGURE_ARGS_JSON
+
 try {
-    $buildLock = Enter-BuildLock -LockPath $buildLockPath -WorkRoot $workRoot
+    $buildLock = Enter-BuildLock -LockPath $buildLockPath -WorkRoot $conanOutputRoot
 
     if ($Clean) {
-        Remove-Item -Path $conanOutputRoot, $installRoot, $workRoot -Recurse -Force -ErrorAction SilentlyContinue
-
-        if (Test-Path -LiteralPath $sourceRoot) {
-            & $bashPath -lc ("rm -rf $(Convert-ToBashLiteral -Value (Convert-ToMsysPath -Path $sourceRoot))")
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to clean extracted Squid source directory at $sourceRoot."
-            }
-        }
-
-        Remove-Item -Path $sourceRoot -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path -LiteralPath $sourceRoot) {
-            throw "Clean requested, but the extracted Squid source directory still exists at $sourceRoot."
-        }
+        $sourceRoot = Join-Path $resolvedRepositoryRoot "sources\squid-$([string]$metadata.version)"
+        Remove-Item -Path $conanOutputRoot, $installRoot, ([string]$layout.WorkRoot), $sourceRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    $null = New-Item -ItemType Directory -Path $downloadsRoot, $sourcesRoot, $installRoot, $workRoot, $conanOutputRoot, (Split-Path -Parent $resolvedLockfilePath) -Force
+    $null = New-Item -ItemType Directory -Path $resolvedBuildRoot, $conanOutputRoot, (Split-Path -Parent $resolvedLockfilePath) -Force
+
+    & (Join-Path $PSScriptRoot 'Export-ConanWorkspaceRecipes.ps1') -RepositoryRoot $resolvedRepositoryRoot | Out-Null
 
     if ([string]::IsNullOrWhiteSpace([string]$toolchainState.EffectiveProfilePath) -or -not (Test-Path -LiteralPath $toolchainState.EffectiveProfilePath)) {
         throw "Expected a generated Conan profile at $($toolchainState.EffectiveProfilePath), but it was not found."
@@ -234,8 +153,13 @@ try {
             -LockfilePath $resolvedLockfilePath | Out-Null
     }
 
-    $conanInstallArguments = @(
-        'install',
+    & $conanCommand.Source source $resolvedRepositoryRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "conan source failed with exit code $LASTEXITCODE."
+    }
+
+    $conanBuildArguments = @(
+        'build',
         $resolvedRepositoryRoot,
         '-of', $conanOutputRoot,
         '-pr:h', $toolchainState.EffectiveProfilePath,
@@ -246,201 +170,42 @@ try {
         '--build=missing'
     )
 
-    & $conanCommand.Source @conanInstallArguments
+    $env:SQUID4WIN_MAKE_JOBS = [string]$MakeJobs
+    if ($AdditionalConfigureArgs.Count -gt 0) {
+        $env:SQUID4WIN_CONFIGURE_ARGS_JSON = ConvertTo-Json -Compress -InputObject @($AdditionalConfigureArgs)
+    } else {
+        Remove-Item Env:SQUID4WIN_CONFIGURE_ARGS_JSON -ErrorAction SilentlyContinue
+    }
+
+    & $conanCommand.Source @conanBuildArguments
     if ($LASTEXITCODE -ne 0) {
-        throw "conan install failed with exit code $LASTEXITCODE."
+        throw "conan build failed with exit code $LASTEXITCODE."
     }
 
-    $autotoolsScript = Get-GeneratedScriptPath -Root $conanOutputRoot -PreferredRoots @($conanGeneratorsRoot) -FileName 'conanautotoolstoolchain.sh' -Required
-    $releaseScript = Get-GeneratedScriptPath -Root $conanOutputRoot -PreferredRoots @($conanGeneratorsRoot) -FileName 'squid-release.sh'
-
-    if (-not (Test-Path -LiteralPath $archivePath)) {
-        Invoke-WebRequest -Uri $metadata.assets.source_archive -OutFile $archivePath
-    }
-
-    $expectedHash = [string]$metadata.assets.source_archive_sha256
-    if ($expectedHash) {
-        $actualHash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualHash -ne $expectedHash.ToLowerInvariant()) {
-            throw "SHA256 mismatch for $archiveName. Expected $expectedHash but found $actualHash."
-        }
-    }
-
-    if (-not (Test-Path -LiteralPath $sourceRoot)) {
-        $archivePathMsys = Convert-ToMsysPath -Path $archivePath
-        $sourcesRootMsys = Convert-ToMsysPath -Path $sourcesRoot
-        $extractLines = @(
-            "export MSYSTEM=$($toolchainState.Msys2Env)",
-            'export CHERE_INVOKING=1',
-            'source /etc/profile',
-            'set -o pipefail',
-            "mkdir -p $(Convert-ToBashLiteral -Value $sourcesRootMsys)",
-            "tar -xf $(Convert-ToBashLiteral -Value $archivePathMsys) -C $(Convert-ToBashLiteral -Value $sourcesRootMsys)"
-        )
-
-        & $bashPath -lc ($extractLines -join '; ')
-        if ($LASTEXITCODE -ne 0) {
-            throw "tar extraction failed with exit code $LASTEXITCODE."
-        }
-
-        if (-not (Test-Path -LiteralPath $sourceRoot)) {
-            $fallbackSourceDirectory = Get-ChildItem -Path $sourcesRoot -Directory | Where-Object { $_.Name -like 'squid-*' } | Sort-Object Name -Descending | Select-Object -First 1
-            if ($null -ne $fallbackSourceDirectory) {
-                $sourceRoot = $fallbackSourceDirectory.FullName
-            }
-        }
-    }
-
-    if (-not (Test-Path -LiteralPath $sourceRoot)) {
-        throw "Expected extracted source directory at $sourceRoot."
-    }
-
-    $appliedSourcePatches = & (Join-Path $PSScriptRoot 'Apply-SquidSourcePatches.ps1') -SourceRoot $sourceRoot
-    foreach ($appliedSourcePatch in @($appliedSourcePatches)) {
-        if ($appliedSourcePatch.Applied) {
-            Write-Host "Applied Squid source patch: $($appliedSourcePatch.Name)"
-        }
-    }
-
-    $configureArguments = [System.Collections.Generic.List[string]]::new()
-    $configureCacheEntries = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $msys2EnvDirectory = ([string]$buildProfile.msys2Env).ToLowerInvariant()
-    $pkgConfigBinaryPath = "/$msys2EnvDirectory/bin/pkg-config"
-    $pkgConfigLibDir = "/$msys2EnvDirectory/lib/pkgconfig:/$msys2EnvDirectory/share/pkgconfig"
-
-    if ($buildProfile.PSObject.Properties.Name -contains 'configureCache' -and $null -ne $buildProfile.configureCache) {
-        foreach ($cacheProperty in $buildProfile.configureCache.PSObject.Properties) {
-            $cacheName = [string]$cacheProperty.Name
-            $cacheValue = [string]$cacheProperty.Value
-
-            if ([string]::IsNullOrWhiteSpace($cacheName) -or [string]::IsNullOrWhiteSpace($cacheValue)) {
-                continue
-            }
-
-            $configureCacheEntries.Add([PSCustomObject]@{
-                Name = $cacheName
-                Value = $cacheValue
-            })
-        }
-    }
-
-    $configureSitePath = $null
-    if ($configureCacheEntries.Count -gt 0) {
-        $configureSitePath = Join-Path $workRoot 'config.site'
-        $configureSiteDirectory = Split-Path -Parent $configureSitePath
-        $configureSiteLines = [System.Collections.Generic.List[string]]::new()
-        $configureSiteLines.Add('# Generated by Invoke-SquidBuild.ps1 to stabilize native MSYS2/MinGW-w64 configure checks.')
-
-        foreach ($configureCacheEntry in $configureCacheEntries) {
-            $configureSiteLines.Add("$($configureCacheEntry.Name)=$($configureCacheEntry.Value)")
-        }
-
-        $null = New-Item -ItemType Directory -Path $configureSiteDirectory -Force
-        Set-Content -LiteralPath $configureSitePath -Value $configureSiteLines -Encoding ascii
-    }
-
-    foreach ($configureArgument in @(
-        "--prefix=$(Convert-ToMsysPath -Path $installRoot)",
-        "--build=$([string]$buildProfile.hostTriplet)",
-        "--host=$([string]$buildProfile.hostTriplet)"
-    ) + @($buildProfile.configureArgs) + $AdditionalConfigureArgs) {
-        if ([string]::IsNullOrWhiteSpace([string]$configureArgument)) {
-            continue
-        }
-
-        if (-not $configureArguments.Contains([string]$configureArgument)) {
-            $configureArguments.Add([string]$configureArgument)
-        }
-    }
-
-    $configureArgumentText = ($configureArguments | ForEach-Object { Convert-ToBashLiteral -Value $_ }) -join ' '
-    $sourceRootMsys = Convert-ToMsysPath -Path $sourceRoot
-    $workRootMsys = Convert-ToMsysPath -Path $workRoot
-    $bootstrapMarkerPathMsys = Convert-ToMsysPath -Path $bootstrapMarkerPath
-    $bashCommonLines = @(
-        "export MSYSTEM=$($toolchainState.Msys2Env)",
-        'export CHERE_INVOKING=1',
-        'source /etc/profile',
-        'set -o pipefail',
-        "export PATH=""/$msys2EnvDirectory/bin:/usr/bin:/usr/bin/core_perl:`$PATH"""
-    )
-
-    # Keep the reviewed Conan metadata and autotools exports, but do not source
-    # the generic Conan build env because it can override the selected MSYS2
-    # linker/binutils with tool-requirement binaries.
-    foreach ($generatedScript in @($autotoolsScript, $releaseScript)) {
-        if ($generatedScript) {
-            $bashCommonLines += "source $(Convert-ToBashLiteral -Value (Convert-ToMsysPath -Path $generatedScript))"
-        }
-    }
-
-    $bashCommonLines += "export PKG_CONFIG=$(Convert-ToBashLiteral -Value $pkgConfigBinaryPath)"
-    $bashCommonLines += "export PKG_CONFIG_LIBDIR=$(Convert-ToBashLiteral -Value $pkgConfigLibDir)"
-    if ($configureSitePath) {
-        $bashCommonLines += "export CONFIG_SITE=$(Convert-ToBashLiteral -Value (Convert-ToMsysPath -Path $configureSitePath))"
-    }
-
-    $configureBashLines = @($bashCommonLines)
-    $configureBashLines += "mkdir -p $(Convert-ToBashLiteral -Value $workRootMsys)"
-    $configureBashLines += "rm -f $(Convert-ToBashLiteral -Value $bootstrapMarkerPathMsys)"
-    $configureBashLines += "cd $(Convert-ToBashLiteral -Value $sourceRootMsys)"
-    $configureBashLines += (
-        'if [ -f ./bootstrap.sh ] && { [ ! -x ./configure ] || [ ! -f ./Makefile.in ] || [ ! -f ./src/Makefile.in ] || [ ! -f ./libltdl/Makefile.in ] || [ ! -f ./cfgaux/ltmain.sh ] || [ ! -f ./cfgaux/compile ] || [ ! -f ./cfgaux/config.guess ] || [ ! -f ./cfgaux/config.sub ] || [ ! -f ./cfgaux/missing ] || [ ! -f ./cfgaux/install-sh ]; }; then ./bootstrap.sh || exit $?; touch ' +
-        (Convert-ToBashLiteral -Value $bootstrapMarkerPathMsys) +
-        '; fi'
-    )
-    $configureBashLines += "cd $(Convert-ToBashLiteral -Value $workRootMsys)"
-    $configureBashLines += 'echo "Configuring Squid..."'
-    $configureBashLines += "$(Convert-ToBashLiteral -Value ($sourceRootMsys + '/configure')) $configureArgumentText || exit `$?"
-    $configureBashLines += 'if [ -f confdefs.h ]; then cp confdefs.h squid4win-confdefs.h; fi'
-
-    & $bashPath -lc ($configureBashLines -join '; ')
-    if ($LASTEXITCODE -ne 0) {
-        throw "Squid configure failed with exit code $LASTEXITCODE."
-    }
-
-    if (Test-Path -LiteralPath $bootstrapMarkerPath) {
-        $reappliedSourcePatches = & (Join-Path $PSScriptRoot 'Apply-SquidSourcePatches.ps1') -SourceRoot $sourceRoot
-        foreach ($reappliedSourcePatch in @($reappliedSourcePatches)) {
-            if ($reappliedSourcePatch.Applied) {
-                Write-Host "Reapplied Squid source patch after bootstrap: $($reappliedSourcePatch.Name)"
-            }
-        }
-
-        Remove-Item -LiteralPath $bootstrapMarkerPath -Force -ErrorAction SilentlyContinue
-    }
-
-    $autoconfRepair = & (Join-Path $PSScriptRoot 'Repair-SquidAutoconfHeader.ps1') `
-        -GeneratedHeaderPath (Join-Path $workRoot 'include\autoconf.h') `
-        -ConfdefsPath (Join-Path $workRoot 'squid4win-confdefs.h') `
-        -ConfigLogPath (Join-Path $workRoot 'config.log')
-
-    if ($autoconfRepair.RepairedCount -gt 0) {
-        Write-Host "Repaired generated autoconf header macros: $($autoconfRepair.RepairedCount)"
-    }
-
-    $buildBashLines = @($bashCommonLines)
-    $buildBashLines += "cd $(Convert-ToBashLiteral -Value $workRootMsys)"
-    $buildBashLines += 'echo "Building Squid..."'
-    $buildBashLines += "make -j$MakeJobs || exit `$?"
-    $buildBashLines += "cd $(Convert-ToBashLiteral -Value $workRootMsys)"
-    $buildBashLines += 'echo "Installing Squid..."'
-    $buildBashLines += 'make install || exit $?'
-
-    & $bashPath -lc ($buildBashLines -join '; ')
-    if ($LASTEXITCODE -ne 0) {
-        throw "MSYS2 build failed with exit code $LASTEXITCODE."
+    if (-not (Test-Path -LiteralPath $installRoot)) {
+        throw "The Conan build finished without materializing the staged bundle at $installRoot."
     }
 
     Write-Host "Build completed successfully."
-    Write-Host "Installed files: $installRoot"
-    Write-Host "Work root: $workRoot"
+    Write-Host "Staged bundle root: $installRoot"
     Write-Host "Conan output root: $conanOutputRoot"
-    Write-Host "Conan home: $conanHome"
+    Write-Host "Conan home: $($toolchainState.ConanHome)"
     Write-Host "Conan profile: $($toolchainState.EffectiveProfilePath)"
     Write-Host "Lockfile: $resolvedLockfilePath"
 }
 finally {
+    if ($hadMakeJobs) {
+        $env:SQUID4WIN_MAKE_JOBS = $previousMakeJobs
+    } else {
+        Remove-Item Env:SQUID4WIN_MAKE_JOBS -ErrorAction SilentlyContinue
+    }
+
+    if ($hadConfigureArgs) {
+        $env:SQUID4WIN_CONFIGURE_ARGS_JSON = $previousConfigureArgs
+    } else {
+        Remove-Item Env:SQUID4WIN_CONFIGURE_ARGS_JSON -ErrorAction SilentlyContinue
+    }
+
     if ($null -ne $buildLock) {
         $buildLock.Dispose()
         Remove-Item -LiteralPath $buildLockPath -Force -ErrorAction SilentlyContinue

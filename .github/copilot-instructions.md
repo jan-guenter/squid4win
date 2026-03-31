@@ -30,4 +30,9 @@ Release and packaging rules:
 - Keep Sonar exclusions aligned with the repository layout, especially generated
   directories and vendored skills.
 - Keep package-manager publication credential-gated. Generating manifests is
-  safe; blind live publishing is not.
+  safe; live publication should only run through the documented secret-gated
+  workflow path.
+- If you change feed metadata generation or publication, keep
+  `scripts\Export-PackageManagerMetadata.ps1`, the package-manager publish
+  helpers under `scripts\`, `.github\workflows\package-managers.yml`, and
+  `.github\workflows\package-manager-publish.yml` synchronized.

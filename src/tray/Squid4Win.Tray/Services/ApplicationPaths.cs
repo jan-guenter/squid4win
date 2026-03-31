@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 
 namespace Squid4Win.Tray.Services;
 
@@ -65,15 +66,10 @@ public sealed class ApplicationPaths
             return NormalizePath(overridePath);
         }
 
-        foreach (var candidate in candidates)
-        {
-            if (Directory.Exists(candidate))
-            {
-                return NormalizePath(candidate);
-            }
-        }
-
-        return NormalizePath(candidates[0]);
+        return candidates
+            .Where(Directory.Exists)
+            .Select(NormalizePath)
+            .FirstOrDefault() ?? NormalizePath(candidates[0]);
     }
 
     private static string ResolveFile(string? overridePath, params string[] candidates)
@@ -83,15 +79,10 @@ public sealed class ApplicationPaths
             return NormalizePath(overridePath);
         }
 
-        foreach (var candidate in candidates)
-        {
-            if (File.Exists(candidate))
-            {
-                return NormalizePath(candidate);
-            }
-        }
-
-        return NormalizePath(candidates[0]);
+        return candidates
+            .Where(File.Exists)
+            .Select(NormalizePath)
+            .FirstOrDefault() ?? NormalizePath(candidates[0]);
     }
 
     private string ResolveServiceExecutablePath()

@@ -43,6 +43,8 @@ if ($null -eq $conanCommand) {
     throw 'Conan is required to refresh lockfiles. Install Conan 2 or use the setup-conan action in CI.'
 }
 
+& (Join-Path $PSScriptRoot 'Export-ConanWorkspaceRecipes.ps1') -RepositoryRoot $repoRoot | Out-Null
+
 $resolvedLockfilePath = if ($LockfilePath) {
     Get-AbsolutePath -Path $LockfilePath -BasePath $repoRoot
 } else {

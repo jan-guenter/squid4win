@@ -17,7 +17,8 @@ model too early.
 The first committed installer contract is:
 
 - stage a combined release payload under `artifacts\install-root`
-- build that payload from the native Squid stage plus the published WPF tray app
+- build that payload from the Conan-owned native Squid bundle, with the tray app
+  consumed as a package dependency of the root product recipe
 - default the MSI install root to `C:\Squid4Win`
 - keep Squid config and runtime directories under the install root for now
 - materialize `etc\squid.conf` from `packaging\defaults\squid.conf.template`
@@ -26,6 +27,9 @@ The first committed installer contract is:
   verbs through an installed PowerShell helper
 - keep the tray app tolerant of both `ProgramData` locations and install-root
   `etc`/`var\logs` fallbacks
+- bundle the required MSYS2 runtime DLL set beside each staged native
+  executable directory so `sbin\squid.exe` and the `libexec\*.exe` helpers can
+  launch from the installed payload without an external PATH dependency
 
 ## Rationale
 
@@ -46,13 +50,19 @@ The first committed installer contract is:
   must update the tray path model, payload staging, and installer helper
   together.
 - The release payload now has an explicit shape that workflows and docs must keep
-  synchronized: Squid stage, tray publish output, config template, installer
-  helper, and notices bundle.
+  synchronized: Conan-built staged bundle, runtime DLL adjacency for native
+  executables, config template, installer helper, and notices bundle.
 
 ## Implementation notes
 
-- `scripts\Stage-ReleasePayload.ps1` is the source of truth for assembling
-  `artifacts\install-root`.
+- The root `conanfile.py` is the source of truth for assembling the staged
+  bundle that later becomes `artifacts\install-root`.
+- `config\build-profile.json` declares the `runtimeDlls` list that the root
+  recipe harvests from the resolved MSYS2 environment into each staged native
+  executable directory.
+- `scripts\Stage-ReleasePayload.ps1` is now a thin wrapper that mirrors the
+  Conan-built staged bundle into `artifacts\install-root` and optionally creates
+  the portable zip.
 - `scripts\Build-Installer.ps1` is the preferred entry point for building the
   MSI from the staged payload.
 - `packaging\wix\Squid4Win.Installer.wixproj` harvests the staged payload instead

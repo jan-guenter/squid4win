@@ -65,12 +65,13 @@ hide build behavior in global user state.
   Dependabot, while Conan references remain custom-updated.
 - Contributors must not assume `%USERPROFILE%\.conan2` contains valid project
   state.
-- The current committed build flow should be described honestly: MSYS2 owns the
-  foundational native toolchain and core package installation, while Conan now
-  records `mingw-builds` and the core `openssl`/`pcre2`/`libxml2`/`zlib`
-  dependency references as the versioned source of truth the native path is
-  converging toward, with those runtime-library refs staying metadata-only until
-  a fully Conan-managed MinGW dependency path is validated.
+- The current committed build flow should be described honestly: MSYS2 still
+  owns the foundational native toolchain and core package installation, while
+  Conan now owns the top-level product recipe, versioned source metadata in
+  `conandata.yml`, the Windows compatibility patch set under `conan\patches\`,
+  and the separate tray-app package consumed by the final bundle. The external
+  `openssl`/`pcre2`/`libxml2`/`zlib` refs still remain metadata-only until a
+  fully Conan-managed MinGW dependency path is validated.
 - Lockfile automation exists now, but reproducibility claims should stay modest
   until a resolved lockfile is generated and validated as part of the evolving
   native build path.
@@ -84,6 +85,9 @@ hide build behavior in global user state.
   `.conan2\profiles\` from the detected MSYS2 root.
 - Keep `scripts\Resolve-ConanHome.ps1` and GitHub workflow environment settings
   aligned on repo-local Conan state.
+- Export the repo-local `python_requires` helper and tray recipe before lockfile
+  refreshes or local product builds so the committed multi-recipe graph stays
+  reproducible.
 - Use `conan\lockfiles\` as the repository location for Conan lockfile outputs,
   refreshed by dedicated automation when the Conan-owned graph changes.
 - Keep the versioned Conan refs in `config\build-profile.json` synchronized with

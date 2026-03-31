@@ -1,4 +1,4 @@
-# ADR 0005: Quality scanning and downstream package metadata
+# ADR 0005: Quality scanning and downstream package automation
 
 - Status: Accepted
 - Date: 2026-03-31
@@ -26,8 +26,10 @@ The automation baseline is:
   content from scan scope
 - generate winget, Chocolatey, and Scoop metadata from released artifacts in a
   dedicated workflow
-- keep live publication to package feeds credential-gated until the required
-  feed accounts and tokens are available
+- keep live publication in a separate manual workflow that reuses that
+  metadata-generation path and only runs the explicitly selected feed jobs
+- require the expected feed accounts, tokens, and repository variables before
+  any live publication job runs
 
 ## Rationale
 
@@ -46,8 +48,9 @@ The automation baseline is:
 - CI now owns both native build health and the Sonar quality signal.
 - Release automation must preserve stable artifact names because downstream
   package metadata generation depends on them.
-- Feed publication remains partially scaffolded until credentials are supplied,
-  but the repository can already produce the metadata required for later pushes.
+- Feed publication now stays tied to the generated metadata, but it runs only
+  from the dedicated manual publication workflow instead of the metadata
+  workflow itself.
 - Any change to artifact names, release URLs, or scan exclusions must update the
   workflows, docs, and Copilot instructions together.
 
@@ -55,8 +58,12 @@ The automation baseline is:
 
 - Keep the Sonar scope in `sonar-project.properties`.
 - Keep feed metadata generation in `scripts\Export-PackageManagerMetadata.ps1`.
+- Keep the package-manager publish helpers under `scripts\` responsible for the
+  credential-gated winget, Chocolatey, and Scoop hand-off steps.
 - Keep `.github\workflows\package-managers.yml` responsible for downloading
   release assets and generating feed metadata from those real binaries.
+- Keep `.github\workflows\package-manager-publish.yml` responsible for the
+  manual credential-gated publication path.
 - Keep credentials out of the repository and document required secret names in
   the contributor docs instead.
 

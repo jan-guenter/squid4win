@@ -6,6 +6,7 @@ param(
     [string]$BuildProfilePath = (Join-Path $PSScriptRoot '..\config\build-profile.json'),
     [string]$MetadataPath = (Join-Path $PSScriptRoot '..\conan\squid-release.json'),
     [string]$VersionConfigPath = (Join-Path $PSScriptRoot '..\config\squid-version.json'),
+    [string]$ConanDataPath = (Join-Path $PSScriptRoot '..\conandata.yml'),
     [string]$Msys2Root,
     [string]$EffectiveProfilePath,
     [switch]$AllowMissingPrerequisites
@@ -33,6 +34,7 @@ $resolvedRepositoryRoot = Get-AbsolutePath -Path $RepositoryRoot -BasePath (Get-
 $resolvedBuildProfilePath = Get-AbsolutePath -Path $BuildProfilePath -BasePath $resolvedRepositoryRoot
 $resolvedMetadataPath = Get-AbsolutePath -Path $MetadataPath -BasePath $resolvedRepositoryRoot
 $resolvedVersionConfigPath = Get-AbsolutePath -Path $VersionConfigPath -BasePath $resolvedRepositoryRoot
+$resolvedConanDataPath = Get-AbsolutePath -Path $ConanDataPath -BasePath $resolvedRepositoryRoot
 $buildProfile = & (Join-Path $PSScriptRoot 'Get-SquidBuildProfile.ps1') -ConfigPath $resolvedBuildProfilePath
 $configurationLabel = $Configuration.ToLowerInvariant()
 $warnings = [System.Collections.Generic.List[string]]::new()
@@ -93,16 +95,60 @@ if ($null -eq $conanCommand) {
 
 $metadata = Get-Content -Raw -LiteralPath $resolvedMetadataPath | ConvertFrom-Json
 $versionConfig = Get-Content -Raw -LiteralPath $resolvedVersionConfigPath | ConvertFrom-Json
+$conanDataContent = if (Test-Path -LiteralPath $resolvedConanDataPath) {
+    Get-Content -Raw -LiteralPath $resolvedConanDataPath
+} else {
+    ''
+}
+$expectedConanDataContent = @"
+sources:
+  "$([string]$metadata.version)":
+    url: "$([string]$metadata.assets.source_archive)"
+    sha256: "$([string]$metadata.assets.source_archive_sha256)"
+    strip_root: true
+
+patches:
+  "$([string]$metadata.version)":
+    - patch_file: "conan/patches/squid/0001-mingw-compat-core-shims.patch"
+      patch_description: "Provide foundational MinGW POSIX compatibility shims."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0002-mingw-build-system-flags.patch"
+      patch_description: "Adjust Squid build-system flags and MinGW link libraries."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0003-mingw-disk-io-compat.patch"
+      patch_description: "Teach Squid DiskIO backends to build and run under MinGW."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0004-mingw-socket-and-ipc-compat.patch"
+      patch_description: "Add MinGW-safe Winsock and IPC wrappers."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0005-mingw-win32-runtime-support.patch"
+      patch_description: "Expose the Win32 runtime helpers needed by the MinGW port."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0006-mingw-cert-generator-compat.patch"
+      patch_description: "Fix MinGW certificate helper and certificate DB support."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0007-mingw-main-and-service-integration.patch"
+      patch_description: "Wire MinGW into Squid runtime startup and Windows service paths."
+      base_path: "."
+      strip: 2
+"@ + [Environment]::NewLine
 $configuredRepository = '{0}/{1}' -f [string]$versionConfig.owner, [string]$versionConfig.repo
 
 if (
     ([string]$metadata.repository -ne $configuredRepository) -or
     ([string]$metadata.version -ne [string]$versionConfig.version) -or
     ([string]$metadata.tag -ne [string]$versionConfig.tag) -or
-    ([string]$metadata.assets.source_archive -ne [string]$versionConfig.sourceArchiveUrl)
+    ([string]$metadata.assets.source_archive -ne [string]$versionConfig.sourceArchiveUrl) -or
+    ($conanDataContent.Trim() -ne $expectedConanDataContent.Trim())
 ) {
     $metadataSynchronized = $false
-    $errors.Add('config\squid-version.json and conan\squid-release.json are out of sync. Run scripts\Update-SquidVersion.ps1 to refresh them together.')
+    $errors.Add('config\squid-version.json, conan\squid-release.json, and conandata.yml are out of sync. Run scripts\Update-SquidVersion.ps1 to refresh them together.')
 }
 
 try {

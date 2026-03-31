@@ -1,10 +1,12 @@
 .conan2/
 artifacts/
 build/
+sources/
 .vs/
 .vsconan/
 .idea/
 .vscode/
+.sonarlint/
 .env
 src/**/bin/
 src/**/obj/
