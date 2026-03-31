@@ -519,16 +519,6 @@ setgid(gid_t gid) /* squid4win-mingw-user-compat */
 }
 #endif
 
-#if !HAVE_INITGROUPS
-static inline int
-initgroups(const char *user, gid_t group) /* squid4win-mingw-user-compat */
-{
-    (void)user;
-    (void)group;
-    return 0;
-}
-#endif
-
 '@ -replace "`r?`n", $newline
 
     $updatedMingwUserCompatSource = ([regex]'(?m)^static inline int\r?\nkill\(pid_t pid, int sig\) /\* squid4win-mingw-kill-compat \*/\r?\n').Replace(
@@ -553,6 +543,36 @@ $patchResults.Add([PSCustomObject]@{
     Name = 'mingw-user-group-compat'
     Path = $mingwCompatPath
     Applied = $mingwUserCompatPatched
+})
+
+$mingwLegacyInitgroupsSource = Get-Content -Raw -LiteralPath $mingwCompatPath
+$mingwLegacyInitgroupsMarker = 'initgroups(const char *user, gid_t group) /* squid4win-mingw-user-compat */'
+$mingwLegacyInitgroupsPatched = $false
+
+if ($mingwLegacyInitgroupsSource.Contains($mingwLegacyInitgroupsMarker)) {
+    $updatedMingwLegacyInitgroupsSource = [regex]::Replace(
+        $mingwLegacyInitgroupsSource,
+        '(?ms)^#if !HAVE_INITGROUPS\r?\nstatic inline int\r?\ninitgroups\(const char \*user, gid_t group\) /\* squid4win-mingw-user-compat \*/\r?\n\{\r?\n\s*\(void\)user;\r?\n\s*\(void\)group;\r?\n\s*return 0;\r?\n\}\r?\n#endif\r?\n?',
+        '',
+        1
+    )
+
+    if ($updatedMingwLegacyInitgroupsSource -eq $mingwLegacyInitgroupsSource) {
+        throw "Failed to remove the legacy MinGW initgroups compatibility shim from $mingwCompatPath."
+    }
+
+    [System.IO.File]::WriteAllText(
+        $mingwCompatPath,
+        $updatedMingwLegacyInitgroupsSource,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    $mingwLegacyInitgroupsPatched = $true
+}
+
+$patchResults.Add([PSCustomObject]@{
+    Name = 'mingw-remove-inline-initgroups-compat'
+    Path = $mingwCompatPath
+    Applied = $mingwLegacyInitgroupsPatched
 })
 
 $mingwGetPageSizeSource = Get-Content -Raw -LiteralPath $mingwCompatPath
