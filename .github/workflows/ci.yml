@@ -141,7 +141,6 @@ jobs:
       - name: Resolve build automation configuration
         id: build-config
         run: |
-          $buildProfile = .\scripts\Get-SquidBuildProfile.ps1
           $layout = .\scripts\Resolve-SquidBuildLayout.ps1 -Configuration Release -RepositoryRoot $PWD.Path
           $conanHome = .\scripts\Resolve-ConanHome.ps1 -RepositoryRoot $PWD.Path
           $configLogPath = Join-Path $layout.ConanOutputRoot 'build\release\config.log'
@@ -152,7 +151,6 @@ jobs:
           "stage_root=$($layout.StageRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "stage_root_glob=$($layout.StageRoot.Replace('\', '/'))/**" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "config_log_path=$($configLogPath.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "msys2_packages=$((@($buildProfile.requiredMsys2Packages | ForEach-Object { [string]$_ }) -join ' '))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Cache Conan home
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
@@ -167,78 +165,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r .\requirements-automation.txt
 
-      - name: Setup MSYS2
-        id: msys2
-        uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: ${{ steps.build-config.outputs.msys2_packages }}
-
-      - name: Validate native toolchain bootstrap
-        id: bootstrap
-        run: |
-          $state = .\scripts\Invoke-SquidBuild.ps1 `
-            -Configuration Release `
-            -BootstrapOnly `
-            -AllowMissingPrerequisites `
-            -Msys2Root '${{ steps.msys2.outputs.msys2-location }}'
-
-          "effective_profile_path=$($state.EffectiveProfilePath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "msys2_root=$($state.Msys2Root)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-          $conanVersion = if ($state.ConanVersion) { $state.ConanVersion } else { 'missing' }
-          $msys2Root = if ($state.Msys2Root) { $state.Msys2Root } else { 'missing' }
-          $profilePath = if ($state.EffectiveProfilePath) {
-            $state.EffectiveProfilePath
-          } elseif ($state.PlannedEffectiveProfilePath) {
-            $state.PlannedEffectiveProfilePath
-          } else {
-            'missing'
-          }
-          $summaryLines = @(
-            '## Native bootstrap',
-            '',
-            ('- Ready: `{0}`' -f $state.Ready),
-            ('- Metadata synchronized: `{0}`' -f $state.MetadataSynchronized),
-            ('- Conan home: `{0}`' -f $state.ConanHome),
-            ('- Conan version: `{0}`' -f $conanVersion),
-            ('- MSYS2 root: `{0}`' -f $msys2Root),
-            ('- Conan profile: `{0}`' -f $profilePath)
-          )
-
-          if ($state.MissingMsys2Packages.Count -gt 0) {
-            $summaryLines += ('- Missing MSYS2 packages: `{0}`' -f ($state.MissingMsys2Packages -join ', '))
-          }
-
-          if ($state.Warnings.Count -gt 0) {
-            $summaryLines += ''
-            $summaryLines += '### Warnings'
-            $summaryLines += $state.Warnings | ForEach-Object { '- ' + $_ }
-          }
-
-          if ($state.Errors.Count -gt 0) {
-            $summaryLines += ''
-            $summaryLines += '### Errors'
-            $summaryLines += $state.Errors | ForEach-Object { '- ' + $_ }
-          }
-
-          if ($env:GITHUB_STEP_SUMMARY) {
-            $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          }
-
-          if (-not $state.Ready) {
-            throw ($state.Errors -join [Environment]::NewLine)
-          }
-
       - name: Build Squid
         run: |
           .\scripts\Invoke-SquidBuild.ps1 `
             -Configuration Release `
             -RefreshLockfile `
-            -Msys2Root '${{ steps.bootstrap.outputs.msys2_root }}' `
-            -EffectiveProfilePath '${{ steps.bootstrap.outputs.effective_profile_path }}' `
-            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}'
+            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}' `
+            -WithTray `
+            -WithRuntimeDlls `
+            -WithPackagingSupport
 
       - name: Smoke test Squid
         run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release
@@ -273,6 +208,7 @@ jobs:
             -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
             -Dsonar.pullrequest.branch=${{ github.head_ref }}
             -Dsonar.pullrequest.base=${{ github.base_ref }}
+            -Dsonar.python.version=3.12
 
       - name: Run SonarQube scan for branches
         if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && github.event_name != 'pull_request' }}
@@ -286,6 +222,7 @@ jobs:
             -Dsonar.organization=${{ secrets.COPILOT_MCP_SONARQUBE_ORG }}
             -Dsonar.projectVersion=${{ github.sha }}
             -Dsonar.branch.name=${{ github.ref_name }}
+            -Dsonar.python.version=3.12
 
       - name: Check SonarQube quality gate
         if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') }}

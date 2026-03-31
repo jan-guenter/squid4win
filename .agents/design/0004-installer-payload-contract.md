@@ -57,9 +57,9 @@ The first committed installer contract is:
 
 - The root `conanfile.py` is the source of truth for assembling the staged
   bundle that later becomes `artifacts\install-root`.
-- `config\build-profile.json` declares the `runtimeDlls` list that the root
-  recipe harvests from the resolved MSYS2 environment into each staged native
-  executable directory.
+- `conandata.yml` declares the `build.runtime_dlls` list that the root recipe
+  harvests from the Conan-managed MSYS2 and MinGW dependency graph into each
+  staged native executable directory.
 - `scripts\Stage-ReleasePayload.ps1` is now a thin wrapper that mirrors the
   Conan-built staged bundle into `artifacts\install-root` and optionally creates
   the portable zip.

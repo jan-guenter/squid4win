@@ -7,14 +7,16 @@
 
 This project will need repeatable dependency resolution for a Windows-native
 Squid build, MSI packaging, and the companion tray application. Some
-dependencies are naturally sourced from MSYS2, while others may benefit from
-Conan 2 for version pinning or reusable tool requirements.
+dependencies are naturally sourced from MSYS2 packages, while the project also
+needs Conan 2 to own the shell/compiler bootstrap, versioned source metadata,
+lockfiles, and release packaging graph.
 
-The repository now includes Conan 2 scaffolding in `conanfile.py`, a committed
+The repository now includes a Conan-owned root product recipe, a committed
 MSYS2/MinGW-w64 host profile, repo-local `CONAN_HOME` helpers, generated Squid
-release metadata, and a companion workflow for Conan lockfile refresh. At the
-same time, the native build path is still intentionally MSYS2 `mingw64` first
-on Windows, and the current Conan-owned graph is small.
+release metadata, and a companion workflow for Conan lockfile refresh. The
+native build path is still intentionally MSYS2 `mingw64` first on Windows, but
+the actual shell/compiler/tool bootstrap now comes from Conan tool requirements
+instead of probing local machine install roots.
 
 The project also needs to avoid polluting developer-global Conan state because
 shared machine profiles make CI reproduction and troubleshooting harder.
@@ -23,30 +25,35 @@ shared machine profiles make CI reproduction and troubleshooting harder.
 
 Dependency management will use a split model:
 
-- use MSYS2 and `pacman` for the foundational shell, compiler, and MinGW-w64
-  environment
-- use Conan 2 as a repo-owned supplement for selected versioned build inputs,
-  metadata, and tool requirements
-- record the current MinGW toolchain and core native dependency references in
-  `config\build-profile.json` so the Conan-owned graph remains reviewable even
-  while MSYS2 still owns the proven bootstrap path
+- use Conan 2 tool requirements for the foundational shell, compiler, and
+  MinGW-w64 runtime environment via `msys2/cci.latest` and `mingw-builds/15.1.0`
+- use `conandata.yml` as the repo-owned source of truth for build metadata such
+  as tool requirements, MSYS2 package composition, runtime DLL harvesting, and
+  `configure` defaults
 - isolate `CONAN_HOME` to `<repo>\.conan2` for both local work and CI
-- keep committed profile templates, generated metadata, and lockfile locations
-  in the repository instead of relying on developer-global profiles or user
-  cache conventions
-- generate the effective MSYS2/MinGW Conan profile from the resolved MSYS2 root
+- keep the committed host profile, generated metadata, and lockfile locations in
+  the repository instead of relying on developer-global profiles or user cache
+  conventions
+- use the committed `conan\profiles\msys2-mingw-x64` host profile together with
+  a detected default build profile instead of generating machine-specific
+  effective profiles
+- expose release-only bundle features through recipe options so default builds
+  stay focused on Squid itself and its required toolchain/runtime dependencies
 - treat lockfiles as a repository artifact class with dedicated refresh
-  automation, using the same generated profile that the native build uses
+  automation, using the same Conan-owned profiles and recipe options that the
+  native build uses
 
-Conan is a complement to the Windows-native toolchain plan, not a reason to
-hide build behavior in global user state.
+Conan now owns the Windows-native toolchain bootstrap, but it still does so in a
+way that preserves the proven MSYS2/MinGW build path instead of replacing it
+with a different platform stack.
 
 ## Rationale
 
 - MSYS2 remains the most natural source for the base Unix-like environment and
-  MinGW-w64 packages.
-- Conan 2 is useful when package pinning, provenance, or reusable dependency
-  metadata matter more than ad hoc system packages.
+  MinGW-w64 packages, and the ConanCenter `msys2/cci.latest` package exposes
+  that environment in a repo-owned form.
+- Conan 2 is useful for package pinning, provenance, reusable tool requirements,
+  and a single reviewable place to model Windows packaging options.
 - A repo-local `.conan2` directory improves repeatability and keeps the project
   self-contained.
 - Lockfile scaffolding and refresh automation are worth committing early so
@@ -59,19 +66,17 @@ hide build behavior in global user state.
   from Conan.
 - Future scripts must ensure Conan sees the intended compiler, environment, and
   path translations when called from PowerShell or MSYS2.
-- Native bootstrap logic must resolve the actual MSYS2 installation root instead
-  of assuming every machine uses `C:\msys64`.
+- Native bootstrap logic must restore the Conan-managed MSYS2 and MinGW tool
+  requirements instead of assuming every machine already has `C:\msys64`.
 - Dependency update automation will be split: supported ecosystems can use
   Dependabot, while Conan references remain custom-updated.
 - Contributors must not assume `%USERPROFILE%\.conan2` contains valid project
   state.
 - The current committed build flow should be described honestly: MSYS2 still
-  owns the foundational native toolchain and core package installation, while
-  Conan now owns the top-level product recipe, versioned source metadata in
-  `conandata.yml`, the Windows compatibility patch set under `conan\patches\`,
-  and the separate tray-app package consumed by the final bundle. The external
-  `openssl`/`pcre2`/`libxml2`/`zlib` refs still remain metadata-only until a
-  fully Conan-managed MinGW dependency path is validated.
+  provides the shell-facing package ecosystem, while Conan now owns the
+  top-level product recipe, versioned source metadata in `conandata.yml`, the
+  Windows compatibility patch set under `conan\patches\`, the Conan-managed tool
+  bootstrap, and the separate tray-app package consumed by the final bundle.
 - Lockfile automation exists now, but reproducibility claims should stay modest
   until a resolved lockfile is generated and validated as part of the evolving
   native build path.
@@ -80,9 +85,9 @@ hide build behavior in global user state.
 
 - Set `CONAN_HOME` to a repo-relative `.conan2` path in every documented local
   and CI entry point.
-- Keep `conan\profiles\msys2-mingw-x64` as the seed profile shape for the
-  native Squid path, then generate the effective profile under
-  `.conan2\profiles\` from the detected MSYS2 root.
+- Keep `conan\profiles\msys2-mingw-x64` as the committed host profile for the
+  native Squid path and let `conan profile detect --force` maintain the default
+  build profile in the repo-local Conan home.
 - Keep `scripts\Resolve-ConanHome.ps1` and GitHub workflow environment settings
   aligned on repo-local Conan state.
 - Export the repo-local `python_requires` helper and tray recipe before lockfile
@@ -90,9 +95,9 @@ hide build behavior in global user state.
   reproducible.
 - Use `conan\lockfiles\` as the repository location for Conan lockfile outputs,
   refreshed by dedicated automation when the Conan-owned graph changes.
-- Keep the versioned Conan refs in `config\build-profile.json` synchronized with
-  any workflow or documentation changes that claim a new native dependency
-  baseline.
+- Keep `conandata.yml` build metadata, wrapper option switches, and workflow
+  defaults synchronized when the native dependency or packaging baseline
+  changes.
 
 ## Alternatives considered
 

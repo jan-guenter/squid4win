@@ -18,13 +18,10 @@ from conan.tools.files import (
     get,
     load,
     mkdir,
-    rmdir,
     save,
 )
 from conan.tools.gnu import AutotoolsToolchain
 
-BASH_EXECUTABLE_NAME = "bash.exe"
-MSYS2_USR_BIN_BASH_SUFFIX = os.path.join("usr", "bin", BASH_EXECUTABLE_NAME)
 MACRO_NAME_PATTERN = re.compile(r"[A-Za-z_]\w*\Z", re.ASCII)
 
 
@@ -35,6 +32,16 @@ class Squid4WinConan(ConanFile):
     no_copy_source = True
     python_requires = "squid4win_recipe_base/1.0"
     python_requires_extend = "squid4win_recipe_base.Squid4WinRecipeBase"
+    options = {
+        "with_tray": [True, False],
+        "with_runtime_dlls": [True, False],
+        "with_packaging_support": [True, False],
+    }
+    default_options = {
+        "with_tray": False,
+        "with_runtime_dlls": False,
+        "with_packaging_support": False,
+    }
 
     def set_version(self) -> None:
         metadata = self._release_metadata()
@@ -42,12 +49,6 @@ class Squid4WinConan(ConanFile):
 
     def export(self) -> None:
         export_conandata_patches(self)
-        copy(
-            self,
-            "build-profile.json",
-            src=os.path.join(self.recipe_folder, "config"),
-            dst=os.path.join(self.export_folder, "config"),
-        )
         copy(
             self,
             "squid-release.json",
@@ -81,27 +82,27 @@ class Squid4WinConan(ConanFile):
 
     def validate(self) -> None:
         self._validate_native_windows()
+        if self._option_enabled("with_runtime_dlls") and not self._option_enabled(
+            "with_packaging_support"
+        ):
+            raise ConanInvalidConfiguration(
+                "with_runtime_dlls=True requires with_packaging_support=True so "
+                "the bundled notices and source manifest stay in sync."
+            )
 
     def requirements(self) -> None:
-        self.requires("squid4win_tray/0.1")
-
-        if self._conan_dependency_mode() != "managed":
-            return
-
-        for reference in self._string_list(
-            self._build_profile().get("conanRequirements", [])
-        ):
-            self.requires(reference)
+        if self._option_enabled("with_tray"):
+            self.requires("squid4win_tray/0.1")
 
     def build_requirements(self) -> None:
         for reference in self._string_list(
-            self._build_profile().get("conanToolRequirements", [])
+            self._build_settings().get("tool_requires", [])
         ):
             self.tool_requires(reference)
 
     def generate(self) -> None:
         metadata = self._release_metadata()
-        build_profile = self._build_profile()
+        build_settings = self._build_settings()
 
         VirtualBuildEnv(self).generate()
         VirtualRunEnv(self).generate()
@@ -113,17 +114,8 @@ class Squid4WinConan(ConanFile):
             "SQUID_SOURCE_ARCHIVE", str(metadata["assets"]["source_archive"])
         )
         release_env.define(
-            "SQUID_CONAN_REQUIREMENTS",
-            ";".join(self._string_list(build_profile.get("conanRequirements", []))),
-        )
-        release_env.define(
             "SQUID_CONAN_TOOL_REQUIREMENTS",
-            ";".join(
-                self._string_list(build_profile.get("conanToolRequirements", []))
-            ),
-        )
-        release_env.define(
-            "SQUID_CONAN_DEPENDENCY_MODE", self._conan_dependency_mode()
+            ";".join(self._string_list(build_settings.get("tool_requires", []))),
         )
         release_env.vars(self, scope="build").save_script("squid-release")
 
@@ -151,7 +143,7 @@ class Squid4WinConan(ConanFile):
 
     def build(self) -> None:
         metadata = self._release_metadata()
-        build_profile = self._build_profile()
+        build_settings = self._build_settings()
         source_root = Path(self.source_folder)
         build_root = Path(self.build_folder)
         bundle_root = build_root / "bundle"
@@ -161,12 +153,15 @@ class Squid4WinConan(ConanFile):
         confdefs_copy_path = build_root / "squid4win-confdefs.h"
         config_log_path = build_root / "config.log"
         configuration_label = self._configuration_label()
-        msys2_env_directory = str(build_profile.get("msys2Env", "mingw64")).lower()
-        msys2_env_name = str(build_profile.get("msys2Env", "mingw64")).upper()
+        msys2_settings = dict(build_settings.get("msys2", {}))
+        msys2_env_directory = str(msys2_settings.get("env", "mingw64")).lower()
+        msys2_env_name = str(msys2_settings.get("env", "mingw64")).upper()
+        msys2_prefix_path = f"/{msys2_env_directory}"
         pkg_config_binary_path = f"/{msys2_env_directory}/bin/pkg-config"
         pkg_config_lib_dir = (
             f"/{msys2_env_directory}/lib/pkgconfig:/{msys2_env_directory}/share/pkgconfig"
         )
+        build_env_script = Path(self.generators_folder) / "conanbuild.sh"
         autotools_script = Path(self.generators_folder) / "conanautotoolstoolchain.sh"
         release_script = Path(self.generators_folder) / "squid-release.sh"
 
@@ -174,7 +169,7 @@ class Squid4WinConan(ConanFile):
         bootstrap_marker_path.unlink(missing_ok=True)
         build_root.mkdir(parents=True, exist_ok=True)
 
-        configure_cache_lines = self._configure_cache_lines(build_profile)
+        configure_cache_lines = self._configure_cache_lines(build_settings)
         if configure_cache_lines:
             save(
                 self,
@@ -186,9 +181,9 @@ class Squid4WinConan(ConanFile):
         configure_arguments = self._deduplicate(
             [
                 f"--prefix={self._to_msys_path(bundle_root)}",
-                f"--build={str(build_profile['hostTriplet'])}",
-                f"--host={str(build_profile['hostTriplet'])}",
-                *self._string_list(build_profile.get("configureArgs", [])),
+                f"--build={str(build_settings['host_triplet'])}",
+                f"--host={str(build_settings['host_triplet'])}",
+                *self._string_list(build_settings.get("configure_args", [])),
                 *self._additional_configure_args(),
             ]
         )
@@ -198,21 +193,54 @@ class Squid4WinConan(ConanFile):
         source_root_msys = self._to_msys_path(source_root)
         build_root_msys = self._to_msys_path(build_root)
         bootstrap_marker_path_msys = self._to_msys_path(bootstrap_marker_path)
+        mingw_package_root = self._dependency_package_root("mingw-builds")
+        if mingw_package_root is None:
+            raise ConanException(
+                "The mingw-builds tool requirement is not available to the root recipe."
+            )
+
+        mingw_bin_root = mingw_package_root / "bin"
+        mingw_bin_root_msys = self._to_msys_path(mingw_bin_root)
+        mingw_tool_paths = {
+            "CC": mingw_bin_root / "gcc.exe",
+            "CXX": mingw_bin_root / "g++.exe",
+            "AR": mingw_bin_root / "ar.exe",
+            "AS": mingw_bin_root / "as.exe",
+            "LD": mingw_bin_root / "ld.exe",
+            "NM": mingw_bin_root / "nm.exe",
+            "RANLIB": mingw_bin_root / "ranlib.exe",
+            "STRIP": mingw_bin_root / "strip.exe",
+            "STRINGS": mingw_bin_root / "strings.exe",
+            "OBJDUMP": mingw_bin_root / "objdump.exe",
+            "GCOV": mingw_bin_root / "gcov.exe",
+        }
 
         bash_common_lines = [
             f"export MSYSTEM={msys2_env_name}",
             "export CHERE_INVOKING=1",
-            "source /etc/profile",
             "set -o pipefail",
-            f'export PATH="/{msys2_env_directory}/bin:/usr/bin:/usr/bin/core_perl:$PATH"',
         ]
 
-        for generated_script in (autotools_script, release_script):
+        for generated_script in (build_env_script, autotools_script, release_script):
             if generated_script.is_file():
                 bash_common_lines.append(
                     f"source {self._bash_quote(self._to_msys_path(generated_script))}"
                 )
 
+        bash_common_lines.extend(
+            (
+                "source /etc/profile",
+                (
+                    f'export PATH="{mingw_bin_root_msys}:/{msys2_env_directory}/bin:$MSYS_BIN:/usr/bin:/usr/bin/core_perl:$PATH"'
+                ),
+                f'export CPPFLAGS="-I{msys2_prefix_path}/include $CPPFLAGS"',
+                f'export LDFLAGS="-L{msys2_prefix_path}/lib $LDFLAGS"',
+            )
+        )
+        bash_common_lines.extend(
+            f"export {tool_name}={self._bash_quote(self._to_msys_path(tool_path))}"
+            for tool_name, tool_path in mingw_tool_paths.items()
+        )
         bash_common_lines.append(
             f"export PKG_CONFIG={self._bash_quote(pkg_config_binary_path)}"
         )
@@ -278,7 +306,7 @@ class Squid4WinConan(ConanFile):
             source_root,
             metadata,
             configuration_label,
-            build_profile,
+            build_settings,
             msys2_env_directory,
         )
         self._mirror_local_stage_root(bundle_root)
@@ -310,128 +338,136 @@ class Squid4WinConan(ConanFile):
         source_root: Path,
         metadata: dict[str, object],
         configuration_label: str,
-        build_profile: dict[str, object],
+        build_settings: dict[str, object],
         msys2_env_directory: str,
     ) -> None:
-        tray_package_root = self._tray_package_root()
-        tray_bin_root = tray_package_root / "bin"
-        if not tray_bin_root.is_dir():
-            raise ConanException(
-                f"Expected the tray package binaries at {tray_bin_root}."
-            )
-
-        self._copy_directory_contents(tray_bin_root, bundle_root)
-
-        licenses_root = bundle_root / "licenses"
-        installer_support_root = bundle_root / "installer"
-        config_directory = bundle_root / "etc"
-        for directory_path in (
-            licenses_root,
-            installer_support_root,
-            config_directory,
-            bundle_root / "var" / "cache",
-            bundle_root / "var" / "logs",
-            bundle_root / "var" / "run",
-        ):
-            directory_path.mkdir(parents=True, exist_ok=True)
-
-        shutil.copy2(
-            Path(self.recipe_folder)
-            / "scripts"
-            / "installer"
-            / "Manage-SquidService.ps1",
-            installer_support_root / "svc.ps1",
-        )
-        shutil.copy2(
-            Path(self.recipe_folder)
-            / "packaging"
-            / "defaults"
-            / "squid.conf.template",
-            config_directory / "squid.conf.template",
-        )
-        shutil.copy2(
-            self._repository_license_path(),
-            licenses_root / "Repository-LICENSE.txt",
-        )
-
-        mime_destination_path = config_directory / "mime.conf"
-        if not mime_destination_path.is_file():
-            mime_candidates = (
-                config_directory / "mime.conf.default",
-                source_root / "src" / "mime.conf.default",
-            )
-            mime_source_path = next(
-                (candidate for candidate in mime_candidates if candidate.is_file()), None
-            )
-            if mime_source_path is None:
+        if self._option_enabled("with_tray"):
+            tray_package_root = self._tray_package_root()
+            tray_bin_root = tray_package_root / "bin"
+            if not tray_bin_root.is_dir():
                 raise ConanException(
-                    f"Unable to locate mime.conf for the assembled bundle under {bundle_root}."
+                    f"Expected the tray package binaries at {tray_bin_root}."
                 )
-            shutil.copy2(mime_source_path, mime_destination_path)
 
-        squid_copying_path = source_root / "COPYING"
-        if squid_copying_path.is_file():
-            shutil.copy2(squid_copying_path, licenses_root / "Squid-COPYING.txt")
+            self._copy_directory_contents(tray_bin_root, bundle_root)
 
-        bundled_runtime_dlls = self._bundle_native_runtime_dlls(
-            bundle_root, build_profile, msys2_env_directory
-        )
-        source_manifest = {
-            "generated_at": datetime.now(timezone.utc)
-            .isoformat(timespec="seconds")
-            .replace("+00:00", "Z"),
-            "configuration": configuration_label,
-            "squid": {
-                "version": str(metadata["version"]),
-                "tag": str(metadata["tag"]),
-                "source_archive": str(metadata["assets"]["source_archive"]),
-                "source_signature": str(
-                    metadata["assets"].get("source_signature", "")
-                ),
-                "source_archive_sha256": str(
-                    metadata["assets"]["source_archive_sha256"]
-                ),
-            },
-            "repository": {"name": "squid4win", "license": "MIT"},
-            "windows_runtime": {
-                "msys2_env": msys2_env_directory,
-                "dlls": bundled_runtime_dlls,
-            },
-        }
-        save(
-            self,
-            os.fspath(licenses_root / "source-manifest.json"),
-            json.dumps(source_manifest, indent=2) + "\n",
-            encoding="ascii",
-        )
+            tray_executable = bundle_root / "Squid4Win.Tray.exe"
+            if not tray_executable.is_file():
+                raise ConanException(
+                    f"Expected the bundled tray executable at {tray_executable}."
+                )
 
-        notices_content = "\n".join(
-            (
-                "Squid4Win third-party notice bundle",
-                "",
-                f"This payload stages Squid {metadata['version']} from the upstream source archive listed in licenses/source-manifest.json.",
-                "Repository-local automation and packaging code in this project are MIT-licensed; see licenses/Repository-LICENSE.txt.",
-                "",
-                "Current bundled notice set:",
-                "- licenses/source-manifest.json",
-                "- licenses/Repository-LICENSE.txt",
-                "- licenses/Squid-COPYING.txt (when the upstream source tree is available locally)",
-                "",
-                "Bundled native runtime DLLs are recorded in licenses/source-manifest.json.",
-                "Before a signed production release, audit that runtime DLL set and expand this notice bundle with any additional third-party runtime licenses that ship in the installer.",
+        bundled_runtime_dlls: list[str] = []
+        if self._option_enabled("with_runtime_dlls"):
+            bundled_runtime_dlls = self._bundle_native_runtime_dlls(
+                bundle_root, build_settings, msys2_env_directory
             )
-        )
-        save(
-            self,
-            os.fspath(bundle_root / "THIRD-PARTY-NOTICES.txt"),
-            notices_content + "\n",
-            encoding="ascii",
-        )
 
-        tray_executable = bundle_root / "Squid4Win.Tray.exe"
-        if not tray_executable.is_file():
-            raise ConanException(
-                f"Expected the bundled tray executable at {tray_executable}."
+        if self._option_enabled("with_packaging_support"):
+            licenses_root = bundle_root / "licenses"
+            installer_support_root = bundle_root / "installer"
+            config_directory = bundle_root / "etc"
+            for directory_path in (
+                licenses_root,
+                installer_support_root,
+                config_directory,
+            ):
+                directory_path.mkdir(parents=True, exist_ok=True)
+
+            shutil.copy2(
+                Path(self.recipe_folder)
+                / "scripts"
+                / "installer"
+                / "Manage-SquidService.ps1",
+                installer_support_root / "svc.ps1",
+            )
+            shutil.copy2(
+                Path(self.recipe_folder)
+                / "packaging"
+                / "defaults"
+                / "squid.conf.template",
+                config_directory / "squid.conf.template",
+            )
+            shutil.copy2(
+                self._repository_license_path(),
+                licenses_root / "Repository-LICENSE.txt",
+            )
+
+            mime_destination_path = config_directory / "mime.conf"
+            if not mime_destination_path.is_file():
+                mime_candidates = (
+                    config_directory / "mime.conf.default",
+                    source_root / "src" / "mime.conf.default",
+                )
+                mime_source_path = next(
+                    (
+                        candidate
+                        for candidate in mime_candidates
+                        if candidate.is_file()
+                    ),
+                    None,
+                )
+                if mime_source_path is None:
+                    raise ConanException(
+                        "Unable to locate mime.conf for the assembled bundle under "
+                        f"{bundle_root}."
+                    )
+                shutil.copy2(mime_source_path, mime_destination_path)
+
+            squid_copying_path = source_root / "COPYING"
+            if squid_copying_path.is_file():
+                shutil.copy2(squid_copying_path, licenses_root / "Squid-COPYING.txt")
+
+            source_manifest = {
+                "generated_at": datetime.now(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z"),
+                "configuration": configuration_label,
+                "squid": {
+                    "version": str(metadata["version"]),
+                    "tag": str(metadata["tag"]),
+                    "source_archive": str(metadata["assets"]["source_archive"]),
+                    "source_signature": str(
+                        metadata["assets"].get("source_signature", "")
+                    ),
+                    "source_archive_sha256": str(
+                        metadata["assets"]["source_archive_sha256"]
+                    ),
+                },
+                "repository": {"name": "squid4win", "license": "MIT"},
+                "windows_runtime": {
+                    "msys2_env": msys2_env_directory,
+                    "dlls": bundled_runtime_dlls,
+                },
+            }
+            save(
+                self,
+                os.fspath(licenses_root / "source-manifest.json"),
+                json.dumps(source_manifest, indent=2) + "\n",
+                encoding="ascii",
+            )
+
+            notices_content = "\n".join(
+                (
+                    "Squid4Win third-party notice bundle",
+                    "",
+                    f"This payload stages Squid {metadata['version']} from the upstream source archive listed in licenses/source-manifest.json.",
+                    "Repository-local automation and packaging code in this project are MIT-licensed; see licenses/Repository-LICENSE.txt.",
+                    "",
+                    "Current bundled notice set:",
+                    "- licenses/source-manifest.json",
+                    "- licenses/Repository-LICENSE.txt",
+                    "- licenses/Squid-COPYING.txt (when the upstream source tree is available locally)",
+                    "",
+                    "Bundled native runtime DLLs, if enabled, are recorded in licenses/source-manifest.json.",
+                    "Before a signed production release, audit that runtime DLL set and expand this notice bundle with any additional third-party runtime licenses that ship in the installer.",
+                )
+            )
+            save(
+                self,
+                os.fspath(bundle_root / "THIRD-PARTY-NOTICES.txt"),
+                notices_content + "\n",
+                encoding="ascii",
             )
 
         squid_candidates = (
@@ -449,24 +485,30 @@ class Squid4WinConan(ConanFile):
     def _bundle_native_runtime_dlls(
         self,
         bundle_root: Path,
-        build_profile: dict[str, object],
+        build_settings: dict[str, object],
         msys2_env_directory: str,
     ) -> list[str]:
-        runtime_dlls = self._string_list(build_profile.get("runtimeDlls", []))
+        runtime_dlls = self._string_list(build_settings.get("runtime_dlls", []))
         if not runtime_dlls:
             raise ConanException(
-                "build-profile.json must declare runtimeDlls for the staged Windows bundle."
+                "conandata.yml must declare build.runtime_dlls for the staged "
+                "Windows bundle."
             )
 
-        msys2_runtime_bin = self._msys2_runtime_bin_path(
-            build_profile, msys2_env_directory
-        )
+        runtime_dll_sources = self._runtime_dll_source_directories(msys2_env_directory)
         executable_directories = self._native_executable_directories(bundle_root)
         copied_runtime_dlls: list[str] = []
         missing_runtime_dlls: list[str] = []
         for runtime_dll in runtime_dlls:
-            runtime_dll_source_path = msys2_runtime_bin / runtime_dll
-            if not runtime_dll_source_path.is_file():
+            runtime_dll_source_path = next(
+                (
+                    source_directory / runtime_dll
+                    for source_directory in runtime_dll_sources
+                    if (source_directory / runtime_dll).is_file()
+                ),
+                None,
+            )
+            if runtime_dll_source_path is None:
                 missing_runtime_dlls.append(runtime_dll)
                 continue
 
@@ -478,8 +520,9 @@ class Squid4WinConan(ConanFile):
 
         if missing_runtime_dlls:
             raise ConanException(
-                "Unable to locate the required MSYS2 runtime DLLs under "
-                f"{msys2_runtime_bin}: {', '.join(missing_runtime_dlls)}."
+                "Unable to locate the required Windows runtime DLLs in the Conan "
+                "dependency graph: "
+                f"{', '.join(missing_runtime_dlls)}."
             )
 
         destination_labels = [
@@ -488,9 +531,12 @@ class Squid4WinConan(ConanFile):
             else os.fspath(executable_directory.relative_to(bundle_root))
             for executable_directory in executable_directories
         ]
+        source_labels = ", ".join(
+            os.fspath(source_directory) for source_directory in runtime_dll_sources
+        )
         self.output.info(
             "Bundled native runtime DLLs from "
-            f"{msys2_runtime_bin} into {', '.join(destination_labels)}."
+            f"{source_labels} into {', '.join(destination_labels)}."
         )
         return copied_runtime_dlls
 
@@ -517,115 +563,87 @@ class Squid4WinConan(ConanFile):
 
         return executable_directories
 
-    def _msys2_runtime_bin_path(
-        self, build_profile: dict[str, object], msys2_env_directory: str
-    ) -> Path:
-        candidate_roots = self._candidate_msys2_roots(
-            build_profile, msys2_env_directory
-        )
-        for candidate_root in candidate_roots:
-            runtime_bin_path = candidate_root / msys2_env_directory / "bin"
-            if runtime_bin_path.is_dir():
-                return runtime_bin_path
-
-        searched_roots = (
-            ", ".join(os.fspath(candidate_root) for candidate_root in candidate_roots)
-            or "none"
-        )
-        raise ConanException(
-            "Unable to locate the MSYS2 runtime bin directory for the staged bundle. "
-            f"Searched: {searched_roots}."
-        )
-
-    def _candidate_msys2_roots(
-        self, build_profile: dict[str, object], msys2_env_directory: str
+    def _runtime_dll_source_directories(
+        self, msys2_env_directory: str
     ) -> list[Path]:
-        candidate_roots: list[Path] = []
-        seen_roots: set[str] = set()
-        bash_path = str(self.conf.get("tools.microsoft.bash:path", default="")).strip()
-        root_hints: list[object] = [
-            self._root_from_tool_path(bash_path, MSYS2_USR_BIN_BASH_SUFFIX)
-        ]
+        source_directories: list[Path] = []
+        seen_directories: set[str] = set()
 
-        bash_command_path = shutil.which(BASH_EXECUTABLE_NAME) or shutil.which("bash")
-        root_hints.append(
-            self._root_from_tool_path(
-                bash_command_path, MSYS2_USR_BIN_BASH_SUFFIX
+        mingw_package_root = self._dependency_package_root("mingw-builds")
+        if mingw_package_root is not None:
+            self._append_existing_directory(
+                source_directories, seen_directories, mingw_package_root / "bin"
             )
-        )
 
-        gcc_command_path = shutil.which("gcc.exe") or shutil.which("gcc")
-        root_hints.append(
-            self._root_from_tool_path(
-                gcc_command_path,
-                os.path.join(msys2_env_directory, "bin", "gcc.exe"),
+        msys2_package_root = self._dependency_package_root("msys2")
+        if msys2_package_root is not None:
+            self._append_existing_directory(
+                source_directories,
+                seen_directories,
+                msys2_package_root / "bin" / "msys64" / msys2_env_directory / "bin",
             )
-        )
+            self._append_existing_directory(
+                source_directories,
+                seen_directories,
+                msys2_package_root / "bin" / "msys64" / "usr" / "bin",
+            )
 
-        root_hints.extend((os.getenv("MSYS2_ROOT"), os.getenv("MSYS2_LOCATION")))
+        for dependency in self.dependencies.values():
+            package_folder = getattr(dependency, "package_folder", None)
+            if not package_folder:
+                continue
 
-        runner_temp = str(os.getenv("RUNNER_TEMP", "")).strip()
-        if runner_temp:
-            root_hints.append(Path(runner_temp) / "msys64")
+            package_root = Path(package_folder)
+            for bindir in getattr(dependency.cpp_info, "bindirs", []):
+                bindir_path = Path(bindir)
+                if not bindir_path.is_absolute():
+                    bindir_path = package_root / bindir_path
+                self._append_existing_directory(
+                    source_directories, seen_directories, bindir_path
+                )
 
-        root_hints.extend(self._string_list(build_profile.get("msys2RootHints", [])))
+        if not source_directories:
+            raise ConanException(
+                "Unable to locate any runtime DLL source directories from the Conan "
+                "dependency graph."
+            )
 
-        for root_hint in root_hints:
-            self._append_candidate_root(candidate_roots, seen_roots, root_hint)
-
-        return candidate_roots
-
-    def _append_candidate_root(
-        self, candidate_roots: list[Path], seen_roots: set[str], path_value: object
-    ) -> None:
-        if path_value is None:
-            return
-
-        candidate_text = str(path_value).strip()
-        if not candidate_text:
-            return
-
-        candidate_path = Path(candidate_text)
-        if not candidate_path.is_absolute():
-            candidate_path = Path(self.recipe_folder) / candidate_path
-
-        resolved_candidate_path = candidate_path.resolve(strict=False)
-        candidate_key = os.path.normcase(os.fspath(resolved_candidate_path))
-        if candidate_key in seen_roots:
-            return
-
-        seen_roots.add(candidate_key)
-        candidate_roots.append(resolved_candidate_path)
+        return source_directories
 
     @staticmethod
-    def _root_from_tool_path(tool_path: str | None, suffix: str) -> Path | None:
-        if not tool_path:
-            return None
+    def _append_existing_directory(
+        directories: list[Path], seen_directories: set[str], candidate: Path
+    ) -> None:
+        if not candidate.is_dir():
+            return
 
-        resolved_tool_path = os.path.abspath(tool_path).replace("/", "\\")
-        normalized_suffix = suffix.replace("/", "\\")
-        if not resolved_tool_path.lower().endswith(normalized_suffix.lower()):
-            return None
+        candidate_key = os.path.normcase(os.fspath(candidate.resolve(strict=False)))
+        if candidate_key in seen_directories:
+            return
 
-        root_text = resolved_tool_path[: -len(normalized_suffix)].rstrip("\\")
-        if not root_text:
-            return None
-
-        return Path(root_text)
+        seen_directories.add(candidate_key)
+        directories.append(candidate)
 
     def _tray_package_root(self) -> Path:
-        try:
-            dependency = self.dependencies["squid4win_tray"]
-            return Path(dependency.package_folder)
-        except Exception:
-            for dependency in self.dependencies.values():
-                dependency_ref = getattr(dependency, "ref", None)
-                if dependency_ref and getattr(dependency_ref, "name", None) == "squid4win_tray":
-                    return Path(dependency.package_folder)
+        dependency_root = self._dependency_package_root("squid4win_tray")
+        if dependency_root is not None:
+            return dependency_root
 
         raise ConanException(
             "The squid4win_tray package dependency is not available to the root recipe."
         )
+
+    def _dependency_package_root(self, dependency_name: str) -> Path | None:
+        try:
+            dependency = self.dependencies[dependency_name]
+            return Path(dependency.package_folder)
+        except Exception:
+            for dependency in self.dependencies.values():
+                dependency_ref = getattr(dependency, "ref", None)
+                if dependency_ref and getattr(dependency_ref, "name", None) == dependency_name:
+                    return Path(dependency.package_folder)
+
+        return None
 
     def _repository_license_path(self) -> Path:
         local_license_path = Path(self.recipe_folder) / "LICENSE"
@@ -640,17 +658,8 @@ class Squid4WinConan(ConanFile):
             f"Unable to locate the repository license under {self.recipe_folder}."
         )
 
-    def _conan_dependency_mode(self) -> str:
-        mode = str(self._build_profile().get("conanDependencyMode", "managed")).strip()
-        if mode not in {"managed", "metadata-only"}:
-            raise ConanInvalidConfiguration(
-                f"Unsupported conanDependencyMode '{mode}'."
-            )
-
-        return mode
-
-    def _configure_cache_lines(self, build_profile: dict[str, object]) -> list[str]:
-        configure_cache = build_profile.get("configureCache")
+    def _configure_cache_lines(self, build_settings: dict[str, object]) -> list[str]:
+        configure_cache = build_settings.get("configure_cache")
         if not configure_cache:
             return []
 
@@ -685,6 +694,9 @@ class Squid4WinConan(ConanFile):
     @staticmethod
     def _bash_quote(value: object) -> str:
         return "'" + str(value).replace("'", "'\"'\"'") + "'"
+
+    def _option_enabled(self, option_name: str) -> bool:
+        return str(getattr(self.options, option_name)).lower() == "true"
 
     def _run_bash(self, lines: list[str], failure_message: str) -> None:
         bash_path = str(self.conf.get("tools.microsoft.bash:path", default="")).strip()

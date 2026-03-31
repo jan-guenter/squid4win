@@ -1,31 +1,14 @@
-# Default standalone example for contributors using C:\msys64.
-# Local and CI automation generate an effective profile from the resolved
-# MSYS2 root and store it under .conan2\profiles\.
+# Conan-managed host profile for the native Windows Squid build.
+# Toolchain executables and the MSYS2 bash environment come from Conan
+# tool requirements, not from hardcoded local paths.
 
 [settings]
 os=Windows
 arch=x86_64
 compiler=gcc
-compiler.version=14
+compiler.version=15
 compiler.cppstd=gnu17
 compiler.libcxx=libstdc++11
 compiler.exception=seh
 compiler.threads=posix
 build_type=Release
-
-[conf]
-tools.build:compiler_executables={"c":"C:/msys64/mingw64/bin/gcc.exe","cpp":"C:/msys64/mingw64/bin/g++.exe"}
-tools.gnu:host_triplet=x86_64-w64-mingw32
-tools.gnu:make_program=C:/msys64/mingw64/bin/mingw32-make.exe
-tools.microsoft.bash:active=True
-tools.microsoft.bash:subsystem=msys2
-tools.microsoft.bash:path=C:/msys64/usr/bin/bash.exe
-
-[buildenv]
-MSYSTEM=MINGW64
-CHERE_INVOKING=1
-CC=C:/msys64/mingw64/bin/gcc.exe
-CXX=C:/msys64/mingw64/bin/g++.exe
-AR=C:/msys64/mingw64/bin/ar.exe
-RANLIB=C:/msys64/mingw64/bin/ranlib.exe
-STRIP=C:/msys64/mingw64/bin/strip.exe

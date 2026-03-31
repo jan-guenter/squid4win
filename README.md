@@ -99,27 +99,29 @@ integration.
 
 ## Native bootstrap
 
-Run native bootstrap validation before the first local build, after moving
-MSYS2, or when diagnosing toolchain issues:
+Run Conan bootstrap validation before the first local build or when diagnosing
+toolchain issues:
 
 ```powershell
-.\scripts\Initialize-NativeToolchain.ps1 -Configuration Release
+.\scripts\Setup-Environment.ps1 -Configuration Release
 ```
 
-For a non-failing diagnostic run on a machine that might be missing pieces:
+For a non-building diagnostic run:
 
 ```powershell
-.\scripts\Invoke-SquidBuild.ps1 -BootstrapOnly -AllowMissingPrerequisites
+.\scripts\Invoke-SquidBuild.ps1 -Configuration Release -BootstrapOnly
 ```
 
 The bootstrap validation:
 
 - enforces repo-local `CONAN_HOME`
-- checks that `config\squid-version.json` and `conan\squid-release.json` stay aligned
-- resolves MSYS2 from `-Msys2Root`, `MSYS2_ROOT`, `MSYS2_LOCATION`, or common
-  Windows and GitHub Actions install roots
-- validates the required MSYS2 packages from `config\build-profile.json`
-- generates the effective Conan profile under `.conan2\profiles\`
+- ensures Conan's default build profile exists with `conan profile detect --force`
+- validates that the committed host profile `conan\profiles\msys2-mingw-x64`
+  exists
+- exports the repo-local `python_requires` and tray recipes into the repo-local
+  Conan cache
+- relies on Conan tool requirements for MSYS2 and MinGW instead of probing local
+  `C:\msys64`-style install roots
 
 ## Repository layout
 
@@ -142,7 +144,7 @@ The bootstrap validation:
 
 ## Current prerequisites
 
-For contributor workflows that touch the current bootstrap, plan around:
+For contributor workflows that touch the native build, plan around:
 
 - Windows x64
 - Git
@@ -150,63 +152,53 @@ For contributor workflows that touch the current bootstrap, plan around:
 - Python 3.12 and `pip install -r .\requirements-automation.txt`
 - .NET 8 SDK for the tray project
 - Conan 2 via `requirements-automation.txt`
-- MSYS2 with the `mingw64` toolchain if you want to run the native Squid build
-  locally
+- internet access to ConanCenter so the tool requirements can restore the
+  Conan-managed MSYS2 and MinGW toolchain packages
 
-If MSYS2 is not installed in one of the common detected roots, pass the real
-`msys64` location explicitly:
+The native build now restores these Conan-managed tool requirements:
 
-```powershell
-.\scripts\Initialize-NativeToolchain.ps1 -Msys2Root 'D:\custom\msys64'
-.\scripts\Invoke-SquidBuild.ps1 -Configuration Release -Msys2Root 'D:\custom\msys64'
-```
+- `msys2/cci.latest`
+- `mingw-builds/15.1.0`
 
-The CI workflows currently provision these MSYS2 packages for the native build:
+The `msys2/cci.latest` tool package installs the current native build support
+set inside the Conan cache:
 
 - `autoconf`
 - `automake`
 - `libtool`
 - `make`
+- `mingw-w64-x86_64-make`
 - `mingw-w64-x86_64-pkgconf`
-- `mingw-w64-x86_64-binutils`
-- `mingw-w64-x86_64-gcc`
 - `mingw-w64-x86_64-libgnurx`
 - `mingw-w64-x86_64-libxml2`
 - `mingw-w64-x86_64-openssl`
 - `mingw-w64-x86_64-pcre2`
 - `mingw-w64-x86_64-zlib`
 
-The Conan entry point now also records the current versioned toolchain and core
-library intent used by the native build:
+The committed host profile `conan\profiles\msys2-mingw-x64` now contains only
+the host settings contract. Conan tool requirements provide the actual
+`bash.exe`, GCC, and MinGW runtime paths at build time.
 
-- tool requirement: `mingw-builds/15.1.0`
-- dependency references:
-  - `openssl/3.6.1`
-  - `pcre2/10.44`
-  - `libxml2/2.15.2`
-  - `zlib/1.3.1`
+Default local build and release-style packaging flow:
 
-MSYS2 remains the currently proven bootstrap and install mechanism. The Conan
-graph is the reviewable source of truth for versioned toolchain intent while the
-repo continues validating deeper Conan ownership of the native path. The default
-`conanDependencyMode` is currently `metadata-only`, so the native MSYS2 build
-records the core library refs without asking the main CI path to compile those
-third-party packages yet.
+1. `.\scripts\Setup-Environment.ps1 -Configuration Release`
+2. `.\scripts\Invoke-SquidBuild.ps1 -Configuration Release`
+3. `.\scripts\Update-ConanLockfile.ps1 -Configuration Release -WithTray -WithRuntimeDlls -WithPackagingSupport`
+4. `.\scripts\Invoke-SquidBuild.ps1 -Configuration Release -WithTray -WithRuntimeDlls -WithPackagingSupport`
+5. `.\scripts\Stage-ReleasePayload.ps1 -Configuration Release -RequireTray -RequireNotices -CreatePortableZip`
+6. `.\scripts\Build-Installer.ps1 -Configuration Release`
 
-Local build and lockfile flow:
-
-1. `.\scripts\Initialize-NativeToolchain.ps1 -Configuration Release`
-2. `.\scripts\Update-ConanLockfile.ps1 -Configuration Release`
-3. `.\scripts\Invoke-SquidBuild.ps1 -Configuration Release`
-4. `.\scripts\Stage-ReleasePayload.ps1 -Configuration Release -CreatePortableZip`
-5. `.\scripts\Build-Installer.ps1 -Configuration Release`
+The default `Invoke-SquidBuild.ps1` call builds Squid itself and its Conan-owned
+toolchain dependencies only. Tray packaging, native runtime bundling, and
+installer-support files are opt-in recipe options exposed through the
+`-WithTray`, `-WithRuntimeDlls`, and `-WithPackagingSupport` wrapper switches.
 
 `Invoke-SquidBuild.ps1` now consumes the generated lockfile when present and will
-generate a build-scoped lockfile automatically if a committed one is not
-available yet. The wrapper now exports the repo-local `python_requires` and
-tray recipes, runs `conan source`/`conan install`/`conan build`, and keeps an
-exclusive build lock for the selected profile/configuration so concurrent local
-runs fail fast instead of silently mutating the same build root.
+refresh a build-scoped lockfile automatically if a committed one is not
+available yet. The wrapper exports the repo-local `python_requires` and tray
+recipes, runs `conan profile detect --force`, then drives `conan source` and
+`conan build` with an exclusive build lock so concurrent local runs fail fast
+instead of silently mutating the same build root.
 
 `Publish-TrayApp.ps1` is now a thin convenience wrapper around the Conan tray
 recipe: it exports the workspace recipes, runs `conan create` for
@@ -217,17 +209,18 @@ The root Conan recipe now owns the Windows-native build behavior itself. It
 fetches Squid from `conandata.yml`, applies the reviewable patch set under
 `conan\patches\squid\`, pre-seeds the known
 `x86_64-w64-mingw32` autoconf cache values, repairs the generated autoconf
-header after `configure`, builds and installs Squid under the resolved MSYS2
-profile, then consumes the separate `squid4win_tray` package and assembles the
-final staged bundle. `Stage-ReleasePayload.ps1` is now a thin copy-and-archive
-wrapper around that Conan-produced bundle instead of the authoritative payload
-merge step.
+header after `configure`, builds and installs Squid under the Conan-provided
+MSYS2 shell and MinGW toolchain, then optionally consumes the separate
+`squid4win_tray` package and assembles the release bundle.
+`Stage-ReleasePayload.ps1` is now a thin copy-and-archive wrapper around that
+Conan-produced bundle instead of the authoritative payload merge step.
 
-`config\build-profile.json` now also carries the `runtimeDlls` contract for the
-native Windows payload. The root recipe harvests that MSYS2 DLL set into each
-staged native executable directory before the bundle is mirrored to
-`build\install\release`, so keep that list aligned with any new MinGW-linked
-imports.
+`conandata.yml` now carries the `build.runtime_dlls` contract for the native
+Windows payload. When `with_runtime_dlls` and `with_packaging_support` are
+enabled, the root recipe harvests that DLL set from the Conan dependency graph
+into each staged native executable directory before the bundle is mirrored to
+`build\install\<configuration>`, so keep that list aligned with any new
+MinGW-linked imports.
 
 For native MSYS2 reliability, `Invoke-SquidBuild.ps1` still defaults to a
 serial `make -j1`; pass `-MakeJobs` to opt in to a higher parallelism level

@@ -77,11 +77,13 @@ Do not claim any of the following unless you have added and validated them:
 
 - a finished MSI release path
 - end-to-end installed Squid service plus tray app integration
-- local native-build validation on a machine that does not actually have MSYS2
+- local native-build validation on a machine that has not actually restored and
+  used the Conan-managed MSYS2/MinGW toolchain
 
-The native build scripts probe common roots such as `C:\msys64` and
-`C:\tools\msys64`. If neither is present on the current machine, say so plainly
-instead of implying the native build was already proven locally.
+The native build now relies on Conan tool requirements instead of probing common
+machine install roots. If the current machine has not actually restored those
+tool packages and completed a native build, say so plainly instead of implying
+that path was already proven locally.
 
 ## Project memory rule
 
@@ -106,16 +108,17 @@ instead of implying the native build was already proven locally.
 - If you change installer behavior, keep `conanfile.py`,
   `scripts\Stage-ReleasePayload.ps1`, `scripts\Build-Installer.ps1`, and
   `packaging\wix\` synchronized.
-- If you change native MinGW-linked imports or bundled MSYS2 package
-  composition, keep `config\build-profile.json` `runtimeDlls`, the staged-bundle
-  harvesting in `conanfile.py`, and runtime launch validation synchronized.
+- If you change native MinGW-linked imports, Conan tool package composition, or
+  the bundled runtime payload, keep `conandata.yml` `build.runtime_dlls`, the
+  staged-bundle harvesting in `conanfile.py`, and runtime launch validation
+  synchronized.
 - If you change feed metadata generation or publication, keep
   `scripts\Export-PackageManagerMetadata.ps1`, the package-manager publish
   helpers under `scripts\`, `.github\workflows\package-managers.yml`, and
   `.github\workflows\package-manager-publish.yml` synchronized.
 - Prefer repo-relative paths and repo-local state.
-- Do not introduce secrets, signing material, or machine-specific paths beyond
-  documented tool defaults such as `C:\msys64`.
+- Do not introduce secrets, signing material, or new machine-specific tool
+  paths.
 - Use ASCII in docs and config unless an existing file requires something else.
 
 ## When current state changes

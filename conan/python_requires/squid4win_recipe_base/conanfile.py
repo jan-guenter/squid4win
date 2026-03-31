@@ -16,15 +16,21 @@ class Squid4WinRecipeBase:
         json_path = Path(self.recipe_folder).joinpath(*relative_parts)
         return json.loads(load(self, os.fspath(json_path)))
 
-    def _build_profile(self) -> dict[str, object]:
-        return self._load_json_file("config", "build-profile.json")
-
     def _release_metadata(self) -> dict[str, object]:
         metadata_path = Path(self.recipe_folder) / "conan" / "squid-release.json"
         if not metadata_path.is_file():
             return {}
 
         return self._load_json_file("conan", "squid-release.json")
+
+    def _build_settings(self) -> dict[str, object]:
+        build_settings = self.conan_data.get("build")
+        if not isinstance(build_settings, dict):
+            raise ConanInvalidConfiguration(
+                "conandata.yml must define a top-level 'build' mapping."
+            )
+
+        return build_settings
 
     @staticmethod
     def _string_list(values: object) -> list[str]:
@@ -51,6 +57,24 @@ class Squid4WinRecipeBase:
 
     def _configuration_label(self) -> str:
         return str(self.settings.build_type).lower()
+
+    def _build_setting(self, key: str, default: object | None = None) -> object:
+        return self._build_settings().get(key, default)
+
+    def _profile_name(self) -> str:
+        return str(
+            self._build_setting("profile_name", "msys2-mingw-x64")
+        ).strip() or "msys2-mingw-x64"
+
+    def _stage_root_template(self) -> str:
+        stage_root = str(
+            self._build_setting("stage_root", r"build\install\{configuration}")
+        ).strip()
+        return stage_root or r"build\install\{configuration}"
+
+    def _service_name(self) -> str:
+        service_name = str(self._build_setting("service_name", "Squid4Win")).strip()
+        return service_name or "Squid4Win"
 
     def _validate_native_windows(self) -> None:
         if str(self.settings.os) != "Windows":
@@ -103,7 +127,9 @@ class Squid4WinRecipeBase:
         if worktree_root is None:
             return None
 
-        stage_root = str(self._build_profile().get("stageRoot", "build\\install\\release"))
+        stage_root = self._stage_root_template().replace(
+            "{configuration}", self._configuration_label()
+        )
         return (worktree_root / stage_root).resolve()
 
 

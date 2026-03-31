@@ -4,6 +4,71 @@ sources:
     sha256: "f6058907db0150d2f5d228482b5a9e5678920cf368ae0ccbcecceb2ff4c35106"
     strip_root: true
 
+build:
+  profile_name: "msys2-mingw-x64"
+  stage_root: "build\\install\\{configuration}"
+  service_name: "Squid4Win"
+  host_triplet: "x86_64-w64-mingw32"
+  tool_requires:
+    - "msys2/cci.latest"
+    - "mingw-builds/15.1.0"
+  msys2:
+    env: "mingw64"
+    packages:
+      - "autoconf"
+      - "automake"
+      - "libtool"
+      - "make"
+      - "mingw-w64-x86_64-make"
+      - "mingw-w64-x86_64-pkgconf"
+      - "mingw-w64-x86_64-libgnurx"
+      - "mingw-w64-x86_64-libxml2"
+      - "mingw-w64-x86_64-openssl"
+      - "mingw-w64-x86_64-pcre2"
+      - "mingw-w64-x86_64-zlib"
+  mingw_builds:
+    threads: "posix"
+    exception: "seh"
+    runtime: "ucrt"
+  compiler:
+    cppstd: "gnu17"
+    libcxx: "libstdc++11"
+    exception: "seh"
+    threads: "posix"
+  runtime_dlls:
+    - "libcrypto-3-x64.dll"
+    - "libssl-3-x64.dll"
+    - "libwinpthread-1.dll"
+    - "libgnurx-0.dll"
+  configure_cache:
+    ac_cv_sizeof_void_p: "8"
+    ac_cv_c_int8_t: "yes"
+    ac_cv_c_uint8_t: "yes"
+    ac_cv_c_int16_t: "yes"
+    ac_cv_c_uint16_t: "yes"
+    ac_cv_c_int32_t: "yes"
+    ac_cv_c_uint32_t: "yes"
+    ac_cv_c_int64_t: "yes"
+    ac_cv_c_uint64_t: "yes"
+    ac_cv_type_pid_t: "yes"
+    ac_cv_type_size_t: "yes"
+    ac_cv_type_ssize_t: "yes"
+    ac_cv_type_off_t: "yes"
+    ac_cv_sizeof_int64_t: "8"
+    ac_cv_sizeof_off_t: "4"
+    ac_cv_sizeof_size_t: "8"
+  configure_args:
+    - "--disable-strict-error-checking"
+    - "--disable-dependency-tracking"
+    - "--without-netfilter-conntrack"
+    - "--enable-auth-basic=DB,NCSA,POP3,RADIUS,SMB,SSPI,fake"
+    - "--enable-auth-digest=file"
+    - "--enable-auth-negotiate=SSPI"
+    - "--enable-external-acl-helpers=LM_group,SQL_session,delayer,wbinfo_group"
+    - "--with-openssl"
+    - "--enable-win32-service"
+    - "--enable-default-hostsfile"
+
 patches:
   "7.5":
     - patch_file: "conan/patches/squid/0001-mingw-compat-core-shims.patch"
