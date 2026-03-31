@@ -44,7 +44,7 @@ $toolchain = & (Join-Path $PSScriptRoot 'Resolve-Msys2Root.ps1') -RepositoryRoot
 $pkgConfigPath = Join-Path $toolchain.MingwBinPath "$([string]$buildProfile.hostTriplet)-pkg-config.exe"
 $requiredToolPaths = @(
     $toolchain.BashPath,
-    $toolchain.MakePath,
+    $toolchain.ConanMakePath,
     $toolchain.GccPath,
     $toolchain.GppPath,
     $toolchain.ArPath,
@@ -90,7 +90,7 @@ $profileLines = @(
     '[conf]',
     "tools.build:compiler_executables={""c"":""$(Convert-ToConanPath -Path $toolchain.GccPath)"",""cpp"":""$(Convert-ToConanPath -Path $toolchain.GppPath)""}",
     "tools.gnu:host_triplet=$([string]$buildProfile.hostTriplet)",
-    "tools.gnu:make_program=$(Convert-ToConanPath -Path $toolchain.MakePath)",
+    "tools.gnu:make_program=$(Convert-ToConanPath -Path $toolchain.ConanMakePath)",
     'tools.microsoft.bash:active=True',
     'tools.microsoft.bash:subsystem=msys2',
     "tools.microsoft.bash:path=$(Convert-ToConanPath -Path $toolchain.BashPath)",

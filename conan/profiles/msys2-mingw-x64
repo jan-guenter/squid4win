@@ -16,7 +16,7 @@ build_type=Release
 [conf]
 tools.build:compiler_executables={"c":"C:/msys64/mingw64/bin/gcc.exe","cpp":"C:/msys64/mingw64/bin/g++.exe"}
 tools.gnu:host_triplet=x86_64-w64-mingw32
-tools.gnu:make_program=C:/msys64/usr/bin/make.exe
+tools.gnu:make_program=C:/msys64/mingw64/bin/mingw32-make.exe
 tools.microsoft.bash:active=True
 tools.microsoft.bash:subsystem=msys2
 tools.microsoft.bash:path=C:/msys64/usr/bin/bash.exe

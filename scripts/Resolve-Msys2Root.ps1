@@ -144,12 +144,17 @@ foreach ($candidateRoot in $candidateRoots) {
     if ((Test-Path -LiteralPath $bashPath) -and (Test-Path -LiteralPath $pacmanPath)) {
         $mingwRoot = Join-Path $candidateRoot $msys2EnvDirectory
         $mingwBinPath = Join-Path $mingwRoot 'bin'
+        $conanMakePath = Join-Path $mingwBinPath 'mingw32-make.exe'
+        if (-not (Test-Path -LiteralPath $conanMakePath)) {
+            $conanMakePath = Join-Path $candidateRoot 'usr\bin\make.exe'
+        }
 
         [PSCustomObject]@{
             Root = $candidateRoot
             BashPath = $bashPath
             PacmanPath = $pacmanPath
             MakePath = Join-Path $candidateRoot 'usr\bin\make.exe'
+            ConanMakePath = $conanMakePath
             Msys2Env = $msys2EnvName
             Msys2EnvDirectory = $msys2EnvDirectory
             MingwRoot = $mingwRoot
