@@ -131,6 +131,7 @@ jobs:
           .\scripts\Invoke-SquidBuild.ps1 `
             -Configuration Release `
             -Clean `
+            -RefreshLockfile `
             -Msys2Root '${{ steps.bootstrap.outputs.msys2_root }}' `
             -EffectiveProfilePath '${{ steps.bootstrap.outputs.effective_profile_path }}' `
             -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}'
