@@ -25,6 +25,8 @@ The first committed installer contract is:
   during install if the file is missing
 - register and remove the Windows service using Squid's built-in `-i` and `-r`
   verbs through an installed PowerShell helper
+- keep the service name overridable so runner automation can validate isolated
+  temporary service instances without colliding with a shared registration
 - keep the tray app tolerant of both `ProgramData` locations and install-root
   `etc`/`var\logs` fallbacks
 - bundle the required MSYS2 runtime DLL set beside each staged native
@@ -37,6 +39,8 @@ The first committed installer contract is:
   flow on day one.
 - Reusing Squid's own service support avoids shipping a second service wrapper
   and stays aligned with upstream behavior.
+- Parameterizing the service name lets automation exercise the real installer
+  path without reusing runner-global service state.
 - Generating `squid.conf` from a template at install time lets the config use the
   actual resolved install root without hard-coding one machine path in the repo.
 - Tray fallback logic keeps the tray useful before a future `ProgramData`
@@ -52,6 +56,10 @@ The first committed installer contract is:
 - The release payload now has an explicit shape that workflows and docs must keep
   synchronized: Conan-built staged bundle, runtime DLL adjacency for native
   executables, config template, installer helper, and notices bundle.
+- The notices bundle is part of the payload contract, not a post-processing
+  afterthought: the staged payload must carry the third-party notice files for
+  Squid, the bundled native runtime DLLs, and any shipped tray-app package
+  dependencies before WiX harvests the payload.
 
 ## Implementation notes
 
@@ -60,6 +68,9 @@ The first committed installer contract is:
 - `conandata.yml` declares the `build.runtime_dlls` list that the root recipe
   harvests from the Conan-managed MSYS2 and MinGW dependency graph into each
   staged native executable directory.
+- `conandata.yml` also declares the runtime notice artifacts that the root
+  recipe copies into `licenses\third-party\windows-runtime\` for the staged
+  bundle.
 - `scripts\Stage-ReleasePayload.ps1` is now a thin wrapper that mirrors the
   Conan-built staged bundle into `artifacts\install-root` and optionally creates
   the portable zip.
@@ -67,9 +78,14 @@ The first committed installer contract is:
   MSI from the staged payload.
 - `packaging\wix\Squid4Win.Installer.wixproj` harvests the staged payload instead
   of hand-maintaining every Squid file in WiX XML.
+- `conan\recipes\tray-app\conanfile.py` harvests license and notice files for
+  shipped NuGet package dependencies so the root recipe can merge them into the
+  staged bundle before MSI harvesting.
 - `scripts\installer\Manage-SquidService.ps1` runs inside the installed payload
   and performs config materialization, `squid.exe -k parse`, `squid.exe -z`, and
   service registration or removal.
+- `scripts\installer\Manage-SquidService.ps1` stops a running named service
+  before removing it so reinstall and runner cleanup stay reliable.
 
 ## Alternatives considered
 

@@ -65,35 +65,17 @@ $layout = & (Join-Path $PSScriptRoot 'Resolve-SquidBuildLayout.ps1') `
     -Configuration $Configuration `
     -RepositoryRoot $resolvedRepositoryRoot `
     -BuildRoot $resolvedBuildRoot
-$conanHome = & (Join-Path $PSScriptRoot 'Resolve-ConanHome.ps1') -RepositoryRoot $resolvedRepositoryRoot -EnsureExists
-$conanCommand = Get-Command conan -ErrorAction SilentlyContinue
-if ($null -eq $conanCommand) {
-    throw 'The conan CLI is not available on PATH. Install requirements-automation.txt first.'
-}
-if (-not (Test-Path -LiteralPath $resolvedHostProfilePath)) {
-    throw "The Conan host profile '$resolvedHostProfilePath' was not found."
-}
-$env:CONAN_HOME = $conanHome
-& $conanCommand.Source profile detect --force
-if ($LASTEXITCODE -ne 0) {
-    throw "conan profile detect failed with exit code $LASTEXITCODE."
-}
-& (Join-Path $PSScriptRoot 'Export-ConanWorkspaceRecipes.ps1') -RepositoryRoot $resolvedRepositoryRoot | Out-Null
-$conanVersion = (& $conanCommand.Source --version 2>&1 | Out-String).Trim()
-$bootstrapState = [PSCustomObject]@{
-    Ready = $true
-    ConanHome = $conanHome
-    ConanVersion = $conanVersion
-    HostProfilePath = $resolvedHostProfilePath
-    BuildProfile = $BuildProfile
-    RecipeOptions = [PSCustomObject]@{
-        WithTray = $WithTray.IsPresent
-        WithRuntimeDlls = $WithRuntimeDlls.IsPresent
-        WithPackagingSupport = $WithPackagingSupport.IsPresent
-    }
-}
+$bootstrapState = & (Join-Path $PSScriptRoot 'Invoke-ConanRootRecipe.ps1') `
+    -Operation Bootstrap `
+    -Configuration $Configuration `
+    -RepositoryRoot $resolvedRepositoryRoot `
+    -BuildRoot $resolvedBuildRoot `
+    -HostProfilePath $resolvedHostProfilePath `
+    -BuildProfile $BuildProfile `
+    -WithTray:$WithTray `
+    -WithRuntimeDlls:$WithRuntimeDlls `
+    -WithPackagingSupport:$WithPackagingSupport
 if ($BootstrapOnly) {
-    Write-Host 'Conan workspace bootstrap succeeded.'
     $bootstrapState
     return
 }
@@ -109,11 +91,6 @@ $resolvedLockfilePath = if ($LockfilePath) {
 } else {
     Join-Path $conanOutputRoot "lockfiles\msys2-mingw-x64-$configurationLabel.lock"
 }
-$conanOptionArguments = & (Join-Path $PSScriptRoot 'Get-ConanRecipeOptionArguments.ps1') `
-    -RepositoryRoot $resolvedRepositoryRoot `
-    -WithTray:$WithTray `
-    -WithRuntimeDlls:$WithRuntimeDlls `
-    -WithPackagingSupport:$WithPackagingSupport
 $buildLock = $null
 $hadMakeJobs = Test-Path Env:SQUID4WIN_MAKE_JOBS
 $previousMakeJobs = $env:SQUID4WIN_MAKE_JOBS
@@ -127,51 +104,47 @@ try {
     }
     $null = New-Item -ItemType Directory -Path $resolvedBuildRoot, $conanOutputRoot, (Split-Path -Parent $resolvedLockfilePath) -Force
     if ($RefreshLockfile -or -not (Test-Path -LiteralPath $resolvedLockfilePath)) {
-        & (Join-Path $PSScriptRoot 'Update-ConanLockfile.ps1') `
+        & (Join-Path $PSScriptRoot 'Invoke-ConanRootRecipe.ps1') `
+            -Operation LockCreate `
             -Configuration $Configuration `
             -RepositoryRoot $resolvedRepositoryRoot `
+            -BuildRoot $resolvedBuildRoot `
             -HostProfilePath $resolvedHostProfilePath `
             -BuildProfile $BuildProfile `
             -LockfilePath $resolvedLockfilePath `
+            -SkipBootstrap `
             -WithTray:$WithTray `
             -WithRuntimeDlls:$WithRuntimeDlls `
             -WithPackagingSupport:$WithPackagingSupport | Out-Null
     }
-    & $conanCommand.Source source $resolvedRepositoryRoot
-    if ($LASTEXITCODE -ne 0) {
-        throw "conan source failed with exit code $LASTEXITCODE."
-    }
-    $conanBuildArguments = @(
-        'build',
-        $resolvedRepositoryRoot,
-        '-of', $conanOutputRoot,
-        '-pr:h', $resolvedHostProfilePath,
-        '-pr:b', $BuildProfile,
-        '--lockfile', $resolvedLockfilePath,
-        '-s:h', "build_type=$Configuration",
-        '-s:b', "build_type=$Configuration",
-        '--build=missing'
-    ) + $conanOptionArguments
+    & (Join-Path $PSScriptRoot 'Invoke-ConanRootRecipe.ps1') `
+        -Operation Source `
+        -Configuration $Configuration `
+        -RepositoryRoot $resolvedRepositoryRoot `
+        -BuildRoot $resolvedBuildRoot `
+        -SkipBootstrap `
+        -WithTray:$WithTray `
+        -WithRuntimeDlls:$WithRuntimeDlls `
+        -WithPackagingSupport:$WithPackagingSupport | Out-Null
     $env:SQUID4WIN_MAKE_JOBS = [string]$MakeJobs
     if ($AdditionalConfigureArgs.Count -gt 0) {
         $env:SQUID4WIN_CONFIGURE_ARGS_JSON = ConvertTo-Json -Compress -InputObject @($AdditionalConfigureArgs)
     } else {
         Remove-Item Env:SQUID4WIN_CONFIGURE_ARGS_JSON -ErrorAction SilentlyContinue
     }
-    & $conanCommand.Source @conanBuildArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "conan build failed with exit code $LASTEXITCODE."
-    }
-    if (-not (Test-Path -LiteralPath $installRoot)) {
-        throw "The Conan build finished without materializing the staged bundle at $installRoot."
-    }
-    Write-Host 'Build completed successfully.'
-    Write-Host "Staged bundle root: $installRoot"
-    Write-Host "Conan output root: $conanOutputRoot"
-    Write-Host "Conan home: $conanHome"
-    Write-Host "Conan host profile: $resolvedHostProfilePath"
-    Write-Host "Conan build profile: $BuildProfile"
-    Write-Host "Lockfile: $resolvedLockfilePath"
+    & (Join-Path $PSScriptRoot 'Invoke-ConanRootRecipe.ps1') `
+        -Operation Build `
+        -Configuration $Configuration `
+        -RepositoryRoot $resolvedRepositoryRoot `
+        -BuildRoot $resolvedBuildRoot `
+        -HostProfilePath $resolvedHostProfilePath `
+        -BuildProfile $BuildProfile `
+        -LockfilePath $resolvedLockfilePath `
+        -OutputRoot $conanOutputRoot `
+        -SkipBootstrap `
+        -WithTray:$WithTray `
+        -WithRuntimeDlls:$WithRuntimeDlls `
+        -WithPackagingSupport:$WithPackagingSupport | Out-Null
 }
 finally {
     if ($hadMakeJobs) {

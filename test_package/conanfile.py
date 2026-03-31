@@ -50,6 +50,12 @@ class Squid4WinBundleTestPackage(ConanFile):
                     f"Expected the bundled tray executable at {tray_executable}."
                 )
 
+        notices_path = package_root / "THIRD-PARTY-NOTICES.txt"
+        if with_packaging_support and not notices_path.is_file():
+            raise ConanException(
+                f"Expected the bundled third-party notices at {notices_path}."
+            )
+
         source_manifest_path = package_root / "licenses" / "source-manifest.json"
         if with_packaging_support and not source_manifest_path.is_file():
             raise ConanException(
@@ -71,6 +77,14 @@ class Squid4WinBundleTestPackage(ConanFile):
             if not runtime_dlls:
                 raise ConanException(
                     "Expected source-manifest.json to declare bundled windows_runtime DLLs."
+                )
+
+            runtime_notice_packages = list(
+                source_manifest.get("windows_runtime", {}).get("packages", [])
+            )
+            if not runtime_notice_packages:
+                raise ConanException(
+                    "Expected source-manifest.json to declare packaged notice files for the bundled windows_runtime DLLs."
                 )
 
             executable_directories = sorted(
@@ -98,6 +112,59 @@ class Squid4WinBundleTestPackage(ConanFile):
                 raise ConanException(
                     "Expected each packaged executable directory to contain the bundled runtime DLLs: "
                     + "; ".join(missing_runtime_dlls)
+                )
+
+            runtime_notice_dlls = sorted(
+                {
+                    str(runtime_dll).strip()
+                    for package in runtime_notice_packages
+                    for runtime_dll in package.get("dlls", [])
+                    if str(runtime_dll).strip()
+                }
+            )
+            if runtime_notice_dlls != sorted(runtime_dlls):
+                raise ConanException(
+                    "Expected the runtime notice package metadata to cover the same DLL set declared in source-manifest.json."
+                )
+
+            missing_notice_files = sorted(
+                {
+                    str(notice_file).strip()
+                    for package in runtime_notice_packages
+                    for notice_file in package.get("notice_files", [])
+                    if str(notice_file).strip()
+                    and not (package_root / Path(str(notice_file))).is_file()
+                }
+            )
+            if missing_notice_files:
+                raise ConanException(
+                    "Expected each declared runtime notice file to exist in the packaged bundle: "
+                    + ", ".join(missing_notice_files)
+                )
+
+        if with_tray and with_packaging_support:
+            tray_third_party_binary = package_root / "System.ServiceProcess.ServiceController.dll"
+            tray_notice_packages = list(
+                source_manifest.get("tray", {}).get("third_party_packages", [])
+            )
+            if tray_third_party_binary.is_file() and not tray_notice_packages:
+                raise ConanException(
+                    "Expected source-manifest.json to declare third-party tray package notices."
+                )
+
+            missing_tray_notice_files = sorted(
+                {
+                    str(notice_file).strip()
+                    for package in tray_notice_packages
+                    for notice_file in package.get("notice_files", [])
+                    if str(notice_file).strip()
+                    and not (package_root / Path(str(notice_file))).is_file()
+                }
+            )
+            if missing_tray_notice_files:
+                raise ConanException(
+                    "Expected each declared tray-package notice file to exist in the packaged bundle: "
+                    + ", ".join(missing_tray_notice_files)
                 )
 
         self.run(f'"{squid_executable}" -v', env="conanrun")

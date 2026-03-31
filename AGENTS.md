@@ -23,10 +23,20 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - The tray app is a separate `.NET 8` WPF deliverable packaged through
   `conan\recipes\tray-app`.
 - WiX v4 MSI authoring and payload staging are committed.
+- Release automation now separates prerelease and stable GitHub release paths,
+  but both build from the root Conan recipe before payload staging and MSI
+  assembly.
+- The staged release bundle now carries harvested third-party notices for Squid,
+  the bundled native runtime DLL set, and the tray app's shipped NuGet package
+  dependency set.
 - The current repo state has been locally validated through native build,
   native install tree creation, portable zip creation, and MSI build.
-- Clean-host installer and installed-service lifecycle validation are still
-  pending.
+- The repository now includes committed GitHub Actions automation for a
+  runner-safe installed-service lifecycle path on isolated Windows runners with
+  unique temporary service names and isolated cleanup.
+- Cited successful execution of that workflow, clean-host installer upgrade
+  validation, and end-to-end installed-service plus tray-app lifecycle
+  validation are still pending.
 
 For detailed Conan toolchain, installer, and automation rationale, use
 `README.md` plus ADRs `0001` through `0005` instead of duplicating those
@@ -50,13 +60,18 @@ details here.
   `.\scripts\Update-SquidVersion.ps1`.
 - Keep docs truthful about what is committed, what has only been locally
   validated, and what is still unproven on a clean host.
-- Do not claim a finished MSI or installed-service lifecycle path unless you
-  actually validated it.
+- Do not claim successful runner-safe, clean-host, or tray-app lifecycle proof
+  beyond the committed automation and any explicitly cited successful
+  validation.
 - If installer behavior changes, keep `conanfile.py`,
   `scripts\Stage-ReleasePayload.ps1`, `scripts\Build-Installer.ps1`, and
   `packaging\wix\` synchronized.
+- If release workflow behavior changes, keep
+  `.github\workflows\build-release-artifacts.yml`,
+  `.github\workflows\prerelease.yml`, `.github\workflows\release.yml`, and
+  `.github\workflows\package-managers.yml` synchronized.
 - If native runtime DLL harvesting or MinGW-linked imports change, keep
-  `conandata.yml` and `conanfile.py` synchronized.
+  `conandata.yml`, `conanfile.py`, and the staged notice bundle synchronized.
 - Treat `.agents\skills\` as vendored third-party content and update it
   deliberately.
 - Prefer repo-relative paths and repo-local state; do not introduce

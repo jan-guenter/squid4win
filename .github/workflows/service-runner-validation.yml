@@ -1,0 +1,104 @@
+name: Service runner validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/service-runner-validation.yml'
+      - 'conan/**'
+      - 'conandata.yml'
+      - 'conanfile.py'
+      - 'packaging/**'
+      - 'scripts/**'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/service-runner-validation.yml'
+      - 'conan/**'
+      - 'conandata.yml'
+      - 'conanfile.py'
+      - 'packaging/**'
+      - 'scripts/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-runner-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  validate-installed-service:
+    name: Validate installed service
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Resolve build automation configuration
+        id: build-config
+        run: |
+          $layout = .\scripts\Resolve-SquidBuildLayout.ps1 -Configuration Release -RepositoryRoot $PWD.Path
+          $conanHome = .\scripts\Resolve-ConanHome.ps1 -RepositoryRoot $PWD.Path
+
+          "CONAN_HOME=$conanHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "conan_home=$conanHome" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "repo_lockfile_path=$($layout.RepoLockfilePath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Cache Conan home
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ steps.build-config.outputs.conan_home }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-conan-
+
+      - name: Install automation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r .\requirements-automation.txt
+
+      - name: Build Squid
+        run: |
+          .\scripts\Invoke-SquidBuild.ps1 `
+            -Configuration Release `
+            -RefreshLockfile `
+            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}' `
+            -WithTray `
+            -WithRuntimeDlls `
+            -WithPackagingSupport
+
+      - name: Smoke test Squid
+        run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release -RequireNotices
+
+      - name: Validate installed service lifecycle
+        run: .\scripts\Invoke-ServiceRunnerValidation.ps1 -Configuration Release -RepositoryRoot $PWD.Path
+
+      - name: Upload runner validation artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: service-runner-validation
+          path: artifacts\service-validation\**
+          if-no-files-found: ignore

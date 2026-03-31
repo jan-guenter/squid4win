@@ -1,0 +1,23 @@
+name: Prerelease
+
+on:
+  push:
+    tags:
+      - v*-*
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prerelease-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prerelease:
+    uses: ./.github/workflows/build-release-artifacts.yml
+    with:
+      artifact_name: squid4win-prerelease
+      release_channel: prerelease
+      prerelease: true
+      publish_github_release: ${{ github.event_name == 'push' }}

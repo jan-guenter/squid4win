@@ -35,6 +35,39 @@ build:
     - "libssl-3-x64.dll"
     - "libwinpthread-1.dll"
     - "libgnurx-0.dll"
+  runtime_notice_artifacts:
+    - id: "openssl"
+      name: "OpenSSL"
+      dependency: "msys2"
+      package: "mingw-w64-x86_64-openssl"
+      project_url: "https://openssl-library.org"
+      license: "spdx:Apache-2.0"
+      dlls:
+        - "libcrypto-3-x64.dll"
+        - "libssl-3-x64.dll"
+      license_files:
+        - "licenses\\libopenssl\\LICENSE.txt"
+    - id: "winpthreads"
+      name: "winpthreads"
+      dependency: "mingw-builds"
+      package: "mingw-w64-x86_64-libwinpthread"
+      project_url: "https://www.mingw-w64.org/"
+      license: "spdx:MIT AND BSD-3-Clause-Clear"
+      dlls:
+        - "libwinpthread-1.dll"
+      license_files:
+        - "licenses\\winpthreads\\COPYING"
+        - "licenses\\mingw-w64\\COPYING.MinGW-w64-runtime.txt"
+    - id: "libgnurx"
+      name: "libgnurx"
+      dependency: "mingw-builds"
+      package: "mingw-w64-x86_64-libgnurx"
+      project_url: "https://mingw.sourceforge.io/"
+      license: "LGPL"
+      dlls:
+        - "libgnurx-0.dll"
+      license_files:
+        - "licenses\\mingw-libgnurx\\COPYING.LIB"
   configure_cache:
     ac_cv_sizeof_void_p: "8"
     ac_cv_c_int8_t: "yes"

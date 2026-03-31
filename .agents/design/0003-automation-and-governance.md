@@ -24,6 +24,8 @@ rules:
 - allow auto-merge only after required checks and review policy succeed
 - keep release publishing behind explicit approval until signing and packaging
   are proven stable
+- keep prerelease artifact publication distinct from stable release publication
+  so preview builds do not silently trigger stable downstream distribution work
 - treat `.agents\design\*.md` files as required project memory for humans and
   agents
 - prefer multiple focused workflows over one monolithic pipeline
@@ -33,7 +35,8 @@ Expected workflow separation:
 - pull request validation
 - native Squid build
 - installer packaging
-- release or publish
+- prerelease publication
+- stable release or publish
 
 ## Rationale
 
@@ -60,6 +63,9 @@ Expected workflow separation:
 - Keep `.github\workflows\update-upstream.yml` and
   `.github\workflows\conan-update.yml` separate so upstream Squid bumps and
   Conan dependency refreshes remain independently diagnosable.
+- Keep `.github\workflows\prerelease.yml` separate from
+  `.github\workflows\release.yml`, even if they share a reusable artifact-build
+  workflow, so preview tags and stable tags remain independently diagnosable.
 - Keep auto-merge scoped to changes that have low operational risk and complete
   validation coverage.
 - Record workflow intent in documentation before YAML is added, then keep the

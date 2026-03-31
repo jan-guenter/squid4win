@@ -166,18 +166,53 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r .\requirements-automation.txt
 
-      - name: Build Squid
+      - name: Bootstrap root Conan workspace
         run: |
-          .\scripts\Invoke-SquidBuild.ps1 `
+          .\scripts\Invoke-ConanRootRecipe.ps1 `
+            -Operation Bootstrap `
             -Configuration Release `
-            -RefreshLockfile `
+            -RepositoryRoot $PWD.Path `
+            -WithTray `
+            -WithRuntimeDlls `
+            -WithPackagingSupport | Out-Null
+
+      - name: Refresh root Conan lockfile
+        run: |
+          .\scripts\Invoke-ConanRootRecipe.ps1 `
+            -Operation LockCreate `
+            -Configuration Release `
+            -RepositoryRoot $PWD.Path `
             -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}' `
             -WithTray `
             -WithRuntimeDlls `
-            -WithPackagingSupport
+            -WithPackagingSupport `
+            -SkipBootstrap | Out-Null
+
+      - name: Materialize root Conan sources
+        run: |
+          .\scripts\Invoke-ConanRootRecipe.ps1 `
+            -Operation Source `
+            -Configuration Release `
+            -RepositoryRoot $PWD.Path `
+            -WithTray `
+            -WithRuntimeDlls `
+            -WithPackagingSupport `
+            -SkipBootstrap | Out-Null
+
+      - name: Build root Conan recipe
+        run: |
+          .\scripts\Invoke-ConanRootRecipe.ps1 `
+            -Operation Build `
+            -Configuration Release `
+            -RepositoryRoot $PWD.Path `
+            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}' `
+            -WithTray `
+            -WithRuntimeDlls `
+            -WithPackagingSupport `
+            -SkipBootstrap | Out-Null
 
       - name: Smoke test Squid
-        run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release
+        run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release -RequireNotices
 
       - name: Summarize SonarCloud scanner mode
         if: ${{ vars.SONAR_CI_SCAN_ENABLED != 'true' }}

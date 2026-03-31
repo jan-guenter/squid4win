@@ -15,8 +15,16 @@ Windows layout:
   installed helper script `installer\svc.ps1`
 - the first install materializes `etc\squid.conf` from
   `packaging\defaults\squid.conf.template` if the file is not already present
+- `scripts\Build-Installer.ps1 -ServiceName ...` can override the default
+  service name so `.github\workflows\service-runner-validation.yml` can install
+  isolated temporary instances on Windows runners
+- the staged payload already includes the harvested third-party notice bundle
+  under `licenses\third-party\` before WiX harvests the file tree
 
 What is still pending:
 
-- expanding runtime license harvesting once the final DLL set is stable
+- cited successful execution of the dedicated runner lifecycle workflow,
+  clean-host confirmation that installer behavior matches it, plus upgrade
+  coverage
+- end-to-end installed service plus tray-app interaction on a clean host
 - richer UI and customization options if they are needed later

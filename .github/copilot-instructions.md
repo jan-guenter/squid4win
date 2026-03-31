@@ -15,16 +15,24 @@ Repo-specific directives:
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conandata.yml` aligned when the Squid pin changes. Prefer
   `.\scripts\Update-SquidVersion.ps1`.
+- Keep staged third-party notice harvesting under `licenses\third-party\`
+  synchronized between `conandata.yml`, the root `conanfile.py`, and
+  `conan\recipes\tray-app\conanfile.py` when shipped runtime DLLs or tray-app
+  package dependencies change.
 - Treat `.agents\design\*.md` as project memory. If an accepted design changes,
   update the ADR and preserve its alternatives/history sections.
 - Treat `.agents\skills\` as vendored third-party content and update it
   deliberately.
 - Do not copy GPL code from `diladele/squid-windows`. Architectural inspiration
   is acceptable; source reuse is not.
-- Do not imply clean-host installer validation or end-to-end installed-service
-  proof unless that validation actually happened.
+- Do not imply successful runner-safe installer validation, clean-host
+  installer validation, or more installed-service proof than the committed
+  automation and any explicitly cited successful runs.
 - Preserve current artifact names `squid4win.msi` and
   `squid4win-portable.zip` unless you also update the downstream packaging
   metadata flow.
+- Keep prerelease and stable GitHub release workflows distinct; prereleases
+  stop at GitHub prerelease assets, while stable published releases drive
+  downstream package-manager metadata.
 - Keep live feed publication credential-gated.
 - Never commit secrets or machine-specific paths.

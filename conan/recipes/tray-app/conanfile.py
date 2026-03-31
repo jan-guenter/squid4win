@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from conan import ConanFile
@@ -23,13 +26,14 @@ class Squid4WinTrayConan(ConanFile):
     def export(self) -> None:
         repository_root = Path(self.recipe_folder).parents[2]
         project_root = repository_root / "src" / "tray" / self.PROJECT_NAME
+        build_support_root = Path(self.export_folder) / "build-support"
 
-        copy(
-            self,
-            self.DIRECTORY_BUILD_PROPS_FILE,
-            src=os.fspath(repository_root),
-            dst=os.path.join(self.export_folder, "build-support"),
+        build_support_root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(
+            repository_root / self.DIRECTORY_BUILD_PROPS_FILE,
+            build_support_root / self.DIRECTORY_BUILD_PROPS_FILE,
         )
+
         copy(
             self,
             "LICENSE",
@@ -78,15 +82,12 @@ class Squid4WinTrayConan(ConanFile):
         exported_directory_build_props = (
             Path(self.recipe_folder) / "build-support" / self.DIRECTORY_BUILD_PROPS_FILE
         )
-        local_directory_build_props = (
-            Path(self.recipe_folder).parents[2] / self.DIRECTORY_BUILD_PROPS_FILE
-        )
+        if not exported_directory_build_props.is_file():
+            raise ConanException(
+                f"Exported {self.DIRECTORY_BUILD_PROPS_FILE} is missing at {exported_directory_build_props}."
+            )
         shutil.copy2(
-            (
-                exported_directory_build_props
-                if exported_directory_build_props.is_file()
-                else local_directory_build_props
-            ),
+            exported_directory_build_props,
             source_root / self.DIRECTORY_BUILD_PROPS_FILE,
         )
 
@@ -142,6 +143,7 @@ class Squid4WinTrayConan(ConanFile):
 
     def package(self) -> None:
         publish_root = Path(self.build_folder) / "publish"
+        package_root = Path(self.package_folder)
         exported_license_path = Path(self.recipe_folder) / "build-support" / "LICENSE"
         local_license_path = Path(self.recipe_folder).parents[2] / "LICENSE"
         copy(
@@ -161,9 +163,207 @@ class Squid4WinTrayConan(ConanFile):
             dst=os.path.join(self.package_folder, "licenses"),
         )
 
+        third_party_packages = self._harvest_published_package_notices(
+            publish_root, package_root
+        )
+        manifest_path = package_root / "licenses" / "third-party-package-manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "generated_at": datetime.now(timezone.utc)
+                    .isoformat(timespec="seconds")
+                    .replace("+00:00", "Z"),
+                    "packages": third_party_packages,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     def package_info(self) -> None:
         self.cpp_info.bindirs = ["bin"]
         self.runenv_info.prepend_path(
             "PATH", os.path.join(self.package_folder, "bin")
         )
 
+    def _harvest_published_package_notices(
+        self, publish_root: Path, package_root: Path
+    ) -> list[dict[str, object]]:
+        deps_path = publish_root / f"{self.PROJECT_NAME}.deps.json"
+        if not deps_path.is_file():
+            raise ConanException(
+                f"Expected the published deps manifest at {deps_path}."
+            )
+
+        deps_data = json.loads(deps_path.read_text(encoding="utf-8"))
+        runtime_target_name = (
+            str(deps_data.get("runtimeTarget", {}).get("name", "")).strip()
+        )
+        runtime_target = dict(deps_data.get("targets", {}).get(runtime_target_name, {}))
+        global_packages_root = self._nuget_global_packages_root()
+        third_party_packages: list[dict[str, object]] = []
+        for library_name, library_data in sorted(
+            dict(deps_data.get("libraries", {})).items()
+        ):
+            if str(library_data.get("type", "")).strip().lower() != "package":
+                continue
+
+            target_entry = dict(runtime_target.get(library_name, {}))
+            shipped_assets = self._deduplicate(
+                [
+                    str(asset_path).replace("\\", "/")
+                    for asset_path in (
+                        list(dict(target_entry.get("runtime", {})).keys())
+                        + list(dict(target_entry.get("runtimeTargets", {})).keys())
+                    )
+                    if str(asset_path).strip()
+                ]
+            )
+            if not shipped_assets:
+                continue
+
+            package_id, _, package_version = library_name.partition("/")
+            if not package_id or not package_version:
+                raise ConanException(
+                    f"Unexpected NuGet library key '{library_name}' in {deps_path}."
+                )
+
+            package_path_value = str(library_data.get("path", "")).strip()
+            if not package_path_value:
+                raise ConanException(
+                    f"The deps manifest did not declare a package path for '{library_name}'."
+                )
+
+            package_path = global_packages_root / Path(
+                package_path_value.replace("/", os.sep)
+            )
+            if not package_path.is_dir():
+                raise ConanException(
+                    f"Expected the NuGet package cache directory for '{library_name}' at {package_path}."
+                )
+
+            package_metadata = self._read_nuget_package_metadata(package_path)
+            notice_files = self._copy_nuget_notice_files(
+                package_path, package_root, package_id
+            )
+            third_party_packages.append(
+                {
+                    "id": package_id,
+                    "version": package_version,
+                    "license": package_metadata.get("license", ""),
+                    "project_url": package_metadata.get("project_url", ""),
+                    "shipped_assets": shipped_assets,
+                    "notice_files": notice_files,
+                }
+            )
+
+        return third_party_packages
+
+    def _nuget_global_packages_root(self) -> Path:
+        configured_packages_root = os.getenv("NUGET_PACKAGES", "").strip()
+        if configured_packages_root:
+            packages_root = Path(configured_packages_root)
+            if packages_root.is_dir():
+                return packages_root
+
+        result = subprocess.run(
+            ["dotnet", "nuget", "locals", "global-packages", "--list"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise ConanException(
+                f"dotnet nuget locals failed with exit code {result.returncode}: {result.stderr.strip()}"
+            )
+
+        for output_line in (result.stdout or "").splitlines():
+            if ":" not in output_line:
+                continue
+
+            label, _, value = output_line.partition(":")
+            if label.strip().lower() != "global-packages":
+                continue
+
+            packages_root = Path(value.strip())
+            if packages_root.is_dir():
+                return packages_root
+
+        raise ConanException(
+            "Unable to resolve the NuGet global-packages cache location for tray dependency notice harvesting."
+        )
+
+    @staticmethod
+    def _read_nuget_package_metadata(package_path: Path) -> dict[str, str]:
+        nuspec_path = next(package_path.glob("*.nuspec"), None)
+        if nuspec_path is None or not nuspec_path.is_file():
+            return {}
+
+        nuspec_text = nuspec_path.read_text(encoding="utf-8")
+
+        def metadata_text(name: str) -> str:
+            match = re.search(
+                rf"<{name}\b[^>]*>(.*?)</{name}>",
+                nuspec_text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if match is None:
+                return ""
+            return match.group(1).strip()
+
+        return {
+            "license": metadata_text("license") or metadata_text("licenseUrl"),
+            "project_url": metadata_text("projectUrl"),
+        }
+
+    def _copy_nuget_notice_files(
+        self, package_path: Path, package_root: Path, package_id: str
+    ) -> list[str]:
+        notice_candidates: list[Path] = []
+        seen_paths: set[str] = set()
+        for pattern in ("LICENSE*", "NOTICE*", "THIRD-PARTY-NOTICES*"):
+            for candidate in sorted(package_path.glob(pattern)):
+                if not candidate.is_file():
+                    continue
+
+                candidate_key = os.path.normcase(os.fspath(candidate))
+                if candidate_key in seen_paths:
+                    continue
+
+                seen_paths.add(candidate_key)
+                notice_candidates.append(candidate)
+
+        if not notice_candidates:
+            raise ConanException(
+                f"Unable to locate license or notice files in the NuGet package cache for '{package_id}' at {package_path}."
+            )
+
+        destination_root = (
+            package_root
+            / "licenses"
+            / "third-party"
+            / "nuget"
+            / package_id
+        )
+        destination_root.mkdir(parents=True, exist_ok=True)
+        copied_notice_files: list[str] = []
+        for source_path in notice_candidates:
+            destination_path = destination_root / source_path.name
+            shutil.copy2(source_path, destination_path)
+            copied_notice_files.append(
+                os.fspath(destination_path.relative_to(package_root)).replace(
+                    "\\", "/"
+                )
+            )
+
+        return copied_notice_files
+
+    @staticmethod
+    def _deduplicate(values: list[str]) -> list[str]:
+        deduplicated_values: list[str] = []
+        for value in values:
+            if value not in deduplicated_values:
+                deduplicated_values.append(value)
+
+        return deduplicated_values

@@ -61,6 +61,7 @@ permissions:
 jobs:
   generate:
     name: Generate feed metadata
+    if: ${{ github.event_name != 'release' || github.event.release.prerelease != true }}
     runs-on: windows-2022
     outputs:
       repository: ${{ steps.release.outputs.repository }}

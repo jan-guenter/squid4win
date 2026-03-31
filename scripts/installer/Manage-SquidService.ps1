@@ -44,7 +44,89 @@ function Test-SquidServiceRegistration {
         [string]$Name
     )
 
-    return $null -ne (Get-Service -Name $Name -ErrorAction SilentlyContinue)
+    return $null -ne (Get-SquidServiceInstance -Name $Name)
+}
+
+function Get-SquidServiceController {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    return Get-Service -Name $Name -ErrorAction SilentlyContinue
+}
+
+function Get-SquidServiceInstance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $escapedName = $Name.Replace("'", "''")
+    return Get-CimInstance -ClassName Win32_Service -Filter "Name = '$escapedName'" -ErrorAction SilentlyContinue
+}
+
+function Wait-SquidServiceRegistrationState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [Parameter(Mandatory = $true)]
+        [bool]$Present,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        if ((Test-SquidServiceRegistration -Name $Name) -eq $Present) {
+            return
+        }
+
+        Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+
+    $expectedState = if ($Present) { 'visible' } else { 'absent' }
+    throw "The Squid Windows service '$Name' did not become $expectedState within $TimeoutSeconds seconds."
+}
+
+function Stop-SquidServiceIfRunning {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $service = Get-SquidServiceController -Name $Name
+    if ($null -eq $service) {
+        return $false
+    }
+
+    try {
+        $service.Refresh()
+        if ($service.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+            return $false
+        }
+
+        if ($service.Status -eq [System.ServiceProcess.ServiceControllerStatus]::StopPending) {
+            $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds($TimeoutSeconds))
+            return $true
+        }
+
+        if (-not $service.CanStop) {
+            throw "The Squid Windows service '$Name' is registered but Windows reported that it cannot be stopped."
+        }
+
+        if ($PSCmdlet.ShouldProcess($Name, 'Stop Squid Windows service')) {
+            Stop-Service -Name $Name -ErrorAction Stop
+        }
+        $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds($TimeoutSeconds))
+        return $true
+    }
+    finally {
+        if ($service -is [System.IDisposable]) {
+            $service.Dispose()
+        }
+    }
 }
 
 function Initialize-SquidConfiguration {
@@ -103,16 +185,18 @@ switch ($Action) {
 
         if (Test-SquidServiceRegistration -Name $ServiceName) {
             Write-Host "Removing existing service registration for $ServiceName before reinstalling it."
+            if (Stop-SquidServiceIfRunning -Name $ServiceName) {
+                Write-Host "Stopped Squid Windows service '$ServiceName' before removing the existing registration."
+            }
             Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $ServiceName)
+            Wait-SquidServiceRegistrationState -Name $ServiceName -Present $false
         }
 
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-k', 'parse', '-f', $configPath)
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-z', '-f', $configPath)
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $ServiceName, '-f', $configPath)
 
-        if (-not (Test-SquidServiceRegistration -Name $ServiceName)) {
-            throw "The Squid Windows service '$ServiceName' was not visible after installation."
-        }
+        Wait-SquidServiceRegistrationState -Name $ServiceName -Present $true
 
         Write-Host "Installed Squid Windows service '$ServiceName' using $configPath."
     }
@@ -123,7 +207,11 @@ switch ($Action) {
             return
         }
 
+        if (Stop-SquidServiceIfRunning -Name $ServiceName) {
+            Write-Host "Stopped Squid Windows service '$ServiceName' before removal."
+        }
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $ServiceName)
+        Wait-SquidServiceRegistrationState -Name $ServiceName -Present $false
         Write-Host "Removed Squid Windows service '$ServiceName'."
     }
 }

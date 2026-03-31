@@ -22,8 +22,15 @@ The automation baseline is:
 - run SonarQube analysis from CI after the native Windows build and smoke tests
 - enforce the Sonar quality gate on pull requests and mainline builds
 - keep the Sonar host configurable, with a default compatible with SonarCloud
+- add installed-service lifecycle validation automation in a dedicated Windows
+  workflow that builds an MSI with a unique temporary service name, installs it
+  under an isolated root, starts and stops the service, and uninstalls it with
+  cleanup
 - exclude generated outputs, local caches, and vendored `.agents\skills\`
   content from scan scope
+- keep prerelease artifact publication separate from stable release publication,
+  and do not auto-generate downstream package-manager metadata from prerelease
+  GitHub releases
 - generate winget, Chocolatey, and Scoop metadata from released artifacts in a
   dedicated workflow
 - keep live publication in a separate manual workflow that reuses that
@@ -36,6 +43,11 @@ The automation baseline is:
 - The native Windows build is the highest-value validation path, so quality
   analysis should attach to that pipeline instead of a disconnected static-only
   job.
+- Installed-service lifecycle validation needs service control and MSI cleanup,
+  so it should stay in a dedicated workflow instead of being bolted onto the
+  shared CI job that other changes may edit concurrently.
+- Unique temporary service names keep runner validation isolated from any other
+  service registration on the same machine.
 - Quality gates help keep automated version bumps and dependency updates from
   silently degrading maintainability.
 - Package-manager metadata should be generated from the real release artifacts so
@@ -46,8 +58,13 @@ The automation baseline is:
 ## Consequences
 
 - CI now owns both native build health and the Sonar quality signal.
+- Quality automation now also owns a dedicated Windows runner automation path
+  for MSI install/register/start/stop/uninstall exercises with explicit
+  cleanup.
 - Release automation must preserve stable artifact names because downstream
   package metadata generation depends on them.
+- Preview releases stop at GitHub prerelease assets; downstream package-manager
+  metadata remains a stable-release concern.
 - Feed publication now stays tied to the generated metadata, but it runs only
   from the dedicated manual publication workflow instead of the metadata
   workflow itself.
@@ -57,9 +74,17 @@ The automation baseline is:
 ## Implementation notes
 
 - Keep the Sonar scope in `sonar-project.properties`.
+- Keep `scripts\Invoke-ServiceRunnerValidation.ps1` responsible for generating a
+  unique temporary service name, staging an isolated validation root, invoking
+  the MSI, and cleaning up leftover runner state.
+- Keep `.github\workflows\service-runner-validation.yml` responsible for the
+  isolated Windows runner lifecycle validation path.
 - Keep feed metadata generation in `scripts\Export-PackageManagerMetadata.ps1`.
 - Keep the package-manager publish helpers under `scripts\` responsible for the
   credential-gated winget, Chocolatey, and Scoop hand-off steps.
+- Keep `.github\workflows\package-managers.yml` scoped to stable published
+  releases; prerelease workflows should stop after GitHub prerelease asset
+  publication.
 - Keep `.github\workflows\package-managers.yml` responsible for downloading
   release assets and generating feed metadata from those real binaries.
 - Keep `.github\workflows\package-manager-publish.yml` responsible for the
