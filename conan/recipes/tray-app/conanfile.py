@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from conan import ConanFile
 from conan.errors import ConanException, ConanInvalidConfiguration
-from conan.tools.env import VirtualBuildEnv, VirtualRunEnv
 from conan.tools.files import copy
 
 
@@ -101,10 +101,6 @@ class Squid4WinTrayConan(ConanFile):
                 "The tray app package only supports x86_64."
             )
 
-    def generate(self) -> None:
-        VirtualBuildEnv(self).generate()
-        VirtualRunEnv(self).generate()
-
     def build(self) -> None:
         project_path = (
             Path(self.source_folder)
@@ -117,15 +113,26 @@ class Squid4WinTrayConan(ConanFile):
 
         shutil.rmtree(publish_root, ignore_errors=True)
 
-        self.run(
-            "dotnet publish "
-            f'"{project_path}" '
-            f"-c {self.settings.build_type} "
-            f'-o "{publish_root}" '
-            "--nologo "
-            "-p:SelfContained=false "
-            "-p:PublishSingleFile=false"
+        publish_command = [
+            "dotnet",
+            "publish",
+            os.fspath(project_path),
+            "-c",
+            str(self.settings.build_type),
+            "-o",
+            os.fspath(publish_root),
+            "--nologo",
+            "-p:SelfContained=false",
+            "-p:PublishSingleFile=false",
+        ]
+        self.output.info(
+            "RUN: " + subprocess.list2cmdline(publish_command)
         )
+        result = subprocess.run(publish_command, check=False)
+        if result.returncode != 0:
+            raise ConanException(
+                f"dotnet publish failed with exit code {result.returncode}."
+            )
 
         tray_executable = publish_root / f"{self.PROJECT_NAME}.exe"
         if not tray_executable.is_file():
