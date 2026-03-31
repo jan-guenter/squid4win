@@ -58,6 +58,9 @@ class Squid4WinRecipeBase:
     def _configuration_label(self) -> str:
         return str(self.settings.build_type).lower()
 
+    def _generators_folder(self) -> str:
+        return os.path.join("build", self._configuration_label(), "conan")
+
     def _build_setting(self, key: str, default: object | None = None) -> object:
         return self._build_settings().get(key, default)
 

@@ -30,11 +30,6 @@ build:
     threads: "posix"
     exception: "seh"
     runtime: "ucrt"
-  compiler:
-    cppstd: "gnu17"
-    libcxx: "libstdc++11"
-    exception: "seh"
-    threads: "posix"
   runtime_dlls:
     - "libcrypto-3-x64.dll"
     - "libssl-3-x64.dll"

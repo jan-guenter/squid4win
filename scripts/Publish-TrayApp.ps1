@@ -10,20 +10,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Get-AbsolutePath {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$BasePath
-    )
-
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-
-    return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
-}
+. (Join-Path $PSScriptRoot 'Get-AbsolutePath.ps1')
 
 function Get-TrayPackageReference {
     param(
@@ -139,7 +126,8 @@ if (-not (Test-Path -LiteralPath $resolvedRecipePath)) {
     throw "Expected the tray recipe at $resolvedRecipePath."
 }
 
-& (Join-Path $PSScriptRoot 'Resolve-ConanHome.ps1') -RepositoryRoot $resolvedRepositoryRoot -EnsureExists -SetEnvironment | Out-Null
+$conanHome = & (Join-Path $PSScriptRoot 'Resolve-ConanHome.ps1') -RepositoryRoot $resolvedRepositoryRoot -EnsureExists
+$env:CONAN_HOME = $conanHome
 & (Join-Path $PSScriptRoot 'Export-ConanWorkspaceRecipes.ps1') -RepositoryRoot $resolvedRepositoryRoot | Out-Null
 
 & $conanCommand.Source create $resolvedRecipePath `

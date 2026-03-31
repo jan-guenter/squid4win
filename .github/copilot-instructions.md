@@ -1,38 +1,30 @@
 # GitHub Copilot instructions for squid4win
 
-Before changing this repository, read `README.md`, `AGENTS.md`, and the ADRs
-under `.agents\design\`.
+Start with `README.md`, `AGENTS.md`, and the ADRs under `.agents\design\`.
+Those files are the source of truth for repository state, contributor guidance,
+and validation status. Do not duplicate their general rules here.
 
-Key repository rules:
+Repo-specific directives:
 
-- Keep `config\squid-version.json` and `conan\squid-release.json` synchronized.
-  Prefer `scripts\Update-SquidVersion.ps1` over editing only one file.
+- Preserve the Conan-first Windows path: the root `conanfile.py` owns Squid
+  source retrieval, patch application, native MSYS2/MinGW build, and staged
+  bundle assembly.
+- Keep the tray app as a separate Conan-packaged `.NET 8` WPF deliverable; do
+  not reintroduce an ad hoc primary packaging path.
+- Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
+- Keep `config\squid-version.json`, `conan\squid-release.json`, and
+  `conandata.yml` aligned when the Squid pin changes. Prefer
+  `.\scripts\Update-SquidVersion.ps1`.
+- Treat `.agents\design\*.md` as project memory. If an accepted design changes,
+  update the ADR and preserve its alternatives/history sections.
+- Treat `.agents\skills\` as vendored third-party content and update it
+  deliberately.
 - Do not copy GPL code from `diladele/squid-windows`. Architectural inspiration
   is acceptable; source reuse is not.
-- Preserve the currently proven native Windows build path:
-  `MSYS2 + MinGW-w64 + PowerShell orchestration + WiX packaging`.
-- Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
-- Treat `.agents\skills\` as vendored third-party content. Update it
-  intentionally with `npx skills add -a github-copilot -y <repo> --skill <skill>`
-  instead of hand-editing skill files.
-- If you change workflows, build scripts, review guidance, or upgrade guidance,
-  update `README.md`, `AGENTS.md`, and any affected files under
-  `.github\instructions\` in the same change.
-- If you change an accepted architectural decision, update the relevant ADR under
-  `.agents\design\`.
-- Never commit secrets or copy values from `.env`.
-
-Release and packaging rules:
-
-- Preserve the current artifact names `squid4win.msi` and
-  `squid4win-portable.zip` unless you also update the downstream package-manager
-  metadata generation flow.
-- Keep Sonar exclusions aligned with the repository layout, especially generated
-  directories and vendored skills.
-- Keep package-manager publication credential-gated. Generating manifests is
-  safe; live publication should only run through the documented secret-gated
-  workflow path.
-- If you change feed metadata generation or publication, keep
-  `scripts\Export-PackageManagerMetadata.ps1`, the package-manager publish
-  helpers under `scripts\`, `.github\workflows\package-managers.yml`, and
-  `.github\workflows\package-manager-publish.yml` synchronized.
+- Do not imply clean-host installer validation or end-to-end installed-service
+  proof unless that validation actually happened.
+- Preserve current artifact names `squid4win.msi` and
+  `squid4win-portable.zip` unless you also update the downstream packaging
+  metadata flow.
+- Keep live feed publication credential-gated.
+- Never commit secrets or machine-specific paths.

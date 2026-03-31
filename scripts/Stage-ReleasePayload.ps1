@@ -5,7 +5,6 @@ param(
     [string]$RepositoryRoot = (Join-Path $PSScriptRoot '..'),
     [string]$BuildRoot = 'build',
     [string]$SquidStageRoot,
-    [string]$TrayPublishRoot,
     [string]$ArtifactRoot = (Join-Path $PSScriptRoot '..\artifacts'),
     [switch]$CreatePortableZip,
     [switch]$RequireTray,
@@ -13,18 +12,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-function Get-AbsolutePath {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$BasePath
-    )
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
-}
+. (Join-Path $PSScriptRoot 'Get-AbsolutePath.ps1')
 function Copy-DirectoryContent {
     param(
         [Parameter(Mandatory = $true)]
@@ -48,9 +36,6 @@ $resolvedSquidStageRoot = if ($SquidStageRoot) {
     Get-AbsolutePath -Path $SquidStageRoot -BasePath $resolvedRepositoryRoot
 } else {
     [string]$layout.StageRoot
-}
-if ($TrayPublishRoot) {
-    Write-Host 'TrayPublishRoot is deprecated; the Conan-built stage root already includes the tray payload when the recipe option is enabled.'
 }
 if (-not (Test-Path -LiteralPath $resolvedSquidStageRoot)) {
     throw "The staged Conan bundle root '$resolvedSquidStageRoot' does not exist."
@@ -96,6 +81,5 @@ if ($CreatePortableZip) {
     InstallPayloadRoot = $installPayloadRoot
     PortableZipPath = if ($CreatePortableZip) { $portableZipPath } else { $null }
     NoticesPath = if (Test-Path -LiteralPath $noticesPath) { $noticesPath } else { $null }
-    TrayExecutablePath = if (Test-Path -LiteralPath $trayExecutablePath) { $trayExecutablePath } else { $null }
     SquidExecutablePath = $stagedSquidExecutablePath
 }

@@ -9,6 +9,10 @@
   },
   "globs": [
     "**/*.md",
+    "!.conan2/**/*.md",
+    "!artifacts/**/*.md",
+    "!build/**/*.md",
+    "!sources/**/*.md",
     "!.agents/skills/**/*.md",
     "!LICENSE"
   ]

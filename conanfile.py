@@ -78,7 +78,7 @@ class Squid4WinConan(ConanFile):
         configuration_label = self._configuration_label()
         self.folders.source = os.path.join("sources", f"squid-{self.version}")
         self.folders.build = os.path.join("build", configuration_label)
-        self.folders.generators = os.path.join("build", configuration_label, "conan")
+        self.folders.generators = self._generators_folder()
 
     def validate(self) -> None:
         self._validate_native_windows()

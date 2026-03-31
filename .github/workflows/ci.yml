@@ -64,7 +64,7 @@ jobs:
             Write-Host 'No C# files detected; skipping dotnet format.'
             exit 0
           }
-          dotnet format whitespace --folder . --verify-no-changes --verbosity minimal
+          dotnet format whitespace .\Squid4Win.slnx --verify-no-changes --verbosity minimal
 
   build-tray:
     name: Build tray app

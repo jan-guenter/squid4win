@@ -48,7 +48,7 @@ class Squid4WinTrayConan(ConanFile):
         configuration_label = self._configuration_label()
         self.folders.source = "source"
         self.folders.build = os.path.join("build", configuration_label)
-        self.folders.generators = os.path.join("build", configuration_label, "conan")
+        self.folders.generators = self._generators_folder()
 
     def source(self) -> None:
         source_root = Path(self.source_folder)

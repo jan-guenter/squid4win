@@ -18,6 +18,5 @@ Windows layout:
 
 What is still pending:
 
-- validating the MSI against a fully successful native Squid stage
 - expanding runtime license harvesting once the final DLL set is stable
 - richer UI and customization options if they are needed later
