@@ -22,7 +22,7 @@ jobs:
       REQUESTED_MAJOR_VERSION: ${{ github.event.inputs.major_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Update Squid version metadata
         id: update
@@ -38,7 +38,7 @@ jobs:
 
       - name: Create pull request
         if: ${{ steps.update.outputs.changed == 'true' }}
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: automation/update-squid-release
           delete-branch: true
