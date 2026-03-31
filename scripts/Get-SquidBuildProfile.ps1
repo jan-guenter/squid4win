@@ -18,6 +18,7 @@ $requiredProperties = @(
     'conanHome',
     'conanProfileName',
     'conanToolRequirements',
+    'conanDependencyMode',
     'conanRequirements',
     'stageRoot',
     'requiredMsys2Packages',

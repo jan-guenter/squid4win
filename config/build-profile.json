@@ -34,6 +34,7 @@
   "conanToolRequirements": [
     "mingw-builds/15.1.0"
   ],
+  "conanDependencyMode": "metadata-only",
   "conanRequirements": [
     "openssl/3.6.1",
     "pcre2/10.44",

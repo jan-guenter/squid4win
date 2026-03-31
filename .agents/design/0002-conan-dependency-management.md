@@ -69,7 +69,8 @@ hide build behavior in global user state.
   foundational native toolchain and core package installation, while Conan now
   records `mingw-builds` and the core `openssl`/`pcre2`/`libxml2`/`zlib`
   dependency references as the versioned source of truth the native path is
-  converging toward.
+  converging toward, with those runtime-library refs staying metadata-only until
+  a fully Conan-managed MinGW dependency path is validated.
 - Lockfile automation exists now, but reproducibility claims should stay modest
   until a resolved lockfile is generated and validated as part of the evolving
   native build path.

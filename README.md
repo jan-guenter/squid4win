@@ -178,7 +178,10 @@ library intent used by the native build:
 
 MSYS2 remains the currently proven bootstrap and install mechanism. The Conan
 graph is the reviewable source of truth for versioned toolchain intent while the
-repo continues validating deeper Conan ownership of the native path.
+repo continues validating deeper Conan ownership of the native path. The default
+`conanDependencyMode` is currently `metadata-only`, so the native MSYS2 build
+records the core library refs without asking the main CI path to compile those
+third-party packages yet.
 
 Local build and lockfile flow:
 

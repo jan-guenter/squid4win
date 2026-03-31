@@ -38,6 +38,8 @@ class Squid4WinBuildConan(ConanFile):
             )
 
     def requirements(self) -> None:
+        if self._conan_dependency_mode() != "managed":
+            return
         for reference in self._string_list(
             self._build_profile().get("conanRequirements", [])
         ):
@@ -75,6 +77,9 @@ class Squid4WinBuildConan(ConanFile):
         release_env.define(
             "SQUID_CONAN_TOOL_REQUIREMENTS", ";".join(conan_tool_requirements)
         )
+        release_env.define(
+            "SQUID_CONAN_DEPENDENCY_MODE", self._conan_dependency_mode()
+        )
         release_env.vars(self, scope="build").save_script("squid-release")
 
         toolchain = AutotoolsToolchain(self)
@@ -87,6 +92,14 @@ class Squid4WinBuildConan(ConanFile):
     def _build_profile(self) -> dict[str, object]:
         build_profile_path = Path(self.recipe_folder) / "config" / "build-profile.json"
         return json.loads(load(self, str(build_profile_path)))
+
+    def _conan_dependency_mode(self) -> str:
+        mode = str(self._build_profile().get("conanDependencyMode", "managed")).strip()
+        if mode not in {"managed", "metadata-only"}:
+            raise ConanInvalidConfiguration(
+                f"Unsupported conanDependencyMode '{mode}'."
+            )
+        return mode
 
     @staticmethod
     def _string_list(values: object) -> list[str]:
