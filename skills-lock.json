@@ -61,6 +61,11 @@
       "sourceType": "github",
       "computedHash": "e49127ff2162330ac79bfde9e7ed1297df15be9ade09164fdebfe697153fcc36"
     },
+    "powershell-master": {
+      "source": "josiahsiegel/claude-plugin-marketplace",
+      "sourceType": "github",
+      "computedHash": "41fd5bd37392f49afab038a9e82ab9e749ba63bdf25881763ccdbdfbdf5f32ea"
+    },
     "prd": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
