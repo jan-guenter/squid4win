@@ -126,6 +126,10 @@ jobs:
 
       - name: Detect MSI packaging inputs
         id: packaging
+        env:
+          RELEASE_CHANNEL: ${{ inputs.release_channel }}
+          PUBLISH_GITHUB_RELEASE: ${{ inputs.publish_github_release }}
+          RELEASE_IS_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           $wixProjectPath = Join-Path $PWD.Path 'packaging\wix\Squid4Win.Installer.wixproj'
           $hasWixSources = Test-Path -LiteralPath $wixProjectPath
@@ -135,9 +139,9 @@ jobs:
             $summaryLines = @(
               '## Packaging',
               '',
-              ('- Channel: `{0}`' -f '${{ inputs.release_channel }}'),
-              ('- GitHub release publication: `{0}`' -f '${{ inputs.publish_github_release }}'),
-              ('- Prerelease channel: `{0}`' -f '${{ inputs.prerelease }}'),
+              ('- Channel: `{0}`' -f $env:RELEASE_CHANNEL),
+              ('- GitHub release publication: `{0}`' -f $env:PUBLISH_GITHUB_RELEASE),
+              ('- Prerelease channel: `{0}`' -f $env:RELEASE_IS_PRERELEASE),
               ('- WiX source present: `{0}`' -f $hasWixSources),
               ('- Installer project: `{0}`' -f $wixProjectPath)
             )
