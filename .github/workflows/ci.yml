@@ -58,13 +58,14 @@ jobs:
       - name: Lint C#
         shell: pwsh
         run: |
-          $csharpFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Include *.cs,*.csproj,*.sln -File |
+          $csharpFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Include *.cs,*.csproj,*.sln,*.slnx -File |
             Where-Object { $_.FullName -notmatch '[/\\](bin|obj)[/\\]' }
           if ($csharpFiles.Count -eq 0) {
             Write-Host 'No C# files detected; skipping dotnet format.'
             exit 0
           }
-          dotnet format whitespace .\Squid4Win.slnx --verify-no-changes --verbosity minimal
+          $solutionPath = Join-Path $env:GITHUB_WORKSPACE 'Squid4Win.slnx'
+          dotnet format whitespace $solutionPath --verify-no-changes --verbosity minimal
 
   build-tray:
     name: Build tray app
