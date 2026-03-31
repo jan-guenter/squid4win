@@ -25,17 +25,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
 
@@ -75,10 +75,10 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -94,12 +94,12 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -120,7 +120,7 @@ jobs:
           "msys2_packages=$((@($buildProfile.requiredMsys2Packages | ForEach-Object { [string]$_ }) -join ' '))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Cache Conan home
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ steps.build-config.outputs.conan_home }}
           key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conan/**', 'requirements-automation.txt') }}
@@ -209,7 +209,7 @@ jobs:
 
       - name: Run SonarQube scan for pull requests
         if: ${{ github.event_name == 'pull_request' && secrets.SONAR_TOKEN != '' && secrets.COPILOT_MCP_SONARQUBE_ORG != '' && vars.SONAR_PROJECT_KEY != '' }}
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
@@ -224,7 +224,7 @@ jobs:
 
       - name: Run SonarQube scan for branches
         if: ${{ github.event_name != 'pull_request' && secrets.SONAR_TOKEN != '' && secrets.COPILOT_MCP_SONARQUBE_ORG != '' && vars.SONAR_PROJECT_KEY != '' }}
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
@@ -244,7 +244,7 @@ jobs:
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: squid-msys2-build
           path: |

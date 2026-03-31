@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -40,7 +40,7 @@ jobs:
           "msys2_packages=$((@($buildProfile.requiredMsys2Packages | ForEach-Object { [string]$_ }) -join ' '))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Cache Conan home
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ steps.build-config.outputs.conan_home }}
           key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conan/**', 'requirements-automation.txt') }}
@@ -121,7 +121,7 @@ jobs:
             -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}'
 
       - name: Open or update pull request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: automation/update-conan-lockfile
           delete-branch: true
