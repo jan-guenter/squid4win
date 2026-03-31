@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
@@ -40,7 +40,7 @@ jobs:
           "msys2_packages=$((@($buildProfile.requiredMsys2Packages | ForEach-Object { [string]$_ }) -join ' '))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Cache Conan home
-        uses: actions/cache@v5
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ${{ steps.build-config.outputs.conan_home }}
           key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
@@ -54,7 +54,7 @@ jobs:
 
       - name: Setup MSYS2
         id: msys2
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2
         with:
           update: true
           msystem: MINGW64
@@ -121,7 +121,7 @@ jobs:
             -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}'
 
       - name: Open or update pull request
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8
         with:
           branch: automation/update-conan-lockfile
           delete-branch: true

@@ -11,6 +11,8 @@ from conan.tools.files import copy
 
 
 class Squid4WinTrayConan(ConanFile):
+    PROJECT_NAME = "Squid4Win.Tray"
+    DIRECTORY_BUILD_PROPS_FILE = "Directory.Build.props"
     name = "squid4win_tray"
     version = "0.1"
     package_type = "application"
@@ -20,11 +22,11 @@ class Squid4WinTrayConan(ConanFile):
 
     def export(self) -> None:
         repository_root = Path(self.recipe_folder).parents[2]
-        project_root = repository_root / "src" / "tray" / "Squid4Win.Tray"
+        project_root = repository_root / "src" / "tray" / self.PROJECT_NAME
 
         copy(
             self,
-            "Directory.Build.props",
+            self.DIRECTORY_BUILD_PROPS_FILE,
             src=os.fspath(repository_root),
             dst=os.path.join(self.export_folder, "build-support"),
         )
@@ -38,9 +40,7 @@ class Squid4WinTrayConan(ConanFile):
             self,
             "*",
             src=os.fspath(project_root),
-            dst=os.path.join(
-                self.export_folder, "src", "tray", "Squid4Win.Tray"
-            ),
+            dst=os.path.join(self.export_folder, "src", "tray", self.PROJECT_NAME),
             excludes=("bin/*", "obj/*"),
         )
 
@@ -55,12 +55,12 @@ class Squid4WinTrayConan(ConanFile):
         shutil.rmtree(source_root, ignore_errors=True)
         source_root.mkdir(parents=True, exist_ok=True)
 
-        exported_project_root = Path(self.recipe_folder) / "src" / "tray" / "Squid4Win.Tray"
+        exported_project_root = Path(self.recipe_folder) / "src" / "tray" / self.PROJECT_NAME
         local_project_root = (
             Path(self.recipe_folder).parents[2]
             / "src"
             / "tray"
-            / "Squid4Win.Tray"
+            / self.PROJECT_NAME
         )
         project_source_root = (
             exported_project_root
@@ -73,19 +73,21 @@ class Squid4WinTrayConan(ConanFile):
             )
 
         self._copy_directory_contents(
-            project_source_root, source_root / "src" / "tray" / "Squid4Win.Tray"
+            project_source_root, source_root / "src" / "tray" / self.PROJECT_NAME
         )
         exported_directory_build_props = (
-            Path(self.recipe_folder) / "build-support" / "Directory.Build.props"
+            Path(self.recipe_folder) / "build-support" / self.DIRECTORY_BUILD_PROPS_FILE
         )
-        local_directory_build_props = Path(self.recipe_folder).parents[2] / "Directory.Build.props"
+        local_directory_build_props = (
+            Path(self.recipe_folder).parents[2] / self.DIRECTORY_BUILD_PROPS_FILE
+        )
         shutil.copy2(
             (
                 exported_directory_build_props
                 if exported_directory_build_props.is_file()
                 else local_directory_build_props
             ),
-            source_root / "Directory.Build.props",
+            source_root / self.DIRECTORY_BUILD_PROPS_FILE,
         )
 
     def validate(self) -> None:
@@ -108,8 +110,8 @@ class Squid4WinTrayConan(ConanFile):
             Path(self.source_folder)
             / "src"
             / "tray"
-            / "Squid4Win.Tray"
-            / "Squid4Win.Tray.csproj"
+            / self.PROJECT_NAME
+            / f"{self.PROJECT_NAME}.csproj"
         )
         publish_root = Path(self.build_folder) / "publish"
 
@@ -125,7 +127,7 @@ class Squid4WinTrayConan(ConanFile):
             "-p:PublishSingleFile=false"
         )
 
-        tray_executable = publish_root / "Squid4Win.Tray.exe"
+        tray_executable = publish_root / f"{self.PROJECT_NAME}.exe"
         if not tray_executable.is_file():
             raise ConanException(
                 f"Expected the published tray executable at {tray_executable}."

@@ -25,28 +25,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: 8.0.x
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: 20
 
       - name: Install markdownlint-cli2
-        run: npm install --global markdownlint-cli2
+        run: npm install --global --ignore-scripts markdownlint-cli2
 
       - name: Lint Markdown
         run: markdownlint-cli2 "**/*.md"
 
       - name: Lint GitHub Actions workflows
-        uses: raven-actions/actionlint@v2
+        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2
 
       - name: Lint PowerShell
         shell: pwsh
@@ -75,15 +75,15 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: 8.0.x
 
@@ -95,7 +95,7 @@ jobs:
           "path=$conanHome" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Cache Conan home
-        uses: actions/cache@v5
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ${{ steps.conan-home.outputs.path }}
           key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
@@ -124,17 +124,17 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: 8.0.x
 
@@ -155,7 +155,7 @@ jobs:
           "msys2_packages=$((@($buildProfile.requiredMsys2Packages | ForEach-Object { [string]$_ }) -join ' '))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Cache Conan home
-        uses: actions/cache@v5
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ${{ steps.build-config.outputs.conan_home }}
           key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
@@ -169,7 +169,7 @@ jobs:
 
       - name: Setup MSYS2
         id: msys2
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2
         with:
           msystem: MINGW64
           update: true
@@ -243,9 +243,25 @@ jobs:
       - name: Smoke test Squid
         run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release
 
+      - name: Summarize SonarCloud scanner mode
+        if: ${{ vars.SONAR_CI_SCAN_ENABLED != 'true' }}
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+
+          $summaryLines = @(
+            '## SonarQube',
+            '',
+            '- CI-based scanning is currently skipped because `SONAR_CI_SCAN_ENABLED` is not set to `true`.',
+            '- Disable SonarCloud Automatic Analysis for this project before re-enabling workflow-based scanner runs.'
+          )
+
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Run SonarQube scan for pull requests
-        if: ${{ github.event_name == 'pull_request' }}
-        uses: SonarSource/sonarqube-scan-action@v7
+        if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && github.event_name == 'pull_request' }}
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
@@ -259,8 +275,8 @@ jobs:
             -Dsonar.pullrequest.base=${{ github.base_ref }}
 
       - name: Run SonarQube scan for branches
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: SonarSource/sonarqube-scan-action@v7
+        if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && github.event_name != 'pull_request' }}
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
@@ -272,15 +288,15 @@ jobs:
             -Dsonar.branch.name=${{ github.ref_name }}
 
       - name: Check SonarQube quality gate
-        if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
-        uses: SonarSource/sonarqube-quality-gate-action@v1
+        if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') }}
+        uses: SonarSource/sonarqube-quality-gate-action@d304d050d930b02a896b0f85935344f023928496 # v1
         timeout-minutes: 10
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: squid-msys2-build
           path: |

@@ -31,10 +31,6 @@ on:
         type: boolean
         default: false
 
-permissions:
-  actions: read
-  contents: read
-
 jobs:
   validate:
     name: Validate publication request
@@ -82,12 +78,13 @@ jobs:
   metadata:
     name: Generate feed metadata
     needs: validate
+    permissions:
+      contents: read
     uses: ./.github/workflows/package-managers.yml
     with:
       tag: ${{ inputs.tag }}
       version: ${{ inputs.version }}
       repository: ${{ inputs.repository }}
-    secrets: inherit
 
   publish_winget:
     name: Publish winget manifest
@@ -95,6 +92,9 @@ jobs:
     if: ${{ inputs.publish_winget }}
     runs-on: windows-2022
     environment: package-feeds
+    permissions:
+      actions: read
+      contents: read
     outputs:
       changed: ${{ steps.publish.outputs.changed }}
       pull_request_url: ${{ steps.publish.outputs.pull_request_url }}
@@ -103,10 +103,10 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download package manager artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: squid4win-package-managers
           path: artifacts\package-managers
@@ -181,6 +181,9 @@ jobs:
     if: ${{ inputs.publish_chocolatey }}
     runs-on: windows-2022
     environment: package-feeds
+    permissions:
+      actions: read
+      contents: read
     outputs:
       already_published: ${{ steps.publish.outputs.already_published }}
       package_path: ${{ steps.publish.outputs.package_path }}
@@ -189,10 +192,10 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download package manager artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: squid4win-package-managers
           path: artifacts\package-managers
@@ -260,6 +263,9 @@ jobs:
     if: ${{ inputs.publish_scoop }}
     runs-on: windows-2022
     environment: package-feeds
+    permissions:
+      actions: read
+      contents: read
     outputs:
       changed: ${{ steps.publish.outputs.changed }}
       pull_request_url: ${{ steps.publish.outputs.pull_request_url }}
@@ -268,10 +274,10 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download package manager artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: squid4win-package-managers
           path: artifacts\package-managers

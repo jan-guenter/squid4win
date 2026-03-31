@@ -60,7 +60,9 @@ templates.
 - Repo-committed skills now live under `.agents\skills\`; treat them as vendored
   third-party content and update them deliberately through `npx skills add -a github-copilot`
 - SonarQube scan scope is defined in `sonar-project.properties`, and CI owns the
-  current scan plus quality-gate enforcement
+  scanner plus quality-gate path only when `SONAR_CI_SCAN_ENABLED=true`; keep
+  that variable off until SonarCloud Automatic Analysis is disabled for the
+  project
 - Package-manager metadata generation now lives in
   `scripts\Export-PackageManagerMetadata.ps1` and
   `.github\workflows\package-managers.yml`, while credential-gated publication

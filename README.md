@@ -63,7 +63,9 @@ others.
   - Conan lockfile refresh
 - GitHub workflow scaffolding for:
   - CI linting and Windows native build execution
-  - SonarQube scan and quality-gate enforcement on CI builds
+  - SonarQube scan and quality-gate enforcement on CI builds once SonarCloud
+    Automatic Analysis has been disabled for the project and
+    `SONAR_CI_SCAN_ENABLED=true` is set
   - release artifact staging
   - package-manager metadata generation and credential-gated publication for
     winget, Chocolatey, and Scoop
@@ -258,7 +260,10 @@ actually building the installer.
 - `ci.yml` lints Markdown, workflows, PowerShell, and C#, then runs the native
   Windows build and smoke-test path on GitHub-hosted runners, builds the tray
   Conan package independently, and then runs the SonarQube scan and quality-gate
-  check when the Sonar secrets and variables are configured
+  check when the Sonar secrets and variables are configured and
+  `SONAR_CI_SCAN_ENABLED=true`; keep that variable unset while SonarCloud
+  Automatic Analysis is still enabled, because SonarCloud rejects running both
+  analysis modes at once
 - `release.yml` builds the Conan-owned native bundle, stages it to
   `artifacts\install-root`, creates the portable zip, and builds the MSI
   through the WiX SDK project

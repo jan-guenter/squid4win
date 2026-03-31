@@ -23,6 +23,10 @@ from conan.tools.files import (
 )
 from conan.tools.gnu import AutotoolsToolchain
 
+BASH_EXECUTABLE_NAME = "bash.exe"
+MSYS2_USR_BIN_BASH_SUFFIX = os.path.join("usr", "bin", BASH_EXECUTABLE_NAME)
+MACRO_NAME_PATTERN = re.compile(r"[A-Za-z_]\w*\Z", re.ASCII)
+
 
 class Squid4WinConan(ConanFile):
     name = "squid4win"
@@ -516,69 +520,82 @@ class Squid4WinConan(ConanFile):
     def _msys2_runtime_bin_path(
         self, build_profile: dict[str, object], msys2_env_directory: str
     ) -> Path:
-        candidate_roots: list[Path] = []
-        seen_roots: set[str] = set()
+        candidate_roots = self._candidate_msys2_roots(
+            build_profile, msys2_env_directory
+        )
+        for candidate_root in candidate_roots:
+            runtime_bin_path = candidate_root / msys2_env_directory / "bin"
+            if runtime_bin_path.is_dir():
+                return runtime_bin_path
 
-        def add_candidate_root(path_value: object) -> None:
-            if path_value is None:
-                return
-
-            candidate_text = str(path_value).strip()
-            if not candidate_text:
-                return
-
-            candidate_path = Path(candidate_text)
-            if not candidate_path.is_absolute():
-                candidate_path = Path(self.recipe_folder) / candidate_path
-
-            resolved_candidate_path = candidate_path.resolve(strict=False)
-            candidate_key = os.path.normcase(os.fspath(resolved_candidate_path))
-            if candidate_key in seen_roots:
-                return
-
-            seen_roots.add(candidate_key)
-            candidate_roots.append(resolved_candidate_path)
-
-        bash_path = str(self.conf.get("tools.microsoft.bash:path", default="")).strip()
-        add_candidate_root(
-            self._root_from_tool_path(bash_path, os.path.join("usr", "bin", "bash.exe"))
+        searched_roots = (
+            ", ".join(os.fspath(candidate_root) for candidate_root in candidate_roots)
+            or "none"
+        )
+        raise ConanException(
+            "Unable to locate the MSYS2 runtime bin directory for the staged bundle. "
+            f"Searched: {searched_roots}."
         )
 
-        bash_command_path = shutil.which("bash.exe") or shutil.which("bash")
-        add_candidate_root(
+    def _candidate_msys2_roots(
+        self, build_profile: dict[str, object], msys2_env_directory: str
+    ) -> list[Path]:
+        candidate_roots: list[Path] = []
+        seen_roots: set[str] = set()
+        bash_path = str(self.conf.get("tools.microsoft.bash:path", default="")).strip()
+        root_hints: list[object] = [
+            self._root_from_tool_path(bash_path, MSYS2_USR_BIN_BASH_SUFFIX)
+        ]
+
+        bash_command_path = shutil.which(BASH_EXECUTABLE_NAME) or shutil.which("bash")
+        root_hints.append(
             self._root_from_tool_path(
-                bash_command_path, os.path.join("usr", "bin", "bash.exe")
+                bash_command_path, MSYS2_USR_BIN_BASH_SUFFIX
             )
         )
 
         gcc_command_path = shutil.which("gcc.exe") or shutil.which("gcc")
-        add_candidate_root(
+        root_hints.append(
             self._root_from_tool_path(
                 gcc_command_path,
                 os.path.join(msys2_env_directory, "bin", "gcc.exe"),
             )
         )
 
-        add_candidate_root(os.getenv("MSYS2_ROOT"))
-        add_candidate_root(os.getenv("MSYS2_LOCATION"))
+        root_hints.extend((os.getenv("MSYS2_ROOT"), os.getenv("MSYS2_LOCATION")))
 
         runner_temp = str(os.getenv("RUNNER_TEMP", "")).strip()
         if runner_temp:
-            add_candidate_root(Path(runner_temp) / "msys64")
+            root_hints.append(Path(runner_temp) / "msys64")
 
-        for hint in self._string_list(build_profile.get("msys2RootHints", [])):
-            add_candidate_root(hint)
+        root_hints.extend(self._string_list(build_profile.get("msys2RootHints", [])))
 
-        for candidate_root in candidate_roots:
-            runtime_bin_path = candidate_root / msys2_env_directory / "bin"
-            if runtime_bin_path.is_dir():
-                return runtime_bin_path
+        for root_hint in root_hints:
+            self._append_candidate_root(candidate_roots, seen_roots, root_hint)
 
-        searched_roots = ", ".join(os.fspath(candidate_root) for candidate_root in candidate_roots) or "none"
-        raise ConanException(
-            "Unable to locate the MSYS2 runtime bin directory for the staged bundle. "
-            f"Searched: {searched_roots}."
-        )
+        return candidate_roots
+
+    def _append_candidate_root(
+        self, candidate_roots: list[Path], seen_roots: set[str], path_value: object
+    ) -> None:
+        if path_value is None:
+            return
+
+        candidate_text = str(path_value).strip()
+        if not candidate_text:
+            return
+
+        candidate_path = Path(candidate_text)
+        if not candidate_path.is_absolute():
+            candidate_path = Path(self.recipe_folder) / candidate_path
+
+        resolved_candidate_path = candidate_path.resolve(strict=False)
+        candidate_key = os.path.normcase(os.fspath(resolved_candidate_path))
+        if candidate_key in seen_roots:
+            return
+
+        seen_roots.add(candidate_key)
+        candidate_roots.append(resolved_candidate_path)
 
     @staticmethod
     def _root_from_tool_path(tool_path: str | None, suffix: str) -> Path | None:
@@ -718,36 +735,13 @@ class Squid4WinConan(ConanFile):
 
         updated_lines: list[str] = []
         repaired_macros: list[str] = []
-        macro_undef_pattern = re.compile(
-            r"^\s*/\*\s*#undef\s+([A-Za-z_][A-Za-z0-9_]*)(\([^)]*\))?\s*\*/\s*$"
-        )
-        macro_definition_pattern = re.compile(
-            r"^\s*#(?:define|undef)\s+([A-Za-z_][A-Za-z0-9_]*)(\([^)]*\))?\b.*$"
-        )
 
         for header_line in header_text.splitlines():
-            macro_match = macro_undef_pattern.match(header_line)
-            if macro_match is None:
-                macro_match = macro_definition_pattern.match(header_line)
-
-            if macro_match is None:
-                updated_lines.append(header_line)
-                continue
-
-            macro_name = macro_match.group(1)
-            if macro_name not in definitions:
-                updated_lines.append(header_line)
-                continue
-
-            definition = definitions[macro_name]
-            replacement_line = f"#define {definition['name']}{definition['parameter_text']}"
-            if definition["value"]:
-                replacement_line += f" {definition['value']}"
-
-            if header_line != replacement_line and macro_name not in repaired_macros:
-                repaired_macros.append(macro_name)
-
-            updated_lines.append(replacement_line)
+            updated_lines.append(
+                self._repair_autoconf_header_line(
+                    header_line, definitions, repaired_macros
+                )
+            )
 
         updated_header_text = newline.join(updated_lines)
         if has_trailing_newline:
@@ -766,6 +760,52 @@ class Squid4WinConan(ConanFile):
             "repaired_macros": repaired_macros,
         }
 
+    def _repair_autoconf_header_line(
+        self,
+        header_line: str,
+        definitions: dict[str, dict[str, str]],
+        repaired_macros: list[str],
+    ) -> str:
+        macro_name = self._macro_name_from_header_line(header_line)
+        if macro_name is None or macro_name not in definitions:
+            return header_line
+
+        replacement_line = self._format_autoconf_definition(definitions[macro_name])
+        if header_line != replacement_line and macro_name not in repaired_macros:
+            repaired_macros.append(macro_name)
+
+        return replacement_line
+
+    @staticmethod
+    def _format_autoconf_definition(definition: dict[str, str]) -> str:
+        replacement_line = f"#define {definition['name']}{definition['parameter_text']}"
+        if definition["value"]:
+            replacement_line += f" {definition['value']}"
+
+        return replacement_line
+
+    @classmethod
+    def _macro_name_from_header_line(cls, header_line: str) -> str | None:
+        stripped_line = header_line.strip()
+        if stripped_line.startswith("/*") and stripped_line.endswith("*/"):
+            inner_line = stripped_line[2:-2].strip()
+            if inner_line.startswith("#undef "):
+                macro_name, _ = cls._split_macro_token(
+                    inner_line[len("#undef ") :].strip()
+                )
+                return macro_name
+            return None
+
+        for directive in ("#define", "#undef"):
+            directive_prefix = f"{directive} "
+            if stripped_line.startswith(directive_prefix):
+                macro_name, _ = cls._split_macro_token(
+                    stripped_line[len(directive_prefix) :].strip()
+                )
+                return macro_name
+
+        return None
+
     def _definition_source_lines(
         self, confdefs_path: Path, config_log_path: Path
     ) -> tuple[str, list[str]]:
@@ -783,13 +823,53 @@ class Squid4WinConan(ConanFile):
         )
 
     @staticmethod
+    def _is_valid_macro_name(macro_name: str) -> bool:
+        return bool(MACRO_NAME_PATTERN.fullmatch(macro_name))
+
+    @classmethod
+    def _split_macro_token(cls, token_text: str) -> tuple[str | None, str]:
+        if not token_text:
+            return None, ""
+
+        macro_token = token_text.split(None, 1)[0]
+        if "(" in macro_token:
+            macro_name, parameter_suffix = macro_token.split("(", 1)
+            parameter_text = f"({parameter_suffix}"
+        else:
+            macro_name = macro_token
+            parameter_text = ""
+
+        if not cls._is_valid_macro_name(macro_name):
+            return None, ""
+
+        return macro_name, parameter_text
+
+    @classmethod
+    def _parse_define_directive(
+        cls, definition_line: str
+    ) -> tuple[str, str, list[str]] | None:
+        stripped_line = definition_line.lstrip()
+        directive_prefix = "#define "
+        if not stripped_line.startswith(directive_prefix):
+            return None
+
+        remainder = stripped_line[len(directive_prefix) :].strip()
+        if not remainder:
+            return None
+
+        split_segments = remainder.split(None, 1)
+        macro_name, parameter_text = cls._split_macro_token(split_segments[0])
+        if macro_name is None:
+            return None
+
+        macro_value = split_segments[1] if len(split_segments) > 1 else ""
+        return macro_name, parameter_text, [macro_value]
+
+    @staticmethod
     def _parse_autoconf_definitions(
         definition_lines: list[str], newline: str
     ) -> dict[str, dict[str, str]]:
         definitions: dict[str, dict[str, str]] = {}
-        define_pattern = re.compile(
-            r"^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(\([^)]*\))?(?:\s+(.*))?$"
-        )
         current_name: str | None = None
         current_parameter_text = ""
         current_value_lines: list[str] = []
@@ -814,13 +894,13 @@ class Squid4WinConan(ConanFile):
                     current_value_lines = []
                 continue
 
-            match = define_pattern.match(definition_line)
-            if match is None:
+            parsed_directive = Squid4WinConan._parse_define_directive(definition_line)
+            if parsed_directive is None:
                 continue
 
-            current_name = match.group(1)
-            current_parameter_text = match.group(2) or ""
-            current_value_lines = [match.group(3) or ""]
+            current_name, current_parameter_text, current_value_lines = (
+                parsed_directive
+            )
             if not definition_line.rstrip().endswith("\\"):
                 commit_current_definition()
                 current_name = None
