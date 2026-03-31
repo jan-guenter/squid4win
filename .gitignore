@@ -1,0 +1,17 @@
+.conan2/
+artifacts/
+build/
+.vs/
+.vsconan/
+.idea/
+.vscode/
+.env
+src/**/bin/
+src/**/obj/
+packaging/wix/bin/
+packaging/wix/obj/
+__pycache__/
+*.cache
+*.suo
+*.tmp
+*.user

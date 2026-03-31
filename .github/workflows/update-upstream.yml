@@ -1,0 +1,61 @@
+name: Update Upstream Squid
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      major_version:
+        description: Optional Squid major train to follow
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-upstream:
+    name: Refresh upstream release metadata
+    runs-on: ubuntu-latest
+    env:
+      REQUESTED_MAJOR_VERSION: ${{ github.event.inputs.major_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Update Squid version metadata
+        id: update
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $parameters = @{}
+          if ($env:REQUESTED_MAJOR_VERSION) {
+            $parameters.MajorVersion = [int]$env:REQUESTED_MAJOR_VERSION
+          }
+          .\scripts\Update-SquidVersion.ps1 @parameters | Out-Null
+
+      - name: Create pull request
+        if: ${{ steps.update.outputs.changed == 'true' }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/update-squid-release
+          delete-branch: true
+          title: "chore: update Squid to ${{ steps.update.outputs.version }}"
+          commit-message: "chore: update Squid to ${{ steps.update.outputs.version }}"
+          add-paths: |
+            conan/squid-release.json
+            config/squid-version.json
+          body: |
+            ## Summary
+            - update `config\squid-version.json` to Squid `${{ steps.update.outputs.version }}`
+            - refresh generated `conan\squid-release.json` metadata for the same release
+            - keep the repo-local Conan-driven build metadata aligned with the latest upstream release
+            - use this scheduled workflow because Dependabot does not manage Conan package graphs or raw upstream Squid release pins
+
+            ## Validation
+            - refreshed release metadata with `scripts/Update-SquidVersion.ps1`
+          labels: |
+            dependencies
+            upstream-squid

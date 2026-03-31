@@ -1,0 +1,25 @@
+# Squid4Win baseline configuration
+# The installer materializes this template into etc\squid.conf on first install.
+
+visible_hostname squid4win
+http_port 3128
+
+acl localnet src 10.0.0.0/8
+acl localnet src 172.16.0.0/12
+acl localnet src 192.168.0.0/16
+acl localnet src fc00::/7
+acl localnet src fe80::/10
+acl localhost src 127.0.0.1/32 ::1
+
+http_access allow localhost
+http_access allow localnet
+http_access deny all
+
+cache_dir ufs __SQUID4WIN_INSTALL_ROOT__/var/cache 100 16 256
+coredump_dir __SQUID4WIN_INSTALL_ROOT__/var/cache
+
+access_log stdio:__SQUID4WIN_INSTALL_ROOT__/var/logs/access.log
+cache_log stdio:__SQUID4WIN_INSTALL_ROOT__/var/logs/cache.log
+cache_store_log none
+pid_filename __SQUID4WIN_INSTALL_ROOT__/var/run/squid.pid
+mime_table __SQUID4WIN_INSTALL_ROOT__/etc/mime.conf

@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # Dependabot can track the Conan CLI pin in requirements-automation.txt,
+  # but it cannot manage Conan package graphs directly. update-upstream.yml
+  # handles Squid release metadata instead.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+      - github-actions
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: UTC
+    allow:
+      - dependency-name: conan
+    commit-message:
+      prefix: chore
+      include: scope
+    labels:
+      - dependencies
+      - python
+    open-pull-requests-limit: 5

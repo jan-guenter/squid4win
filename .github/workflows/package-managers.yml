@@ -1,0 +1,135 @@
+name: Package manager manifests
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to package
+        required: false
+        default: ""
+      version:
+        description: Package version override
+        required: false
+        default: ""
+      repository:
+        description: GitHub repository to read release assets from
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate feed metadata
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve release metadata
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_REPOSITORY: ${{ inputs.repository }}
+          DEFAULT_REPOSITORY: ${{ github.repository }}
+        run: |
+          $repository = if ($env:INPUT_REPOSITORY) {
+            $env:INPUT_REPOSITORY
+          } else {
+            $env:DEFAULT_REPOSITORY
+          }
+
+          $versionFromConfig = (Get-Content -Raw -LiteralPath .\config\squid-version.json | ConvertFrom-Json).version
+          $tag = if (($env:EVENT_NAME -eq 'release') -and $env:RELEASE_TAG) {
+            $env:RELEASE_TAG
+          } elseif ($env:INPUT_TAG) {
+            $env:INPUT_TAG
+          } else {
+            "v$versionFromConfig"
+          }
+
+          $version = if ($env:INPUT_VERSION) {
+            $env:INPUT_VERSION
+          } elseif ($tag.StartsWith('v')) {
+            $tag.Substring(1)
+          } else {
+            $tag
+          }
+
+          $msiUrl = "https://github.com/$repository/releases/download/$tag/squid4win.msi"
+          $portableZipUrl = "https://github.com/$repository/releases/download/$tag/squid4win-portable.zip"
+
+          "repository=$repository" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "msi_url=$msiUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "portable_zip_url=$portableZipUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $downloadRoot = Join-Path $PWD.Path 'artifacts\downloads'
+          $null = New-Item -ItemType Directory -Path $downloadRoot -Force
+
+          gh release download '${{ steps.release.outputs.tag }}' `
+            --repo '${{ steps.release.outputs.repository }}' `
+            --pattern 'squid4win.msi' `
+            --pattern 'squid4win-portable.zip' `
+            --dir $downloadRoot
+
+      - name: Generate package manager metadata
+        id: manifests
+        run: |
+          $downloadRoot = Join-Path $PWD.Path 'artifacts\downloads'
+          $result = .\scripts\Export-PackageManagerMetadata.ps1 `
+            -Version '${{ steps.release.outputs.version }}' `
+            -Tag '${{ steps.release.outputs.tag }}' `
+            -Repository '${{ steps.release.outputs.repository }}' `
+            -MsiPath (Join-Path $downloadRoot 'squid4win.msi') `
+            -PortableZipPath (Join-Path $downloadRoot 'squid4win-portable.zip') `
+            -OutputRoot (Join-Path $PWD.Path 'artifacts\package-managers')
+
+          "output_root=$($result.OutputRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "msi_sha256=$($result.MsiSha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "portable_zip_sha256=$($result.PortableZipSha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload package manager artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: squid4win-package-managers
+          path: artifacts\package-managers\**
+          if-no-files-found: error
+
+      - name: Summarize publication prerequisites
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+
+          $summaryLines = @(
+            '## Package manager metadata',
+            '',
+            ('- Repository: `${0}`' -f '${{ steps.release.outputs.repository }}'),
+            ('- Tag: `${0}`' -f '${{ steps.release.outputs.tag }}'),
+            ('- Version: `${0}`' -f '${{ steps.release.outputs.version }}'),
+            ('- MSI SHA256: `${0}`' -f '${{ steps.manifests.outputs.msi_sha256 }}'),
+            ('- Portable zip SHA256: `${0}`' -f '${{ steps.manifests.outputs.portable_zip_sha256 }}'),
+            '',
+            'Live publication still needs repository secrets and feed accounts:',
+            '- `WINGET_GITHUB_TOKEN` for PRs to `microsoft/winget-pkgs`',
+            '- `CHOCO_API_KEY` for Chocolatey publication',
+            '- `SCOOP_GITHUB_TOKEN` plus a target bucket repository for Scoop'
+          )
+
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

@@ -1,0 +1,253 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL != '' && vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+
+jobs:
+  lint:
+    name: Lint automation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install markdownlint-cli2
+        run: npm install --global markdownlint-cli2
+
+      - name: Lint Markdown
+        run: markdownlint-cli2 "**/*.md"
+
+      - name: Lint GitHub Actions workflows
+        uses: raven-actions/actionlint@v2
+
+      - name: Lint PowerShell
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          Invoke-ScriptAnalyzer -Path .\scripts -Recurse -Settings .\scripts\PSScriptAnalyzerSettings.psd1 -EnableExit
+
+      - name: Lint C#
+        shell: pwsh
+        run: |
+          $csharpFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Include *.cs,*.csproj,*.sln -File |
+            Where-Object { $_.FullName -notmatch '[/\\](bin|obj)[/\\]' }
+          if ($csharpFiles.Count -eq 0) {
+            Write-Host 'No C# files detected; skipping dotnet format.'
+            exit 0
+          }
+          dotnet format whitespace --folder . --verify-no-changes --verbosity minimal
+
+  build-tray:
+    name: Build tray app
+    runs-on: windows-latest
+    needs: lint
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build tray app
+        run: .\scripts\Publish-TrayApp.ps1 -Configuration Release | Out-Null
+
+  build-msys2:
+    name: Build MSYS2/MinGW-w64
+    runs-on: windows-latest
+    needs: lint
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve build automation configuration
+        id: build-config
+        run: |
+          $buildProfile = .\scripts\Get-SquidBuildProfile.ps1
+          $layout = .\scripts\Resolve-SquidBuildLayout.ps1 -Configuration Release -RepositoryRoot $PWD.Path
+          $conanHome = .\scripts\Resolve-ConanHome.ps1 -RepositoryRoot $PWD.Path
+          $configLogPath = Join-Path $layout.WorkRoot 'config.log'
+
+          "CONAN_HOME=$conanHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "conan_home=$conanHome" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "repo_lockfile_path=$($layout.RepoLockfilePath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "stage_root=$($layout.StageRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "stage_root_glob=$($layout.StageRoot.Replace('\', '/'))/**" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "config_log_path=$($configLogPath.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "msys2_packages=$((@($buildProfile.requiredMsys2Packages | ForEach-Object { [string]$_ }) -join ' '))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Cache Conan home
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.build-config.outputs.conan_home }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conan/**', 'requirements-automation.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-conan-
+
+      - name: Install automation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r .\requirements-automation.txt
+
+      - name: Setup MSYS2
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: ${{ steps.build-config.outputs.msys2_packages }}
+
+      - name: Validate native toolchain bootstrap
+        id: bootstrap
+        run: |
+          $state = .\scripts\Invoke-SquidBuild.ps1 `
+            -Configuration Release `
+            -BootstrapOnly `
+            -AllowMissingPrerequisites `
+            -Msys2Root '${{ steps.msys2.outputs.msys2-location }}'
+
+          "effective_profile_path=$($state.EffectiveProfilePath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "msys2_root=$($state.Msys2Root)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          $conanVersion = if ($state.ConanVersion) { $state.ConanVersion } else { 'missing' }
+          $msys2Root = if ($state.Msys2Root) { $state.Msys2Root } else { 'missing' }
+          $profilePath = if ($state.EffectiveProfilePath) {
+            $state.EffectiveProfilePath
+          } elseif ($state.PlannedEffectiveProfilePath) {
+            $state.PlannedEffectiveProfilePath
+          } else {
+            'missing'
+          }
+          $summaryLines = @(
+            '## Native bootstrap',
+            '',
+            ('- Ready: `{0}`' -f $state.Ready),
+            ('- Metadata synchronized: `{0}`' -f $state.MetadataSynchronized),
+            ('- Conan home: `{0}`' -f $state.ConanHome),
+            ('- Conan version: `{0}`' -f $conanVersion),
+            ('- MSYS2 root: `{0}`' -f $msys2Root),
+            ('- Conan profile: `{0}`' -f $profilePath)
+          )
+
+          if ($state.MissingMsys2Packages.Count -gt 0) {
+            $summaryLines += ('- Missing MSYS2 packages: `{0}`' -f ($state.MissingMsys2Packages -join ', '))
+          }
+
+          if ($state.Warnings.Count -gt 0) {
+            $summaryLines += ''
+            $summaryLines += '### Warnings'
+            $summaryLines += $state.Warnings | ForEach-Object { '- ' + $_ }
+          }
+
+          if ($state.Errors.Count -gt 0) {
+            $summaryLines += ''
+            $summaryLines += '### Errors'
+            $summaryLines += $state.Errors | ForEach-Object { '- ' + $_ }
+          }
+
+          if ($env:GITHUB_STEP_SUMMARY) {
+            $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+          if (-not $state.Ready) {
+            throw ($state.Errors -join [Environment]::NewLine)
+          }
+
+      - name: Build Squid
+        run: |
+          .\scripts\Invoke-SquidBuild.ps1 `
+            -Configuration Release `
+            -Msys2Root '${{ steps.bootstrap.outputs.msys2_root }}' `
+            -EffectiveProfilePath '${{ steps.bootstrap.outputs.effective_profile_path }}' `
+            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}'
+
+      - name: Smoke test Squid
+        run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release
+
+      - name: Run SonarQube scan for pull requests
+        if: ${{ github.event_name == 'pull_request' && secrets.SONAR_TOKEN != '' && secrets.COPILOT_MCP_SONARQUBE_ORG != '' && vars.SONAR_PROJECT_KEY != '' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ secrets.COPILOT_MCP_SONARQUBE_ORG }}
+            -Dsonar.projectVersion=${{ github.sha }}
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
+            -Dsonar.pullrequest.branch=${{ github.head_ref }}
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
+
+      - name: Run SonarQube scan for branches
+        if: ${{ github.event_name != 'pull_request' && secrets.SONAR_TOKEN != '' && secrets.COPILOT_MCP_SONARQUBE_ORG != '' && vars.SONAR_PROJECT_KEY != '' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ secrets.COPILOT_MCP_SONARQUBE_ORG }}
+            -Dsonar.projectVersion=${{ github.sha }}
+            -Dsonar.branch.name=${{ github.ref_name }}
+
+      - name: Check SonarQube quality gate
+        if: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') && secrets.SONAR_TOKEN != '' && vars.SONAR_PROJECT_KEY != '' }}
+        uses: SonarSource/sonarqube-quality-gate-action@master
+        timeout-minutes: 10
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: squid-msys2-build
+          path: |
+            ${{ steps.build-config.outputs.stage_root_glob }}
+            ${{ steps.build-config.outputs.config_log_path }}
+          if-no-files-found: error

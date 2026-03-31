@@ -1,0 +1,11 @@
+{
+  "repository": "squid-cache/squid",
+  "version": "7.5",
+  "tag": "SQUID_7_5",
+  "published_at": "2026-03-13T07:47:28Z",
+  "assets": {
+    "source_archive": "https://github.com/squid-cache/squid/releases/download/SQUID_7_5/squid-7.5.tar.xz",
+    "source_signature": "https://github.com/squid-cache/squid/releases/download/SQUID_7_5/squid-7.5.tar.xz.asc",
+    "source_archive_sha256": "f6058907db0150d2f5d228482b5a9e5678920cf368ae0ccbcecceb2ff4c35106"
+  }
+}

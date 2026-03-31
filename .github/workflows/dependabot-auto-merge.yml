@@ -1,0 +1,53 @@
+name: Auto-merge automation PRs
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-automerge:
+    if: ${{ (github.actor == 'dependabot[bot]' || startsWith(github.head_ref, 'automation/')) && !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check changed files
+        id: changed-files
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const allowed = [
+              '.github/workflows/',
+              '.github/dependabot.yml',
+              '.markdownlint-cli2.jsonc',
+              'config/squid-version.json',
+              'conan/lockfiles/',
+              'conan/squid-release.json',
+              'requirements-automation.txt'
+            ];
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100
+            });
+            const onlyAllowed = files.every((file) =>
+              allowed.some((entry) => file.filename === entry || file.filename.startsWith(entry))
+            );
+            if (!onlyAllowed) {
+              core.warning(`Skipping auto-merge because unexpected files changed: ${files.map((file) => file.filename).join(', ')}`);
+            }
+            core.setOutput('only_allowed', String(onlyAllowed));
+
+      - name: Enable auto-merge
+        if: ${{ steps.changed-files.outputs.only_allowed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"

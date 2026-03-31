@@ -1,0 +1,35 @@
+<Project Sdk="WixToolset.Sdk/4.0.5">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>Squid4Win</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <HarvestDirectoryGenerateGuidsNow>true</HarvestDirectoryGenerateGuidsNow>
+    <HarvestDirectoryAutogenerateGuids>false</HarvestDirectoryAutogenerateGuids>
+    <InstallerPayloadRoot Condition="'$(InstallerPayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\install-root</InstallerPayloadRoot>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0.0</ProductVersion>
+    <SquidServiceName Condition="'$(SquidServiceName)' == ''">Squid4Win</SquidServiceName>
+    <DefineConstants>
+      InstallerPayloadRoot=$(InstallerPayloadRoot);
+      ProductVersion=$(ProductVersion);
+      SquidServiceName=$(SquidServiceName)
+    </DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Heat" Version="4.0.5" PrivateAssets="all" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="4.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <HarvestDirectory Include="$(InstallerPayloadRoot)">
+      <ComponentGroupName>InstallPayload</ComponentGroupName>
+      <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
+      <PreprocessorVariable>var.InstallerPayloadRoot</PreprocessorVariable>
+      <SuppressRootDirectory>true</SuppressRootDirectory>
+    </HarvestDirectory>
+  </ItemGroup>
+
+  <ItemGroup>
+    <BindPath Include="$(InstallerPayloadRoot)" />
+  </ItemGroup>
+</Project>

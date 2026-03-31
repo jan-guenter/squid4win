@@ -1,0 +1,8 @@
+{
+  "owner": "squid-cache",
+  "repo": "squid",
+  "track": "stable",
+  "version": "7.5",
+  "tag": "SQUID_7_5",
+  "sourceArchiveUrl": "https://github.com/squid-cache/squid/releases/download/SQUID_7_5/squid-7.5.tar.xz"
+}

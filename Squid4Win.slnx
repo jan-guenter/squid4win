@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/tray/">
+    <Project Path="src/tray/Squid4Win.Tray/Squid4Win.Tray.csproj" />
+  </Folder>
+</Solution>

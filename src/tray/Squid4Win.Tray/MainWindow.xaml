@@ -1,0 +1,202 @@
+<Window x:Class="Squid4Win.Tray.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Squid4Win Dashboard"
+        Width="860"
+        Height="640"
+        MinWidth="760"
+        MinHeight="560"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterScreen">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Padding="20"
+                    Margin="0,0,0,16"
+                    Background="#FFF8F8F8"
+                    BorderBrush="#FFD8D8D8"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                <StackPanel>
+                    <TextBlock FontSize="26" FontWeight="SemiBold" Text="Squid4Win dashboard" />
+                    <TextBlock Margin="0,8,0,0"
+                               Foreground="#FF5C5C5C"
+                               TextWrapping="Wrap"
+                               Text="Manage the local Squid Windows service and jump to the folders the installer will populate. Missing paths are expected until Squid4Win is installed." />
+                </StackPanel>
+            </Border>
+
+            <Grid Grid.Row="1" Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="7*" />
+                    <ColumnDefinition Width="5*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Padding="20"
+                        Margin="0,0,16,0"
+                        Background="White"
+                        BorderBrush="#FFD8D8D8"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                    <StackPanel>
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Windows service" />
+                        <Border Margin="0,14,0,0"
+                                Padding="10,6"
+                                HorizontalAlignment="Left"
+                                Background="#FFEFF4FF"
+                                BorderBrush="#FFD2DBF7"
+                                BorderThickness="1"
+                                CornerRadius="999">
+                            <TextBlock FontSize="16" FontWeight="SemiBold" Text="{Binding ServiceStatus}" />
+                        </Border>
+                        <TextBlock Margin="0,14,0,0" FontWeight="SemiBold" Text="Service name" />
+                        <TextBlock Margin="0,4,0,0" Text="{Binding ServiceName}" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,14,0,0" FontWeight="SemiBold" Text="Details" />
+                        <TextBlock Margin="0,4,0,0"
+                                   Foreground="#FF5C5C5C"
+                                   Text="{Binding ServiceStatusDetails}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Margin="0,14,0,0"
+                                   Foreground="#FF5C5C5C"
+                                   Text="{Binding LastRefreshTime}" />
+                        <WrapPanel Margin="0,18,0,0">
+                            <Button Padding="14,6" Margin="0,0,8,8" Content="Refresh" Click="RefreshButton_Click" />
+                            <Button Padding="14,6"
+                                    Margin="0,0,8,8"
+                                    Content="Start"
+                                    Click="StartServiceButton_Click"
+                                    IsEnabled="{Binding CanStartService}" />
+                            <Button Padding="14,6"
+                                    Margin="0,0,8,8"
+                                    Content="Stop"
+                                    Click="StopServiceButton_Click"
+                                    IsEnabled="{Binding CanStopService}" />
+                            <Button Padding="14,6"
+                                    Margin="0,0,8,8"
+                                    Content="Restart"
+                                    Click="RestartServiceButton_Click"
+                                    IsEnabled="{Binding CanRestartService}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1"
+                        Padding="20"
+                        Background="White"
+                        BorderBrush="#FFD8D8D8"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                    <StackPanel>
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Quick actions" />
+                        <TextBlock Margin="0,6,0,16"
+                                   Foreground="#FF5C5C5C"
+                                   TextWrapping="Wrap"
+                                   Text="The tray menu and dashboard share these location shortcuts so the current install, config, and log paths stay easy to reach." />
+                        <ItemsControl ItemsSource="{Binding RegisteredFeatures}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,12"
+                                            Padding="12"
+                                            Background="#FFF8F8F8"
+                                            BorderBrush="#FFEBEBEB"
+                                            BorderThickness="1"
+                                            CornerRadius="6">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,16,0">
+                                                <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" />
+                                                <TextBlock Margin="0,4,0,0"
+                                                           Foreground="#FF5C5C5C"
+                                                           Text="{Binding Description}"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <Button Grid.Column="1"
+                                                    Padding="12,6"
+                                                    VerticalAlignment="Center"
+                                                    Content="Open"
+                                                    Tag="{Binding}"
+                                                    Click="FeatureActionButton_Click" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Grid.Row="2"
+                    Padding="20"
+                    Background="White"
+                    BorderBrush="#FFD8D8D8"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                <StackPanel>
+                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="Resolved paths" />
+                    <TextBlock Margin="0,6,0,16"
+                               Foreground="#FF5C5C5C"
+                               TextWrapping="Wrap"
+                               Text="These values reflect the tray app's current assumptions. They remain informative even before an installer or service is present." />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="220" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,12,12" FontWeight="SemiBold" Text="Install root" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Margin="0,0,16,12" Text="{Binding InstallRoot}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Margin="0,0,0,12" Foreground="#FF5C5C5C" Text="{Binding InstallRootStatus}" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,12,12" FontWeight="SemiBold" Text="Service executable" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,0,16,12" Text="{Binding ServiceExecutablePath}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="1" Grid.Column="2" Margin="0,0,0,12" Foreground="#FF5C5C5C" Text="{Binding ServiceExecutableStatus}" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,12,12" FontWeight="SemiBold" Text="Data root" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,0,16,12" Text="{Binding DataRoot}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="2" Grid.Column="2" Margin="0,0,0,12" Foreground="#FF5C5C5C" Text="{Binding DataRootStatus}" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,12,12" FontWeight="SemiBold" Text="Config directory" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,0,16,12" Text="{Binding ConfigDirectory}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="3" Grid.Column="2" Margin="0,0,0,12" Foreground="#FF5C5C5C" Text="{Binding ConfigDirectoryStatus}" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,0,12,12" FontWeight="SemiBold" Text="Config file" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Margin="0,0,16,12" Text="{Binding ConfigFilePath}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="4" Grid.Column="2" Margin="0,0,0,12" Foreground="#FF5C5C5C" Text="{Binding ConfigFileStatus}" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,0,12,0" FontWeight="SemiBold" Text="Log directory" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,0,16,0" Text="{Binding LogDirectory}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="5" Grid.Column="2" Foreground="#FF5C5C5C" Text="{Binding LogDirectoryStatus}" TextWrapping="Wrap" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Grid.Row="3"
+                       Margin="0,16,0,0"
+                       HorizontalAlignment="Right"
+                       Foreground="#FF5C5C5C"
+                       Text="Close or minimize this window to return to the notification area." />
+        </Grid>
+    </ScrollViewer>
+</Window>

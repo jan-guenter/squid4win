@@ -1,0 +1,94 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <?define ProductName = "Squid4Win" ?>
+  <?define Manufacturer = "Squid4Win Contributors" ?>
+  <?define UpgradeCode = "E118A5AC-15CA-4A6C-AFA2-C5B2D73E52B6" ?>
+
+  <Package
+      Name="$(var.ProductName)"
+      Manufacturer="$(var.Manufacturer)"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="$(var.UpgradeCode)"
+      InstallerVersion="500"
+      Scope="perMachine"
+      Compressed="yes"
+      Language="1033">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Launch Condition="VersionNT64" Message="This installation package is only supported on 64-bit Windows." />
+
+    <Property Id="ROOTDRIVE" Value="C:\" />
+
+    <StandardDirectory Id="TARGETDIR">
+      <Directory Id="INSTALLFOLDER" Name="Squid4Win" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationShortcutFolder" Name="Squid4Win" />
+    </StandardDirectory>
+
+    <Property Id="SQUID4WIN_SERVICE_NAME" Value="$(var.SquidServiceName)" />
+
+    <ComponentGroup Id="InstallerIntegration" Directory="INSTALLFOLDER">
+      <Component Id="StartMenuShortcutComponent" Guid="*">
+        <Shortcut Id="TrayShortcut"
+                  Directory="ApplicationShortcutFolder"
+                  Name="Squid4Win"
+                  Description="Open the Squid4Win tray application."
+                  Target="[INSTALLFOLDER]Squid4Win.Tray.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveApplicationShortcuts"
+                      Directory="ApplicationShortcutFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Squid4Win"
+                       Name="Installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="MainFeature" Title="Squid4Win" Level="1">
+      <ComponentGroupRef Id="InstallPayload" />
+      <ComponentGroupRef Id="InstallerIntegration" />
+    </Feature>
+
+    <SetProperty Id="InstallSquidService"
+                 Sequence="execute"
+                 After="CostFinalize"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\svc.ps1&quot; Install &quot;[INSTALLFOLDER]&quot; &quot;[SQUID4WIN_SERVICE_NAME]&quot;"
+                 Condition="NOT Installed" />
+
+    <CustomAction Id="InstallSquidService"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check"
+                  DllEntry="WixQuietExec"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" />
+
+    <SetProperty Id="RemoveSquidService"
+                 Sequence="execute"
+                 After="CostFinalize"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\svc.ps1&quot; Uninstall &quot;[INSTALLFOLDER]&quot; &quot;[SQUID4WIN_SERVICE_NAME]&quot;"
+                 Condition="REMOVE=&quot;ALL&quot;" />
+
+    <CustomAction Id="RemoveSquidService"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check"
+                  DllEntry="WixQuietExec"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" />
+
+    <InstallExecuteSequence>
+      <Custom Action="InstallSquidService"
+              After="InstallFiles"
+              Condition="NOT Installed" />
+      <Custom Action="RemoveSquidService"
+              Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>
