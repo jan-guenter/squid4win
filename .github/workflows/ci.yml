@@ -17,7 +17,7 @@ concurrency:
 env:
   DOTNET_NOLOGO: true
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
-  SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL != '' && vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+  SONAR_HOST_URL: https://sonarcloud.io
 
 jobs:
   lint:
@@ -237,7 +237,7 @@ jobs:
 
       - name: Check SonarQube quality gate
         if: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') && secrets.SONAR_TOKEN != '' && vars.SONAR_PROJECT_KEY != '' }}
-        uses: SonarSource/sonarqube-quality-gate-action@master
+        uses: SonarSource/sonarqube-quality-gate-action@v1
         timeout-minutes: 10
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

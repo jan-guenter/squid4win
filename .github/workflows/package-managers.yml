@@ -60,10 +60,16 @@ jobs:
 
           $version = if ($env:INPUT_VERSION) {
             $env:INPUT_VERSION
-          } elseif ($tag.StartsWith('v')) {
-            $tag.Substring(1)
+          } elseif ($tag -match '^v(?<version>.+)$') {
+            $Matches.version
+          } elseif ($tag -match '^SQUID_(?<major>\d+)_(?<minor>\d+)(?:_(?<patch>\d+))?$') {
+            @(
+              $Matches.major,
+              $Matches.minor,
+              $(if ($Matches.patch) { $Matches.patch } else { $null })
+            ) | Where-Object { $_ } | Join-String -Separator '.'
           } else {
-            $tag
+            $versionFromConfig
           }
 
           $msiUrl = "https://github.com/$repository/releases/download/$tag/squid4win.msi"
