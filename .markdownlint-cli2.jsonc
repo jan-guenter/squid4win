@@ -9,6 +9,7 @@
   },
   "globs": [
     "**/*.md",
+    "!.agents/skills/**/*.md",
     "!LICENSE"
   ]
 }
