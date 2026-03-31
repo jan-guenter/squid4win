@@ -391,7 +391,7 @@ try {
     )
     $configureBashLines += "cd $(Convert-ToBashLiteral -Value $workRootMsys)"
     $configureBashLines += 'echo "Configuring Squid..."'
-    $configureBashLines += "$(Convert-ToBashLiteral -Value ($sourceRootMsys + '/configure')) $configureArgumentText"
+    $configureBashLines += "$(Convert-ToBashLiteral -Value ($sourceRootMsys + '/configure')) $configureArgumentText || exit `$?"
     $configureBashLines += 'if [ -f confdefs.h ]; then cp confdefs.h squid4win-confdefs.h; fi'
 
     & $bashPath -lc ($configureBashLines -join '; ')
@@ -422,10 +422,10 @@ try {
     $buildBashLines = @($bashCommonLines)
     $buildBashLines += "cd $(Convert-ToBashLiteral -Value $workRootMsys)"
     $buildBashLines += 'echo "Building Squid..."'
-    $buildBashLines += "make -j$MakeJobs"
+    $buildBashLines += "make -j$MakeJobs || exit `$?"
     $buildBashLines += "cd $(Convert-ToBashLiteral -Value $workRootMsys)"
     $buildBashLines += 'echo "Installing Squid..."'
-    $buildBashLines += 'make install'
+    $buildBashLines += 'make install || exit $?'
 
     & $bashPath -lc ($buildBashLines -join '; ')
     if ($LASTEXITCODE -ne 0) {

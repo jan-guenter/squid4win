@@ -285,6 +285,42 @@ $patchResults.Add([PSCustomObject]@{
     Applied = $mingwStdioCompatPatched
 })
 
+$mingwInitgroupsDeclarationSource = Get-Content -Raw -LiteralPath $mingwCompatPath
+$mingwInitgroupsDeclarationMarker = '#include "compat/initgroups.h" /* squid4win-mingw-initgroups-decl */'
+$mingwInitgroupsDeclarationPatched = $false
+
+if (-not $mingwInitgroupsDeclarationSource.Contains($mingwInitgroupsDeclarationMarker)) {
+    $newline = if ($mingwInitgroupsDeclarationSource.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $updatedMingwInitgroupsDeclarationSource = ([regex]'(?m)^#if HAVE_STDIO_H\r?\n#include <stdio\.h> /\* squid4win-mingw-syslog-compat \*/\r?\n#endif\r?\n').Replace(
+        $mingwInitgroupsDeclarationSource,
+        {
+            param($match)
+
+            $match.Value +
+            $mingwInitgroupsDeclarationMarker +
+            $newline
+        },
+        1
+    )
+
+    if ($updatedMingwInitgroupsDeclarationSource -eq $mingwInitgroupsDeclarationSource) {
+        throw "Failed to add the MinGW initgroups compatibility declaration include to $mingwCompatPath."
+    }
+
+    [System.IO.File]::WriteAllText(
+        $mingwCompatPath,
+        $updatedMingwInitgroupsDeclarationSource,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    $mingwInitgroupsDeclarationPatched = $true
+}
+
+$patchResults.Add([PSCustomObject]@{
+    Name = 'mingw-initgroups-declaration'
+    Path = $mingwCompatPath
+    Applied = $mingwInitgroupsDeclarationPatched
+})
+
 $mingwSignalCompatSource = Get-Content -Raw -LiteralPath $mingwCompatPath
 $mingwSignalCompatMarker = '#include <signal.h> /* squid4win-mingw-signal-compat */'
 $mingwSignalCompatPatched = $false
