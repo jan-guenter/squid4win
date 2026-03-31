@@ -208,7 +208,7 @@ jobs:
         run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release
 
       - name: Run SonarQube scan for pull requests
-        if: ${{ github.event_name == 'pull_request' && secrets.SONAR_TOKEN != '' && secrets.COPILOT_MCP_SONARQUBE_ORG != '' && vars.SONAR_PROJECT_KEY != '' }}
+        if: ${{ github.event_name == 'pull_request' }}
         uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -223,7 +223,7 @@ jobs:
             -Dsonar.pullrequest.base=${{ github.base_ref }}
 
       - name: Run SonarQube scan for branches
-        if: ${{ github.event_name != 'pull_request' && secrets.SONAR_TOKEN != '' && secrets.COPILOT_MCP_SONARQUBE_ORG != '' && vars.SONAR_PROJECT_KEY != '' }}
+        if: ${{ github.event_name != 'pull_request' }}
         uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -236,7 +236,7 @@ jobs:
             -Dsonar.branch.name=${{ github.ref_name }}
 
       - name: Check SonarQube quality gate
-        if: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') && secrets.SONAR_TOKEN != '' && vars.SONAR_PROJECT_KEY != '' }}
+        if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
         uses: SonarSource/sonarqube-quality-gate-action@v1
         timeout-minutes: 10
         env:
