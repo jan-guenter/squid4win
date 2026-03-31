@@ -1056,7 +1056,6 @@ $patchResults.Add([PSCustomObject]@{
 $win32MingwSupportPatched = $false
 $win32Source = Get-Content -Raw -LiteralPath $win32SourcePath
 $newline = if ($win32Source.Contains("`r`n")) { "`r`n" } else { "`n" }
-$win32MapErrorImplMarker = 'void WIN32_maperror(unsigned long WIN32_oserrno) /* squid4win-mingw-win32-maperror-impl */'
 $win32MapErrorImplPattern = [regex]'(?ms)^#if _SQUID_MINGW_\r?\nLPCRITICAL_SECTION dbg_mutex = nullptr; /\* squid4win-mingw-dbg-mutex \*/\r?\n\r?\nvoid\r?\nWIN32_maperror\(unsigned long WIN32_oserrno\) /\* squid4win-mingw-win32-maperror-impl \*/\r?\n\{.*?^\}\r?\n#endif\r?\n(?:\r?\n)?'
 $win32MapErrorImpl = @'
 #if _SQUID_MINGW_

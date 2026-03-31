@@ -67,10 +67,11 @@ function Add-CandidateRoot {
             $null = $candidateRoots.Add($resolvedPath)
         }
     } catch {
+        Write-Verbose "Ignoring invalid MSYS2 root candidate '$Path': $($_.Exception.Message)"
     }
 }
 
-function Add-DriveRelativeCandidateRoots {
+function Add-DriveRelativeCandidateRoot {
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$RelativePaths
@@ -97,7 +98,7 @@ if ($env:RUNNER_TEMP) {
     Add-CandidateRoot -Path (Join-Path $env:RUNNER_TEMP 'msys64')
 }
 
-Add-DriveRelativeCandidateRoots -RelativePaths @(
+Add-DriveRelativeCandidateRoot -RelativePaths @(
     'msys64',
     'tools\msys64'
 )

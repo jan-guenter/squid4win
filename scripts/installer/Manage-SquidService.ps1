@@ -20,15 +20,6 @@ function Get-NormalizedPath {
     return [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
 }
 
-function Ensure-Directory {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path
-    )
-
-    $null = New-Item -ItemType Directory -Path $Path -Force
-}
-
 function Resolve-SquidExecutable {
     param(
         [Parameter(Mandatory = $true)]
@@ -47,7 +38,7 @@ function Resolve-SquidExecutable {
     throw "Unable to find squid.exe under $Root."
 }
 
-function Test-SquidServiceExists {
+function Test-SquidServiceRegistration {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
@@ -56,7 +47,7 @@ function Test-SquidServiceExists {
     return $null -ne (Get-Service -Name $Name -ErrorAction SilentlyContinue)
 }
 
-function Ensure-SquidConfiguration {
+function Initialize-SquidConfiguration {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Root
@@ -105,12 +96,12 @@ switch ($Action) {
                 (Join-Path $resolvedInstallRoot 'var\logs'),
                 (Join-Path $resolvedInstallRoot 'var\run')
             )) {
-            Ensure-Directory -Path $directoryPath
+            $null = New-Item -ItemType Directory -Path $directoryPath -Force
         }
 
-        $configPath = Ensure-SquidConfiguration -Root $resolvedInstallRoot
+        $configPath = Initialize-SquidConfiguration -Root $resolvedInstallRoot
 
-        if (Test-SquidServiceExists -Name $ServiceName) {
+        if (Test-SquidServiceRegistration -Name $ServiceName) {
             Write-Host "Removing existing service registration for $ServiceName before reinstalling it."
             Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $ServiceName)
         }
@@ -119,7 +110,7 @@ switch ($Action) {
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-z', '-f', $configPath)
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $ServiceName, '-f', $configPath)
 
-        if (-not (Test-SquidServiceExists -Name $ServiceName)) {
+        if (-not (Test-SquidServiceRegistration -Name $ServiceName)) {
             throw "The Squid Windows service '$ServiceName' was not visible after installation."
         }
 
@@ -127,7 +118,7 @@ switch ($Action) {
     }
 
     'Uninstall' {
-        if (-not (Test-SquidServiceExists -Name $ServiceName)) {
+        if (-not (Test-SquidServiceRegistration -Name $ServiceName)) {
             Write-Host "Squid Windows service '$ServiceName' is already absent."
             return
         }

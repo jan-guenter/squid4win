@@ -30,7 +30,7 @@ function Get-AbsolutePath {
     return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
 }
 
-function Copy-DirectoryContents {
+function Copy-DirectoryContent {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Source,
@@ -87,8 +87,8 @@ if (Test-Path -LiteralPath $installPayloadRoot) {
 }
 
 $null = New-Item -ItemType Directory -Path $resolvedArtifactRoot, $installPayloadRoot -Force
-Copy-DirectoryContents -Source $resolvedSquidStageRoot -Destination $installPayloadRoot
-Copy-DirectoryContents -Source $resolvedTrayPublishRoot -Destination $installPayloadRoot
+Copy-DirectoryContent -Source $resolvedSquidStageRoot -Destination $installPayloadRoot
+Copy-DirectoryContent -Source $resolvedTrayPublishRoot -Destination $installPayloadRoot
 
 foreach ($directoryPath in @(
         $licensesRoot,

@@ -84,8 +84,8 @@ function Get-GeneratedScriptPath {
         }
     }
 
-    $matches = @(Get-ChildItem -Path $Root -Recurse -Filter $FileName -File -ErrorAction SilentlyContinue | Sort-Object FullName)
-    if ($matches.Count -eq 0) {
+    $generatedScriptMatches = @(Get-ChildItem -Path $Root -Recurse -Filter $FileName -File -ErrorAction SilentlyContinue | Sort-Object FullName)
+    if ($generatedScriptMatches.Count -eq 0) {
         if ($Required) {
             $searchedRoots = @($PreferredRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
             if ($searchedRoots.Count -gt 0) {
@@ -98,7 +98,7 @@ function Get-GeneratedScriptPath {
         return $null
     }
 
-    return $matches[0].FullName
+    return $generatedScriptMatches[0].FullName
 }
 
 function Enter-BuildLock {

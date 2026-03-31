@@ -4,7 +4,10 @@
         'Warning'
     )
     ExcludeRules = @(
-        'PSAvoidUsingWriteHost'
+        'PSAvoidUsingWriteHost',
+        'PSUseConsistentIndentation',
+        'PSPlaceCloseBrace',
+        'PSUseConsistentWhitespace'
     )
     Rules = @{
         PSUseConsistentIndentation = @{
