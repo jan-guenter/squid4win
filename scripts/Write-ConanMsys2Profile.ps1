@@ -83,6 +83,8 @@ $profileLines = @(
     "compiler.version=$compilerVersion",
     "compiler.cppstd=$([string]$buildProfile.compilerCppStd)",
     "compiler.libcxx=$([string]$buildProfile.compilerLibCxx)",
+    "compiler.exception=$([string]$buildProfile.compilerException)",
+    "compiler.threads=$([string]$buildProfile.compilerThreads)",
     "build_type=$Configuration",
     '',
     '[conf]',

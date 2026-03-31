@@ -24,6 +24,8 @@ $requiredProperties = @(
     'hostTriplet',
     'compilerCppStd',
     'compilerLibCxx',
+    'compilerException',
+    'compilerThreads',
     'configureArgs'
 )
 $missingProperties = foreach ($propertyName in $requiredProperties) {

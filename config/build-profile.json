@@ -24,6 +24,8 @@
   "hostTriplet": "x86_64-w64-mingw32",
   "compilerCppStd": "gnu17",
   "compilerLibCxx": "libstdc++11",
+  "compilerException": "seh",
+  "compilerThreads": "posix",
   "installer": "wix4",
   "trayApp": "wpf",
   "conanHome": ".\\.conan2",
