@@ -251,7 +251,6 @@ try {
         throw "conan install failed with exit code $LASTEXITCODE."
     }
 
-    $conanBuildScript = Get-GeneratedScriptPath -Root $conanOutputRoot -PreferredRoots @($conanGeneratorsRoot) -FileName 'conanbuild.sh' -Required
     $autotoolsScript = Get-GeneratedScriptPath -Root $conanOutputRoot -PreferredRoots @($conanGeneratorsRoot) -FileName 'conanautotoolstoolchain.sh' -Required
     $releaseScript = Get-GeneratedScriptPath -Root $conanOutputRoot -PreferredRoots @($conanGeneratorsRoot) -FileName 'squid-release.sh'
 
@@ -366,7 +365,10 @@ try {
         "export PATH=""/$msys2EnvDirectory/bin:/usr/bin:/usr/bin/core_perl:`$PATH"""
     )
 
-    foreach ($generatedScript in @($conanBuildScript, $autotoolsScript, $releaseScript)) {
+    # Keep the reviewed Conan metadata and autotools exports, but do not source
+    # the generic Conan build env because it can override the selected MSYS2
+    # linker/binutils with tool-requirement binaries.
+    foreach ($generatedScript in @($autotoolsScript, $releaseScript)) {
         if ($generatedScript) {
             $bashCommonLines += "source $(Convert-ToBashLiteral -Value (Convert-ToMsysPath -Path $generatedScript))"
         }
