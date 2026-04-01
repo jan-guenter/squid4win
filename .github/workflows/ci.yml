@@ -63,7 +63,7 @@ jobs:
         run: npm install --global --ignore-scripts markdownlint-cli2
 
       - name: Lint Markdown
-        run: markdownlint-cli2 "**/*.md"
+        run: markdownlint-cli2
 
       - name: Lint Python
         run: |

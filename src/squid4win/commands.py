@@ -71,7 +71,7 @@ def _string_list(value: object) -> list[str]:
 
 
 def _bool_text(enabled: bool) -> str:
-    return str(enabled).lower()
+    return str(enabled)
 
 
 def _powershell_executable() -> str:
