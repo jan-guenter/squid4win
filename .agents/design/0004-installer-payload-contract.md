@@ -76,6 +76,8 @@ The first committed installer contract is:
 - `scripts\Stage-ReleasePayload.ps1` is now a thin wrapper that mirrors the
   Conan-built staged bundle into `artifacts\install-root` and optionally creates
   the portable zip.
+- The staged bundle should carry the installer helper entry point plus any
+  helper scripts it imports under `installer\`.
 - That staged bundle should carry `squid.conf.template`,
   `squid.conf.default`, and `squid.conf.documented`, but not a generated
   `etc\squid.conf`.

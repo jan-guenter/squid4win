@@ -392,6 +392,14 @@ try {
         -RequireTray `
         -RequireNotices
     $stagedPayloadRoot = Get-NormalizedPath -Path ([string]$stageResult.InstallPayloadRoot)
+    $stagedServiceHelperPath = Join-Path $stagedPayloadRoot 'installer\svc.ps1'
+    if (-not (Test-Path -LiteralPath $stagedServiceHelperPath)) {
+        throw "The staged payload '$stagedPayloadRoot' is missing '$stagedServiceHelperPath'."
+    }
+    $stagedServiceHelperDependencyPath = Join-Path $stagedPayloadRoot 'installer\Assert-SquidServiceName.ps1'
+    if (-not (Test-Path -LiteralPath $stagedServiceHelperDependencyPath)) {
+        throw "The staged payload '$stagedPayloadRoot' is missing '$stagedServiceHelperDependencyPath'."
+    }
     $stagedConfigTemplatePath = Join-Path $stagedPayloadRoot 'etc\squid.conf.template'
     if (-not (Test-Path -LiteralPath $stagedConfigTemplatePath)) {
         throw "The staged payload '$stagedPayloadRoot' is missing '$stagedConfigTemplatePath'."
@@ -416,6 +424,7 @@ try {
 
     $expectedPaths = @(
         (Join-Path $resolvedInstallRoot 'installer\svc.ps1'),
+        (Join-Path $resolvedInstallRoot 'installer\Assert-SquidServiceName.ps1'),
         (Join-Path $resolvedInstallRoot 'etc\squid.conf'),
         (Join-Path $resolvedInstallRoot 'var\cache'),
         (Join-Path $resolvedInstallRoot 'var\logs'),
