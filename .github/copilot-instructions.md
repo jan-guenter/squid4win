@@ -19,6 +19,9 @@ Repo-specific directives:
   synchronized between `conandata.yml`, the root `conanfile.py`, and
   `conan\recipes\tray-app\conanfile.py` when shipped runtime DLLs or tray-app
   package dependencies change.
+- Keep the committed `conan\lockfiles\` flow cache-backed; use
+  `-UseTrayEditable` only for local root+tray iteration so editable lockfiles
+  stay under `build\conan\`.
 - Treat `.agents\design\*.md` as project memory. If an accepted design changes,
   update the ADR and preserve its alternatives/history sections.
 - Treat `.agents\skills\` as vendored third-party content and update it
@@ -28,11 +31,20 @@ Repo-specific directives:
 - Do not imply successful runner-safe installer validation, clean-host
   installer validation, or more installed-service proof than the committed
   automation and any explicitly cited successful runs.
+- Keep the staged payload free of a machine-specific `etc\squid.conf`; ship
+  `squid.conf.template` plus the upstream reference configs and let install
+  materialize the machine-local config.
 - Preserve current artifact names `squid4win.msi` and
   `squid4win-portable.zip` unless you also update the downstream packaging
   metadata flow.
 - Keep prerelease and stable GitHub release workflows distinct; prereleases
   stop at GitHub prerelease assets, while stable published releases drive
   downstream package-manager metadata.
+- Keep tag-triggered GitHub release publication gated by the `release-approval`
+  environment after artifact build completion and before the GitHub release is
+  published, and do not relax the signed-artifact checks that block unsigned
+  tag-triggered release publication.
+- Keep tag-triggered release/prerelease publication tied to the committed Conan
+  lockfile and to tags that point to commits already reachable from `main`.
 - Keep live feed publication credential-gated.
 - Never commit secrets or machine-specific paths.

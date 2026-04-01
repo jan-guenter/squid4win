@@ -23,3 +23,7 @@ cache_log stdio:__SQUID4WIN_INSTALL_ROOT__/var/logs/cache.log
 cache_store_log none
 pid_filename __SQUID4WIN_INSTALL_ROOT__/var/run/squid.pid
 mime_table __SQUID4WIN_INSTALL_ROOT__/etc/mime.conf
+unlinkd_program __SQUID4WIN_INSTALL_ROOT__/libexec/unlinkd.exe
+icon_directory __SQUID4WIN_INSTALL_ROOT__/share/icons
+error_directory __SQUID4WIN_INSTALL_ROOT__/share/errors/templates
+err_page_stylesheet __SQUID4WIN_INSTALL_ROOT__/etc/errorpage.css

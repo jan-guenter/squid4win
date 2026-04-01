@@ -34,6 +34,15 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - The repository now includes committed GitHub Actions automation for a
   runner-safe installed-service lifecycle path on isolated Windows runners with
   unique temporary service names and isolated cleanup.
+- `main` is protected by required checks for `Lint automation`, `Build tray
+  app`, `Build MSYS2/MinGW-w64`, and `SonarCloud Code Analysis`.
+- Tag-triggered GitHub release publication now pauses on the
+  `release-approval` environment after artifact build/upload and before the
+  GitHub release is published, and it refuses to publish unsigned artifacts
+  when signing credentials are not configured.
+- Tag-triggered release/prerelease publication now consumes the committed
+  `conan\lockfiles\` state without refreshing it during the publish run and only
+  allows tags that point to commits already reachable from `main`.
 - Cited successful execution of that workflow, clean-host installer upgrade
   validation, and end-to-end installed-service plus tray-app lifecycle
   validation are still pending.
@@ -63,6 +72,12 @@ details here.
 - Do not claim successful runner-safe, clean-host, or tray-app lifecycle proof
   beyond the committed automation and any explicitly cited successful
   validation.
+- Keep Squid service names passed through installer and runner-validation
+  automation alphanumeric and at most 32 characters because upstream
+  `squid.exe -n` enforces that contract.
+- Keep the staged payload free of a machine-specific `etc\squid.conf`; ship
+  `squid.conf.template` plus the upstream reference configs and let install
+  materialize the machine-local config.
 - If installer behavior changes, keep `conanfile.py`,
   `scripts\Stage-ReleasePayload.ps1`, `scripts\Build-Installer.ps1`, and
   `packaging\wix\` synchronized.
@@ -70,8 +85,18 @@ details here.
   `.github\workflows\build-release-artifacts.yml`,
   `.github\workflows\prerelease.yml`, `.github\workflows\release.yml`, and
   `.github\workflows\package-managers.yml` synchronized.
+- Keep tag-triggered GitHub release publication gated by the `release-approval`
+  environment after artifacts are built and before the GitHub release is
+  published, and keep signed-artifact checks in place so release/prerelease tag
+  runs fail instead of publishing unsigned assets.
+- Keep tag-triggered release/prerelease publication tied to the committed Conan
+  lockfile and to commits already reachable from `main`; do not re-resolve the
+  reviewed lockfile graph during the publish run.
 - If native runtime DLL harvesting or MinGW-linked imports change, keep
   `conandata.yml`, `conanfile.py`, and the staged notice bundle synchronized.
+- Keep the committed `conan\lockfiles\` flow cache-backed; use
+  `-UseTrayEditable` only for local root+tray iteration so editable lockfiles
+  stay under `build\conan\`.
 - Treat `.agents\skills\` as vendored third-party content and update it
   deliberately.
 - Prefer repo-relative paths and repo-local state; do not introduce

@@ -21,8 +21,9 @@ The first committed installer contract is:
   consumed as a package dependency of the root product recipe
 - default the MSI install root to `C:\Squid4Win`
 - keep Squid config and runtime directories under the install root for now
-- materialize `etc\squid.conf` from `packaging\defaults\squid.conf.template`
-  during install if the file is missing
+- stage `squid.conf.template` plus the upstream reference configs, but omit a
+  machine-specific `etc\squid.conf` and materialize that file during install if
+  it is missing
 - register and remove the Windows service using Squid's built-in `-i` and `-r`
   verbs through an installed PowerShell helper
 - keep the service name overridable so runner automation can validate isolated
@@ -42,7 +43,8 @@ The first committed installer contract is:
 - Parameterizing the service name lets automation exercise the real installer
   path without reusing runner-global service state.
 - Generating `squid.conf` from a template at install time lets the config use the
-  actual resolved install root without hard-coding one machine path in the repo.
+  actual resolved install root without hard-coding one machine path into the
+  staged payload.
 - Tray fallback logic keeps the tray useful before a future `ProgramData`
   migration is fully designed and tested.
 
@@ -74,6 +76,9 @@ The first committed installer contract is:
 - `scripts\Stage-ReleasePayload.ps1` is now a thin wrapper that mirrors the
   Conan-built staged bundle into `artifacts\install-root` and optionally creates
   the portable zip.
+- That staged bundle should carry `squid.conf.template`,
+  `squid.conf.default`, and `squid.conf.documented`, but not a generated
+  `etc\squid.conf`.
 - `scripts\Build-Installer.ps1` is the preferred entry point for building the
   MSI from the staged payload.
 - `packaging\wix\Squid4Win.Installer.wixproj` harvests the staged payload instead

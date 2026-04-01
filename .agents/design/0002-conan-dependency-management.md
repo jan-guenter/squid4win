@@ -42,6 +42,12 @@ Dependency management will use a split model:
 - treat lockfiles as a repository artifact class with dedicated refresh
   automation, using the same Conan-owned profiles and recipe options that the
   native build uses
+- allow the tray app recipe to switch between a cache-backed export for
+  committed lockfile refreshes and a local editable mode for root+tray
+  co-development
+- use the committed repository lockfile as-is for tag-triggered GitHub
+  release/prerelease publication instead of re-resolving the graph during the
+  publish run
 
 Conan now owns the Windows-native toolchain bootstrap, but it still does so in a
 way that preserves the proven MSYS2/MinGW build path instead of replacing it
@@ -77,6 +83,12 @@ with a different platform stack.
   top-level product recipe, versioned source metadata in `conandata.yml`, the
   Windows compatibility patch set under `conan\patches\`, the Conan-managed tool
   bootstrap, and the separate tray-app package consumed by the final bundle.
+- The committed repository lockfile remains cache-backed; local editable tray
+  work should use a build-local lockfile instead of rewriting
+  `conan\lockfiles\`.
+- Tag-triggered GitHub release/prerelease publication now depends on the
+  reviewed committed lockfile state instead of whatever ConanCenter serves at
+  publication time.
 - Lockfile automation exists now, but reproducibility claims should stay modest
   until a resolved lockfile is generated and validated as part of the evolving
   native build path.
@@ -90,11 +102,17 @@ with a different platform stack.
   build profile in the repo-local Conan home.
 - Keep `scripts\Resolve-ConanHome.ps1` and GitHub workflow environment settings
   aligned on repo-local Conan state.
-- Export the repo-local `python_requires` helper and tray recipe before lockfile
-  refreshes or local product builds so the committed multi-recipe graph stays
-  reproducible.
+- Export the repo-local `python_requires` helper before all local product builds
+  and lockfile refreshes.
+- Export the tray recipe before committed lockfile refreshes and cache-backed
+  product builds; use the tray recipe as a Conan editable for local root+tray
+  iteration.
 - Use `conan\lockfiles\` as the repository location for Conan lockfile outputs,
-  refreshed by dedicated automation when the Conan-owned graph changes.
+  refreshed by dedicated automation when the Conan-owned graph changes, and keep
+  editable-only lockfiles under `build\conan\`.
+- Keep `.github\workflows\build-release-artifacts.yml` consuming the committed
+  repository lockfile for tag-triggered publication and avoid rewriting it
+  during a publish run.
 - Keep `conandata.yml` build metadata, wrapper option switches, and workflow
   defaults synchronized when the native dependency or packaging baseline
   changes.

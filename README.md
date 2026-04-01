@@ -22,6 +22,14 @@ the result, and shipping a companion WPF tray app.
   runner-safe installed-service lifecycle path: unique temporary service name,
   isolated install root, start/stop/uninstall exercises, and cleanup on
   isolated Windows runners.
+- `main` is protected by required checks for `Lint automation`, `Build tray
+  app`, `Build MSYS2/MinGW-w64`, and `SonarCloud Code Analysis`.
+- Tag-triggered GitHub release publication now pauses on the
+  `release-approval` environment after artifact build/upload and before the
+  GitHub release is published, and it refuses to publish unsigned artifacts when
+  signing credentials are not configured. Tag-triggered publication now also
+  consumes the committed Conan lockfile as-is and only allows tags that point to
+  commits already reachable from `main`.
 
 ## What is validated today
 
@@ -42,8 +50,10 @@ successful run is explicitly cited.
   clean-host confirmation that MSI lifecycle behavior matches it and upgrade
   coverage
 - end-to-end installed Squid service plus tray-app interaction on a clean host
-- final release-signing flow
+- first signed tag publication with real release-signing credentials
 - first end-to-end downstream publication to winget, Chocolatey, and Scoop
+- manual repo-admin enablement of GitHub Copilot automatic review rules if that
+  ruleset option remains UI-only
 
 The tray app already contains real Windows service status and control wiring,
 but that should not be described as a fully validated installed-service
@@ -111,12 +121,38 @@ harvesting, and installer-support files are opt-in:
 ```
 
 `Update-ConanLockfile.ps1` refreshes the committed lockfile, and
-`Invoke-SquidBuild.ps1` consumes it when present.
+`Invoke-SquidBuild.ps1` consumes it when present. Tag-triggered GitHub
+release/prerelease publication now consumes that committed lockfile without
+refreshing it during the publish run.
+
+### Root + tray editable iteration
+
+For local work on the root recipe and `conan\recipes\tray-app` together, use
+the tray package in editable mode:
+
+```powershell
+.\scripts\Update-ConanLockfile.ps1 -Configuration Release -WithTray -UseTrayEditable
+.\scripts\Invoke-SquidBuild.ps1 -Configuration Release -WithTray -UseTrayEditable
+```
+
+`-UseTrayEditable` keeps the committed `conan\lockfiles\` file untouched,
+registers `squid4win_tray/0.1` as an editable dependency in the repo-local
+`.\.conan2` home, and writes the matching local lockfile under
+`build\conan\msys2-mingw-x64-release\lockfiles\`. The default cache-backed flow
+is restored automatically the next time you run the same scripts without
+`-UseTrayEditable`.
 
 GitHub Actions follows the same root-recipe path: `release.yml` handles stable
 `v*` tags, `prerelease.yml` handles `v*-*` tags, and both drive
 `Invoke-ConanRootRecipe.ps1` explicitly before payload staging and MSI
-assembly. Only stable published GitHub releases fan out into
+assembly. When a tag-triggered run is allowed to publish a GitHub release, the
+workflow now builds and uploads the artifacts first, then waits on the
+`release-approval` environment before the final GitHub release publication
+step. Those tag-triggered publish paths now fail early unless signing
+credentials are configured and both the portable zip payload and MSI are
+actually signed. They also require the tag to point to a commit already
+reachable from `main`. Workflow-dispatch runs can still build artifacts without
+publishing a GitHub release. Only stable published GitHub releases fan out into
 `package-managers.yml`.
 
 ### Runner-safe installed-service validation
@@ -129,10 +165,15 @@ build is:
 ```
 
 The script stages a release payload under `artifacts\service-validation\`,
-builds an MSI with a unique temporary service name, installs it into an
-isolated root, starts and stops the service, uninstalls the MSI, and removes
-leftover runner-only state. By default it refuses to run outside GitHub Actions
-unless `-AllowNonRunnerExecution` is passed intentionally. This documents the
+builds an MSI with a unique short alphanumeric temporary service name,
+installs it into an isolated root, starts and stops the service, uninstalls
+the MSI, and removes leftover runner-only state. The temporary name stays
+within Squid's upstream `-n` contract of 32 alphanumeric characters. By
+contract the staged payload carries `etc\squid.conf.template` and the upstream
+reference configs, but not a machine-specific `etc\squid.conf`; installation
+materializes that file at the actual destination root.
+By default the script refuses to run outside GitHub Actions unless
+`-AllowNonRunnerExecution` is passed intentionally. This documents the
 committed automation path only; it does not by itself claim a cited successful
 runner execution.
 

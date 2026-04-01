@@ -31,6 +31,19 @@ The automation baseline is:
 - keep prerelease artifact publication separate from stable release publication,
   and do not auto-generate downstream package-manager metadata from prerelease
   GitHub releases
+- gate tag-triggered GitHub release publication with the `release-approval`
+  environment after artifact build/upload completes and before the GitHub
+  release itself is published
+- add release-integrity scaffolding that emits a SHA256 manifest for the MSI and
+  portable zip, attempts GitHub artifact attestations when the platform supports
+  them, and uploads the attestation bundle alongside the built artifacts
+- keep Windows Authenticode signing hooks for staged payload executables,
+  packaged helper scripts, and the MSI available for non-publishing/manual
+  builds until signing material is explicitly provisioned
+- fail tag-triggered GitHub release publication when signing material is absent
+  or when the portable zip payload or MSI would be published unsigned
+- require tag-triggered GitHub release/prerelease publication to point to a
+  commit already reachable from `main`
 - generate winget, Chocolatey, and Scoop metadata from released artifacts in a
   dedicated workflow
 - keep live publication in a separate manual workflow that reuses that
@@ -52,6 +65,14 @@ The automation baseline is:
   silently degrading maintainability.
 - Package-manager metadata should be generated from the real release artifacts so
   URLs and checksums stay aligned with the published MSI and portable zip.
+- Release consumers need an integrity signal before final code-signing
+  credentials exist, so checksums and attestations should be available without
+  changing the artifact names or forcing a new credential dependency.
+- Unsigned artifact builds are still useful for local validation and non-
+  publishing workflow runs, but tag-triggered GitHub releases should never
+  publish an unsigned MSI or portable zip.
+- Tag-triggered publication should inherit the repository's protected-main
+  quality posture instead of trusting maintainers to tag an arbitrary SHA.
 - Vendored skills should not generate noise in Sonar or review flows unless a
   change intentionally updates those skills.
 
@@ -65,6 +86,11 @@ The automation baseline is:
   package metadata generation depends on them.
 - Preview releases stop at GitHub prerelease assets; downstream package-manager
   metadata remains a stable-release concern.
+- Release assets may now include checksum and attestation sidecars in addition
+  to the MSI and portable zip, while tag-triggered GitHub release publication
+  now remains blocked until real Authenticode signing credentials are available.
+- Release/prerelease tag publication now also rejects tags that do not point to
+  commits already reachable from `main`.
 - Feed publication now stays tied to the generated metadata, but it runs only
   from the dedicated manual publication workflow instead of the metadata
   workflow itself.
@@ -80,11 +106,17 @@ The automation baseline is:
 - Keep `.github\workflows\service-runner-validation.yml` responsible for the
   isolated Windows runner lifecycle validation path.
 - Keep feed metadata generation in `scripts\Export-PackageManagerMetadata.ps1`.
+- Keep `scripts\Invoke-AuthenticodeSigning.ps1` responsible for optional
+  Authenticode signing when a certificate path or base64-encoded PFX secret is
+  provided.
 - Keep the package-manager publish helpers under `scripts\` responsible for the
   credential-gated winget, Chocolatey, and Scoop hand-off steps.
 - Keep `.github\workflows\package-managers.yml` scoped to stable published
   releases; prerelease workflows should stop after GitHub prerelease asset
   publication.
+- Keep `.github\workflows\build-release-artifacts.yml` responsible for
+  generating the release checksum manifest and best-effort GitHub artifact
+  attestations for the MSI and portable zip.
 - Keep `.github\workflows\package-managers.yml` responsible for downloading
   release assets and generating feed metadata from those real binaries.
 - Keep `.github\workflows\package-manager-publish.yml` responsible for the

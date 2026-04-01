@@ -7,11 +7,19 @@ param(
     [string]$InstallerPayloadRoot = (Join-Path $PSScriptRoot '..\artifacts\install-root'),
     [string]$ArtifactRoot = (Join-Path $PSScriptRoot '..\artifacts'),
     [string]$ProductVersion,
-    [string]$ServiceName = 'Squid4Win'
+    [string]$ServiceName = 'Squid4Win',
+    [switch]$SignMsi,
+    [string]$SigningCertificatePath = $env:SQUID4WIN_SIGNING_CERTIFICATE_PATH,
+    [string]$SigningCertificateBase64 = $env:SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64,
+    [string]$SigningCertificateSecret = $env:SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD,
+    [string]$SigningTimestampServer = $env:SQUID4WIN_SIGNING_TIMESTAMP_URL,
+    [string]$SignToolPath = $env:SQUID4WIN_SIGNTOOL_PATH
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Get-AbsolutePath.ps1')
+. (Join-Path $PSScriptRoot 'Assert-SquidServiceName.ps1')
+$resolvedServiceName = Assert-SquidServiceName -Name $ServiceName
 $resolvedRepositoryRoot = Get-AbsolutePath -Path $RepositoryRoot -BasePath (Get-Location).Path
 $resolvedProjectPath = Get-AbsolutePath -Path $ProjectPath -BasePath $resolvedRepositoryRoot
 $resolvedInstallerPayloadRoot = Get-AbsolutePath -Path $InstallerPayloadRoot -BasePath $resolvedRepositoryRoot
@@ -40,7 +48,7 @@ foreach ($pathToClear in @($configurationOutputRoot, $configurationIntermediateR
     --nologo `
     "-p:InstallerPayloadRoot=$resolvedInstallerPayloadRoot" `
     "-p:ProductVersion=$resolvedProductVersion" `
-    "-p:SquidServiceName=$ServiceName" | Out-Host
+    "-p:SquidServiceName=$resolvedServiceName" | Out-Host
 $dotnetBuildExitCode = $LASTEXITCODE
 if ($dotnetBuildExitCode -ne 0) {
     throw "dotnet build failed with exit code $dotnetBuildExitCode while building the installer."
@@ -59,9 +67,32 @@ if ($null -eq $msiPath) {
 }
 $null = New-Item -ItemType Directory -Path $resolvedArtifactRoot -Force
 Copy-Item -LiteralPath $msiPath.FullName -Destination $msiArtifactPath -Force
+$msiSigning = [PSCustomObject]@{
+    SigningEnabled = $false
+    SignedFileCount = 0
+    SignedFiles = @()
+    SkippedFileCount = 0
+    SkippedFiles = @()
+}
+if ($SignMsi) {
+    $msiSigning = & (Join-Path $PSScriptRoot 'Invoke-AuthenticodeSigning.ps1') `
+        -Path $msiArtifactPath `
+        -RepositoryRoot $resolvedRepositoryRoot `
+        -RequireMatches `
+        -CertificatePath $SigningCertificatePath `
+        -CertificateBase64 $SigningCertificateBase64 `
+        -CertificateSecret $SigningCertificateSecret `
+        -TimestampServer $SigningTimestampServer `
+        -SignToolPath $SignToolPath
+}
 [PSCustomObject]@{
     ProductVersion = $resolvedProductVersion
-    ServiceName = $ServiceName
+    ServiceName = $resolvedServiceName
     MsiPath = $msiArtifactPath
     BuildOutputPath = $msiPath.FullName
+    SigningEnabled = [bool]$msiSigning.SigningEnabled
+    SignedFileCount = [int]$msiSigning.SignedFileCount
+    SignedFiles = @($msiSigning.SignedFiles)
+    SkippedFileCount = [int]$msiSigning.SkippedFileCount
+    SkippedFiles = @($msiSigning.SkippedFiles)
 }
