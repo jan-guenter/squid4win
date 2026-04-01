@@ -11,6 +11,11 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, 
 
 from squid4win.paths import discover_repository_root
 
+_DEFAULT_REPOSITORY = "jan-guenter/squid4win"
+_REPOSITORY_PATTERN = r"[^/]+/[^/]+"
+_REPOSITORY_FORMAT_MESSAGE = "Repository values must follow the owner/name format."
+_TRAY_EXECUTABLE_NAME = "Squid4Win.Tray.exe"
+
 
 class BuildConfiguration(StrEnum):
     DEBUG = "Debug"
@@ -162,8 +167,8 @@ class TrayBuildLayout(BaseModel):
             configuration_label=configuration_label,
             publish_root=publish_root,
             package_root=package_root,
-            published_tray_executable_path=publish_root / "Squid4Win.Tray.exe",
-            packaged_tray_executable_path=package_root / "bin" / "Squid4Win.Tray.exe",
+            published_tray_executable_path=publish_root / _TRAY_EXECUTABLE_NAME,
+            packaged_tray_executable_path=package_root / "bin" / _TRAY_EXECUTABLE_NAME,
             notice_manifest_path=package_root / "licenses" / "third-party-package-manifest.json",
         )
 
@@ -215,7 +220,7 @@ class BundlePackageState(BaseModel):
                 squid_stage_root / "bin" / "squid.exe",
             )
         )
-        staged_tray_executable_path = squid_stage_root / "Squid4Win.Tray.exe"
+        staged_tray_executable_path = squid_stage_root / _TRAY_EXECUTABLE_NAME
         staged_notices_path = squid_stage_root / "THIRD-PARTY-NOTICES.txt"
         staged_service_script_path = squid_stage_root / "installer" / "svc.ps1"
         staged_config_template_path = squid_stage_root / "etc" / "squid.conf.template"
@@ -381,7 +386,7 @@ class PackageManagerExportOptions(BaseModel):
     repository_root: Path | None = None
     version: Annotated[str, Field(min_length=1)]
     tag: Annotated[str | None, Field(min_length=1)] = None
-    repository: str = "jan-guenter/squid4win"
+    repository: str = _DEFAULT_REPOSITORY
     msi_path: Path | None = None
     portable_zip_path: Path | None = None
     output_root: Path | None = None
@@ -396,8 +401,8 @@ class PackageManagerExportOptions(BaseModel):
     @field_validator("repository")
     @classmethod
     def validate_repository(cls, value: str) -> str:
-        if not re.fullmatch(r"[^/]+/[^/]+", value):
-            msg = "Repository values must follow the owner/name format."
+        if not re.fullmatch(_REPOSITORY_PATTERN, value):
+            msg = _REPOSITORY_FORMAT_MESSAGE
             raise ValueError(msg)
         return value
 
@@ -421,7 +426,7 @@ class PublishWingetOptions(BaseModel):
     repository_root: Path | None = None
     version: Annotated[str, Field(min_length=1)]
     tag: Annotated[str | None, Field(min_length=1)] = None
-    repository: str = "jan-guenter/squid4win"
+    repository: str = _DEFAULT_REPOSITORY
     manifest_root: Path | None = None
     package_identifier: Annotated[str, Field(min_length=1)] = "JanGuenter.Squid4Win"
     target_repository: str = "microsoft/winget-pkgs"
@@ -431,8 +436,8 @@ class PublishWingetOptions(BaseModel):
     @field_validator("repository", "target_repository")
     @classmethod
     def validate_repository(cls, value: str) -> str:
-        if not re.fullmatch(r"[^/]+/[^/]+", value):
-            msg = "Repository values must follow the owner/name format."
+        if not re.fullmatch(_REPOSITORY_PATTERN, value):
+            msg = _REPOSITORY_FORMAT_MESSAGE
             raise ValueError(msg)
         return value
 
@@ -443,7 +448,7 @@ class PublishScoopOptions(BaseModel):
     repository_root: Path | None = None
     version: Annotated[str, Field(min_length=1)]
     tag: Annotated[str | None, Field(min_length=1)] = None
-    repository: str = "jan-guenter/squid4win"
+    repository: str = _DEFAULT_REPOSITORY
     manifest_root: Path | None = None
     target_repository: str
     base_branch: Annotated[str, Field(min_length=1)] = "master"
@@ -453,8 +458,8 @@ class PublishScoopOptions(BaseModel):
     @field_validator("repository", "target_repository")
     @classmethod
     def validate_repository(cls, value: str) -> str:
-        if not re.fullmatch(r"[^/]+/[^/]+", value):
-            msg = "Repository values must follow the owner/name format."
+        if not re.fullmatch(_REPOSITORY_PATTERN, value):
+            msg = _REPOSITORY_FORMAT_MESSAGE
             raise ValueError(msg)
         return value
 
@@ -511,8 +516,8 @@ class UpstreamVersionOptions(BaseModel):
     @field_validator("repository")
     @classmethod
     def validate_repository(cls, value: str) -> str:
-        if not re.fullmatch(r"[^/]+/[^/]+", value):
-            msg = "Repository values must follow the owner/name format."
+        if not re.fullmatch(_REPOSITORY_PATTERN, value):
+            msg = _REPOSITORY_FORMAT_MESSAGE
             raise ValueError(msg)
         return value
 

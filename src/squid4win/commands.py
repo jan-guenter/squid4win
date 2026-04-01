@@ -34,6 +34,9 @@ from squid4win.paths import resolve_path
 if TYPE_CHECKING:
     from squid4win.runner import PlanRunner
 
+_BUILD_MISSING_ARGUMENT = "--build=missing"
+_TRAY_EXECUTABLE_NAME = "Squid4Win.Tray.exe"
+
 
 @dataclass(frozen=True)
 class ConanContext:
@@ -372,7 +375,7 @@ def _run_invocation(
 def _derive_installer_version(metadata_path: Path) -> str:
     metadata = _load_json_object(metadata_path)
     raw_version = str(metadata.get("version", "")).strip()
-    numeric_parts = [int(part) for part in re.split(r"[^0-9]+", raw_version) if part]
+    numeric_parts = [int(part) for part in re.split(r"\D+", raw_version) if part]
     if not numeric_parts:
         msg = f"Unable to derive an installer version from '{raw_version}'."
         raise ValueError(msg)
@@ -644,7 +647,7 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
                         f"build_type={options.configuration.value}",
                         "-s:b",
                         f"build_type={options.configuration.value}",
-                        "--build=missing",
+                        _BUILD_MISSING_ARGUMENT,
                         *recipe_option_arguments,
                     ),
                     environment=base_environment,
@@ -696,7 +699,7 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
                     f"build_type={options.configuration.value}",
                     "-s:b",
                     f"build_type={options.configuration.value}",
-                    "--build=missing",
+                    _BUILD_MISSING_ARGUMENT,
                     *recipe_option_arguments,
                 ),
                 environment=build_environment,
@@ -780,7 +783,7 @@ def build_conan_lockfile_update_plan(options: ConanLockfileUpdateOptions) -> Aut
                     f"build_type={options.configuration.value}",
                     "-s:b",
                     f"build_type={options.configuration.value}",
-                    "--build=missing",
+                    _BUILD_MISSING_ARGUMENT,
                     *recipe_option_arguments,
                 ),
                 environment=base_environment,
@@ -943,7 +946,7 @@ def run_tray_build(options: TrayBuildOptions, runner: PlanRunner, *, execute: bo
 
     runner.run(plan)
 
-    published_tray_executable_path = context.publish_root / "Squid4Win.Tray.exe"
+    published_tray_executable_path = context.publish_root / _TRAY_EXECUTABLE_NAME
     if not published_tray_executable_path.is_file():
         msg = f"Expected the published tray executable at '{published_tray_executable_path}'."
         raise FileNotFoundError(msg)
@@ -952,7 +955,7 @@ def run_tray_build(options: TrayBuildOptions, runner: PlanRunner, *, execute: bo
     shutil.copy2(context.license_path, context.package_root / "licenses" / "LICENSE")
     manifest_path = _harvest_tray_notice_manifest(context.publish_root, context.package_root)
 
-    packaged_tray_executable_path = context.package_root / "bin" / "Squid4Win.Tray.exe"
+    packaged_tray_executable_path = context.package_root / "bin" / _TRAY_EXECUTABLE_NAME
     if not packaged_tray_executable_path.is_file():
         msg = f"Expected the packaged tray executable at '{packaged_tray_executable_path}'."
         raise FileNotFoundError(msg)
@@ -1200,7 +1203,7 @@ def run_bundle_package(
     install_payload_root.mkdir(parents=True, exist_ok=True)
     _copy_directory_contents(bundle_state.squid_stage_root, install_payload_root)
 
-    tray_executable_path = install_payload_root / "Squid4Win.Tray.exe"
+    tray_executable_path = install_payload_root / _TRAY_EXECUTABLE_NAME
     if _bundle_requires_tray(options) and not tray_executable_path.is_file():
         msg = f"Expected the staged tray executable at '{tray_executable_path}'."
         raise FileNotFoundError(msg)

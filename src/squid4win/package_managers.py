@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -34,6 +34,9 @@ if TYPE_CHECKING:
     from squid4win.runner import PlanRunner
 
 _WINGET_MANIFEST_VERSION = "1.9.0"
+_LOGGER_NAME = "squid4win.package_managers"
+_NUSPEC_XML_NAMESPACE = "http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd"
+_ATOM_XML_NAMESPACE = "http://www.w3.org/2005/Atom"
 
 
 @dataclass(frozen=True)
@@ -158,7 +161,7 @@ def _render_winget_documents(
 def _render_chocolatey_nuspec(context: PackageManagerExportContext) -> str:
     package_element = ElementTree.Element(
         "package",
-        {"xmlns": "http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd"},
+        {"xmlns": _NUSPEC_XML_NAMESPACE},
     )
     metadata_element = ElementTree.SubElement(package_element, "metadata")
     for tag_name, value in (
@@ -344,7 +347,7 @@ def run_package_manager_export(
     execute: bool,
 ) -> int:
     _ = runner
-    logger = get_logger("squid4win.package_managers")
+    logger = get_logger(_LOGGER_NAME)
     context = _resolve_export_context(options)
     result = _build_export_result(context)
 
@@ -397,7 +400,7 @@ def _run_command(
     env: dict[str, str] | None = None,
     check: bool = True,
 ) -> str:
-    logger = get_logger("squid4win.package_managers")
+    logger = get_logger(_LOGGER_NAME)
     logger.debug("RUN: %s", _command_line(command))
     completed = subprocess.run(
         command,
@@ -797,7 +800,7 @@ def _test_chocolatey_package_version_presence(
         )
         response.raise_for_status()
         feed = ElementTree.fromstring(response.text)
-        namespace = {"atom": "http://www.w3.org/2005/Atom"}
+        namespace = {"atom": _ATOM_XML_NAMESPACE}
         return bool(feed.findall(".//atom:entry", namespace))
     except (ElementTree.ParseError, OSError, httpx.HTTPError) as error:
         logger.warning(
@@ -818,7 +821,7 @@ def _publish_chocolatey_package_to_source(
     query_source: str,
     repository_root: Path,
 ) -> ChocolateyPublicationResult:
-    if not source.lower().startswith(("http://", "https://")):
+    if urlsplit(source).scheme not in {"http", "https"}:
         resolved_source_path = resolve_path(source, base=repository_root)
         if resolved_source_path is None:
             msg = "Unable to resolve the Chocolatey push source path."
@@ -869,7 +872,7 @@ def run_publish_winget(
     execute: bool,
 ) -> int:
     _ = runner
-    logger = get_logger("squid4win.package_managers")
+    logger = get_logger(_LOGGER_NAME)
     winget_manifest_root, working_root, tag = _resolve_winget_manifest_root(options)
     identifier_segments = options.package_identifier.split(".")
     if len(identifier_segments) < 2:
@@ -931,7 +934,7 @@ def run_publish_scoop(
     execute: bool,
 ) -> int:
     _ = runner
-    logger = get_logger("squid4win.package_managers")
+    logger = get_logger(_LOGGER_NAME)
     scoop_manifest_path, working_root, tag = _resolve_scoop_manifest_path(options)
     sanitized_version = re.sub(r"[^A-Za-z0-9._-]", "-", options.version)
     release_url = f"https://github.com/{options.repository}/releases/tag/{tag}"
@@ -983,7 +986,7 @@ def run_publish_chocolatey(
     execute: bool,
 ) -> int:
     _ = runner
-    logger = get_logger("squid4win.package_managers")
+    logger = get_logger(_LOGGER_NAME)
     paths = RepositoryPaths.discover(options.repository_root)
     repository_root = paths.repository_root
     package_root = _resolved_or_default(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jinja2 import DictLoader, Environment, FileSystemLoader, StrictUndefined
+from jinja2 import DictLoader, Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 
 def create_template_environment(template_root: Path | None = None) -> Environment:
@@ -12,7 +12,7 @@ def create_template_environment(template_root: Path | None = None) -> Environmen
 
     return Environment(
         loader=loader,
-        autoescape=False,
+        autoescape=select_autoescape(default_for_string=True),
         keep_trailing_newline=True,
         lstrip_blocks=True,
         trim_blocks=True,

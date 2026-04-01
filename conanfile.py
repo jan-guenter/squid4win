@@ -24,6 +24,7 @@ from conan.tools.files import (
 from conan.tools.gnu import AutotoolsToolchain
 
 MACRO_NAME_PATTERN = re.compile(r"[A-Za-z_]\w*\Z", re.ASCII)
+SQUID_RELEASE_JSON = "squid-release.json"
 
 
 class Squid4WinConan(ConanFile):
@@ -50,7 +51,7 @@ class Squid4WinConan(ConanFile):
         export_conandata_patches(self)
         copy(
             self,
-            "squid-release.json",
+            SQUID_RELEASE_JSON,
             src=os.path.join(self.recipe_folder, "conan"),
             dst=os.path.join(self.export_folder, "conan"),
         )
@@ -332,11 +333,11 @@ class Squid4WinConan(ConanFile):
         return json.loads(load(self, os.fspath(json_path)))
 
     def _release_metadata(self) -> dict[str, object]:
-        metadata_path = Path(self.recipe_folder) / "conan" / "squid-release.json"
+        metadata_path = Path(self.recipe_folder) / "conan" / SQUID_RELEASE_JSON
         if not metadata_path.is_file():
             return {}
 
-        return self._load_json_file("conan", "squid-release.json")
+        return self._load_json_file("conan", SQUID_RELEASE_JSON)
 
     def _build_settings(self) -> dict[str, object]:
         build_settings = self.conan_data.get("build")

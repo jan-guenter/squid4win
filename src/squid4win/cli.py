@@ -36,6 +36,8 @@ from squid4win.runner import PlanExecutionError, PlanRunner
 from squid4win.upstream import GitHubReleaseClient
 from squid4win.version_helper import TargetUpstreamRelease, UpstreamVersionManager
 
+_DEFAULT_REPOSITORY = "jan-guenter/squid4win"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -139,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_command_arguments(package_manager_export)
     package_manager_export.add_argument("--version", required=True)
     package_manager_export.add_argument("--tag")
-    package_manager_export.add_argument("--repository", default="jan-guenter/squid4win")
+    package_manager_export.add_argument("--repository", default=_DEFAULT_REPOSITORY)
     package_manager_export.add_argument("--msi-path", type=Path)
     package_manager_export.add_argument("--portable-zip-path", type=Path)
     package_manager_export.add_argument("--output-root", type=Path)
@@ -159,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_command_arguments(publish_winget)
     publish_winget.add_argument("--version", required=True)
     publish_winget.add_argument("--tag")
-    publish_winget.add_argument("--repository", default="jan-guenter/squid4win")
+    publish_winget.add_argument("--repository", default=_DEFAULT_REPOSITORY)
     publish_winget.add_argument("--manifest-root", type=Path)
     publish_winget.add_argument("--package-identifier", default="JanGuenter.Squid4Win")
     publish_winget.add_argument("--target-repository", default="microsoft/winget-pkgs")
@@ -187,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_command_arguments(publish_scoop)
     publish_scoop.add_argument("--version", required=True)
     publish_scoop.add_argument("--tag")
-    publish_scoop.add_argument("--repository", default="jan-guenter/squid4win")
+    publish_scoop.add_argument("--repository", default=_DEFAULT_REPOSITORY)
     publish_scoop.add_argument("--manifest-root", type=Path)
     publish_scoop.add_argument("--target-repository", required=True)
     publish_scoop.add_argument("--base-branch", default="master")
@@ -422,7 +424,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         LookupError,
         OSError,
         PlanExecutionError,
-        RuntimeError,
         ValueError,
         httpx.HTTPError,
     ) as error:
