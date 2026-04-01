@@ -54,6 +54,18 @@ if (-not $Version) {
     $SourceArchiveSha256 = $release.SourceArchiveSha256
 }
 
+if ($PublishedAt) {
+    $publishedAtTimestamp = [System.DateTimeOffset]::MinValue
+    $dateParseStyles = [System.Globalization.DateTimeStyles]::AllowWhiteSpaces -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
+    $publishedAtText = [string]$PublishedAt
+    if (
+        [System.DateTimeOffset]::TryParse($publishedAtText, [System.Globalization.CultureInfo]::InvariantCulture, $dateParseStyles, [ref]$publishedAtTimestamp) -or
+        [System.DateTimeOffset]::TryParse($publishedAtText, [System.Globalization.CultureInfo]::CurrentCulture, $dateParseStyles, [ref]$publishedAtTimestamp)
+    ) {
+        $PublishedAt = $publishedAtTimestamp.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+}
+
 $updatedMetadata = [ordered]@{
     repository = $Repository
     version = $Version
@@ -76,44 +88,37 @@ $updatedConfig = [ordered]@{
     sourceArchiveUrl = $SourceArchive
 }
 
-$newConanDataContent = @"
-sources:
-  "$Version":
-    url: "$SourceArchive"
-    sha256: "$SourceArchiveSha256"
-    strip_root: true
+if (-not (Test-Path -LiteralPath $resolvedConanDataPath)) {
+    throw "Expected existing conandata.yml at $resolvedConanDataPath so the Squid version update can preserve the current build metadata."
+}
 
-patches:
-  "$Version":
-    - patch_file: "conan/patches/squid/0001-mingw-compat-core-shims.patch"
-      patch_description: "Provide foundational MinGW POSIX compatibility shims."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0002-mingw-build-system-flags.patch"
-      patch_description: "Adjust Squid build-system flags and MinGW link libraries."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0003-mingw-disk-io-compat.patch"
-      patch_description: "Teach Squid DiskIO backends to build and run under MinGW."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0004-mingw-socket-and-ipc-compat.patch"
-      patch_description: "Add MinGW-safe Winsock and IPC wrappers."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0005-mingw-win32-runtime-support.patch"
-      patch_description: "Expose the Win32 runtime helpers needed by the MinGW port."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0006-mingw-cert-generator-compat.patch"
-      patch_description: "Fix MinGW certificate helper and certificate DB support."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0007-mingw-main-and-service-integration.patch"
-      patch_description: "Wire MinGW into Squid runtime startup and Windows service paths."
-      base_path: "."
-      strip: 2
-"@ + [Environment]::NewLine
+$existingConanDataContent = Get-Content -Raw -LiteralPath $resolvedConanDataPath
+$buildAndPatchSectionMatch = [regex]::Match($existingConanDataContent, '(?ms)^build:\r?\n.*$')
+if (-not $buildAndPatchSectionMatch.Success) {
+    throw "Unable to locate the top-level build section in $resolvedConanDataPath."
+}
+
+$newline = if ($existingConanDataContent.Contains("`r`n")) { "`r`n" } else { "`n" }
+$newPatchSectionHeader = "patches:$newline  ""$Version"":"
+if ($buildAndPatchSectionMatch.Value -notmatch 'patches:\r?\n\s+"[^"]+":') {
+    throw "Unable to locate the versioned patches section in $resolvedConanDataPath."
+}
+
+$preservedConanDataTail = $buildAndPatchSectionMatch.Value -replace 'patches:\r?\n\s+"[^"]+":', $newPatchSectionHeader
+$newConanDataContent = (
+    @(
+        'sources:'
+        "  ""$Version"":"
+        "    url: ""$SourceArchive"""
+        "    sha256: ""$SourceArchiveSha256"""
+        '    strip_root: true'
+        ''
+    ) -join $newline
+) + $newline + $preservedConanDataTail
+
+if (-not $newConanDataContent.EndsWith($newline)) {
+    $newConanDataContent += $newline
+}
 
 $newMetadataContent = ($updatedMetadata | ConvertTo-Json -Depth 5) + [Environment]::NewLine
 $newConfigContent = ($updatedConfig | ConvertTo-Json -Depth 5) + [Environment]::NewLine
@@ -131,10 +136,7 @@ if (Test-Path -LiteralPath $resolvedConfigPath) {
     $configChanged = $existingConfigContent.Trim() -ne $newConfigContent.Trim()
 }
 
-if (Test-Path -LiteralPath $resolvedConanDataPath) {
-    $existingConanDataContent = Get-Content -Raw -LiteralPath $resolvedConanDataPath
-    $conanDataChanged = $existingConanDataContent.Trim() -ne $newConanDataContent.Trim()
-}
+$conanDataChanged = $existingConanDataContent.Trim() -ne $newConanDataContent.Trim()
 
 if ($metadataChanged) {
     Set-Content -LiteralPath $resolvedMetadataPath -Value $newMetadataContent -Encoding utf8
