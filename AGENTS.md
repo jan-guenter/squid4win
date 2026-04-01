@@ -34,6 +34,11 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - The repository now includes committed GitHub Actions automation for a
   runner-safe installed-service lifecycle path on isolated Windows runners with
   unique temporary service names and isolated cleanup.
+- `main` is protected by required checks for `Lint automation`, `Build tray
+  app`, `Build MSYS2/MinGW-w64`, and `SonarCloud Code Analysis`.
+- Tag-triggered GitHub release publication now pauses on the
+  `release-approval` environment after artifact build/upload and before the
+  GitHub release is published.
 - Cited successful execution of that workflow, clean-host installer upgrade
   validation, and end-to-end installed-service plus tray-app lifecycle
   validation are still pending.

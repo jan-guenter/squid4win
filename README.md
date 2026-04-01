@@ -22,6 +22,11 @@ the result, and shipping a companion WPF tray app.
   runner-safe installed-service lifecycle path: unique temporary service name,
   isolated install root, start/stop/uninstall exercises, and cleanup on
   isolated Windows runners.
+- `main` is protected by required checks for `Lint automation`, `Build tray
+  app`, `Build MSYS2/MinGW-w64`, and `SonarCloud Code Analysis`.
+- Tag-triggered GitHub release publication now pauses on the
+  `release-approval` environment after artifact build/upload and before the
+  GitHub release is published.
 
 ## What is validated today
 
@@ -44,6 +49,8 @@ successful run is explicitly cited.
 - end-to-end installed Squid service plus tray-app interaction on a clean host
 - final release-signing flow
 - first end-to-end downstream publication to winget, Chocolatey, and Scoop
+- manual repo-admin enablement of GitHub Copilot automatic review rules if that
+  ruleset option remains UI-only
 
 The tray app already contains real Windows service status and control wiring,
 but that should not be described as a fully validated installed-service
