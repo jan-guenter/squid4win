@@ -443,6 +443,10 @@ class Squid4WinConan(ConanFile):
             installer_support_root / "svc.ps1",
         )
         shutil.copy2(
+            Path(self.recipe_folder) / "scripts" / "Assert-SquidServiceName.ps1",
+            installer_support_root / "Assert-SquidServiceName.ps1",
+        )
+        shutil.copy2(
             Path(self.recipe_folder)
             / "packaging"
             / "defaults"

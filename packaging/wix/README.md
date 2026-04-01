@@ -12,7 +12,8 @@ Windows layout:
 - the payload is staged under `artifacts\install-root`
 - the MSI installs to `C:\Squid4Win` by default to avoid path-with-spaces issues
 - the MSI invokes Squid's built-in `-i` and `-r` service verbs through the
-  installed helper script `installer\svc.ps1`
+  installed helper scripts under `installer\`, with `installer\svc.ps1` as the
+  entry point
 - the staged payload intentionally omits a machine-specific `etc\squid.conf`
   and the first install materializes it from
   `packaging\defaults\squid.conf.template` if the file is not already present

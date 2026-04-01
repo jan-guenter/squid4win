@@ -10,7 +10,14 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '..\Assert-SquidServiceName.ps1')
+$serviceNameHelperPath = @(
+    (Join-Path $PSScriptRoot 'Assert-SquidServiceName.ps1'),
+    (Join-Path $PSScriptRoot '..\Assert-SquidServiceName.ps1')
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $serviceNameHelperPath) {
+    throw "Unable to locate Assert-SquidServiceName.ps1 next to $PSCommandPath or in its parent directory."
+}
+. $serviceNameHelperPath
 
 function Get-NormalizedPath {
     param(
