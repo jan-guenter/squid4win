@@ -173,7 +173,10 @@ class Squid4WinTrayConan(ConanFile):
         self.cpp_info.bindirs = ["bin"]
         self.cpp_info.includedirs = []
         self.cpp_info.libdirs = []
-        self.runenv_info.prepend_path("PATH", os.path.join(self.package_folder, "bin"))
+        if self.package_folder is not None:
+            self.runenv_info.prepend_path(
+                "PATH", os.path.join(self.package_folder, "bin")
+            )
 
     def _project_root(self) -> Path:
         local_repository_root = self._local_repository_root()
