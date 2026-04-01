@@ -93,6 +93,11 @@ The first committed installer contract is:
   service registration or removal.
 - `scripts\installer\Manage-SquidService.ps1` stops a running named service
   before removing it so reinstall and runner cleanup stay reliable.
+- `packaging\wix\Product.wxs` must pass the install root to
+  `installer\svc.ps1` as `"[INSTALLFOLDER]."` rather than raw
+  `"[INSTALLFOLDER]"`, because MSI directory properties include a trailing
+  backslash and that suffix would otherwise escape the closing quote in the raw
+  `WixQuietExec` command line.
 
 ## Alternatives considered
 

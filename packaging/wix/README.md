@@ -22,6 +22,10 @@ Windows layout:
   isolated temporary instances on Windows runners; Squid's upstream `-n`
   contract requires that override to stay alphanumeric and no longer than 32
   characters
+- the WiX service custom actions pass the install root to `installer\svc.ps1`
+  as `"[INSTALLFOLDER]."` rather than raw `"[INSTALLFOLDER]"` so the trailing
+  directory separator does not escape the closing quote in the underlying
+  `WixQuietExec` command line
 - the staged payload already includes the harvested third-party notice bundle
   under `licenses\third-party\` before WiX harvests the file tree
 
