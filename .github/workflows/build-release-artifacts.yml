@@ -67,12 +67,15 @@ jobs:
       - name: Resolve release security configuration
         id: release-security
         env:
+          SIGNING_CERTIFICATE_PATH: ${{ vars.SQUID4WIN_SIGNING_CERTIFICATE_PATH }}
           SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
           SIGNING_TIMESTAMP_URL: ${{ vars.SQUID4WIN_SIGNING_TIMESTAMP_URL }}
           SIGNTOOL_PATH: ${{ vars.SQUID4WIN_SIGNTOOL_PATH }}
           DISABLE_GITHUB_ATTESTATION: ${{ vars.SQUID4WIN_DISABLE_GITHUB_ATTESTATION }}
         run: |
-          $signingConfigured = -not [string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_PFX_BASE64)
+          $signingConfigured = `
+            (-not [string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_PATH)) -or `
+            (-not [string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_PFX_BASE64))
           $timestampConfigured = -not [string]::IsNullOrWhiteSpace($env:SIGNING_TIMESTAMP_URL)
           $customSignToolConfigured = -not [string]::IsNullOrWhiteSpace($env:SIGNTOOL_PATH)
           $attestationEnabled = ($env:GITHUB_SERVER_URL -eq 'https://github.com') -and ($env:DISABLE_GITHUB_ATTESTATION -ne 'true')
@@ -195,6 +198,7 @@ jobs:
       - name: Stage release payload
         id: payload
         env:
+          SQUID4WIN_SIGNING_CERTIFICATE_PATH: ${{ vars.SQUID4WIN_SIGNING_CERTIFICATE_PATH }}
           SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
           SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD }}
           SQUID4WIN_SIGNING_TIMESTAMP_URL: ${{ vars.SQUID4WIN_SIGNING_TIMESTAMP_URL }}
@@ -217,6 +221,7 @@ jobs:
         if: ${{ steps.packaging.outputs.has_wix_sources == 'true' }}
         id: wix
         env:
+          SQUID4WIN_SIGNING_CERTIFICATE_PATH: ${{ vars.SQUID4WIN_SIGNING_CERTIFICATE_PATH }}
           SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
           SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD }}
           SQUID4WIN_SIGNING_TIMESTAMP_URL: ${{ vars.SQUID4WIN_SIGNING_TIMESTAMP_URL }}

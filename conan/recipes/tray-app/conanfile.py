@@ -187,17 +187,19 @@ class Squid4WinTrayConan(ConanFile):
 
         return Path(self.source_folder) / "src" / "tray" / self.PROJECT_NAME
 
-    def _build_support_root(self) -> Path:
-        exported_build_support_root = Path(self.recipe_folder) / "build-support"
-        if exported_build_support_root.is_dir():
-            return exported_build_support_root
+    def _license_source_path(self) -> Path:
+        exported_license_path = Path(self.recipe_folder) / "build-support" / "LICENSE"
+        if exported_license_path.is_file():
+            return exported_license_path
 
         local_repository_root = self._local_repository_root()
         if local_repository_root is not None:
-            return local_repository_root
+            local_license_path = local_repository_root / "LICENSE"
+            if local_license_path.is_file():
+                return local_license_path
 
         raise ConanException(
-            f"Unable to locate the tray app build-support inputs under {self.recipe_folder}."
+            f"Unable to locate the tray app LICENSE file under {self.recipe_folder}."
         )
 
     def _editable_package_root(self) -> Path:
@@ -222,18 +224,15 @@ class Squid4WinTrayConan(ConanFile):
         self, publish_root: Path, package_root: Path
     ) -> None:
         package_root.mkdir(parents=True, exist_ok=True)
+        licenses_root = package_root / "licenses"
+        licenses_root.mkdir(parents=True, exist_ok=True)
         copy(
             self,
             "*",
             src=os.fspath(publish_root),
             dst=os.path.join(os.fspath(package_root), "bin"),
         )
-        copy(
-            self,
-            "LICENSE",
-            src=os.fspath(self._build_support_root()),
-            dst=os.path.join(os.fspath(package_root), "licenses"),
-        )
+        shutil.copy2(self._license_source_path(), licenses_root / "LICENSE")
         third_party_packages = self._harvest_published_package_notices(
             publish_root, package_root
         )

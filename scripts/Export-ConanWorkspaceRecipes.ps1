@@ -70,8 +70,9 @@ Invoke-ConanCommand `
 
 $editables = Get-ConanEditableMap
 $trayEditable = $editables[$trayRecipe.Reference]
-$expectedEditablePath = [System.IO.Path]::GetFullPath(
-    (Join-Path $trayRecipe.Path 'conanfile.py')
+$expectedEditablePaths = @(
+    [System.IO.Path]::GetFullPath($trayRecipe.Path),
+    [System.IO.Path]::GetFullPath((Join-Path $trayRecipe.Path 'conanfile.py'))
 )
 $trayEditablePath = if ($null -ne $trayEditable) {
     [System.IO.Path]::GetFullPath([string]$trayEditable['path'])
@@ -85,7 +86,7 @@ $trayEditableOutputFolder = if ($null -ne $trayEditable) {
 }
 
 if ($null -ne $trayEditable -and (
-        ($trayEditablePath -ne $expectedEditablePath) -or
+        ($expectedEditablePaths -notcontains $trayEditablePath) -or
         (-not [string]::IsNullOrWhiteSpace($trayEditableOutputFolder)) -or
         (-not $UseTrayEditable)
     )) {

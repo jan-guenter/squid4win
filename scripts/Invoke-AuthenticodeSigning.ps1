@@ -10,7 +10,7 @@ param(
     [string]$CertificateSecret = $env:SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD,
     [string]$TimestampServer = $env:SQUID4WIN_SIGNING_TIMESTAMP_URL,
     [string]$SignToolPath = $env:SQUID4WIN_SIGNTOOL_PATH,
-    [string[]]$SignableExtensions = @('.exe', '.msi', '.ps1', '.psm1', '.psd1')
+    [string[]]$SignableExtensions = @('.dll', '.exe', '.msi', '.ps1', '.psm1', '.psd1')
 )
 
 Set-StrictMode -Version Latest

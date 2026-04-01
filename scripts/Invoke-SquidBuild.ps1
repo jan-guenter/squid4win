@@ -86,14 +86,15 @@ $installRoot = [string]$layout.StageRoot
 $conanOutputRoot = [string]$layout.ConanOutputRoot
 $buildLockPath = [string]$layout.BuildLockPath
 $repoLockfilePath = [string]$layout.RepoLockfilePath
+$lockfileName = Split-Path -Leaf $repoLockfilePath
 $resolvedLockfilePath = if ($LockfilePath) {
     Get-AbsolutePath -Path $LockfilePath -BasePath $resolvedRepositoryRoot
 } elseif ($UseTrayEditable) {
-    Join-Path $conanOutputRoot "lockfiles\msys2-mingw-x64-$configurationLabel.lock"
+    Join-Path $conanOutputRoot ("lockfiles\$lockfileName")
 } elseif (Test-Path -LiteralPath $repoLockfilePath) {
     $repoLockfilePath
 } else {
-    Join-Path $conanOutputRoot "lockfiles\msys2-mingw-x64-$configurationLabel.lock"
+    Join-Path $conanOutputRoot ("lockfiles\$lockfileName")
 }
 $buildLock = $null
 $hadMakeJobs = Test-Path Env:SQUID4WIN_MAKE_JOBS
