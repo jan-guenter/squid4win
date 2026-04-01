@@ -81,10 +81,9 @@ if ($BootstrapOnly) {
     $bootstrapState
     return
 }
-$configurationLabel = $Configuration.ToLowerInvariant()
-$installRoot = [string]$layout.StageRoot
-$conanOutputRoot = [string]$layout.ConanOutputRoot
-$buildLockPath = [string]$layout.BuildLockPath
+ $installRoot = [string]$layout.StageRoot
+ $conanOutputRoot = [string]$layout.ConanOutputRoot
+ $buildLockPath = [string]$layout.BuildLockPath
 $repoLockfilePath = [string]$layout.RepoLockfilePath
 $lockfileName = Split-Path -Leaf $repoLockfilePath
 $resolvedLockfilePath = if ($LockfilePath) {

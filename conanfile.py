@@ -342,155 +342,248 @@ class Squid4WinConan(ConanFile):
         msys2_env_directory: str,
     ) -> None:
         if self._option_enabled("with_tray"):
-            tray_package_root = self._tray_package_root()
-            tray_bin_root = tray_package_root / "bin"
-            if not tray_bin_root.is_dir():
-                raise ConanException(
-                    f"Expected the tray package binaries at {tray_bin_root}."
-                )
-
-            self._copy_directory_contents(tray_bin_root, bundle_root)
-
-            tray_executable = bundle_root / "Squid4Win.Tray.exe"
-            if not tray_executable.is_file():
-                raise ConanException(
-                    f"Expected the bundled tray executable at {tray_executable}."
-                )
+            self._stage_tray_bundle(bundle_root)
 
         bundled_runtime_dlls: list[str] = []
-        runtime_notice_packages: list[dict[str, object]] = []
-        tray_third_party_packages: list[dict[str, object]] = []
         if self._option_enabled("with_runtime_dlls"):
             bundled_runtime_dlls = self._bundle_native_runtime_dlls(
                 bundle_root, build_settings, msys2_env_directory
             )
 
         if self._option_enabled("with_packaging_support"):
-            licenses_root = bundle_root / "licenses"
-            installer_support_root = bundle_root / "installer"
-            config_directory = bundle_root / "etc"
-            for directory_path in (
-                licenses_root,
-                installer_support_root,
-                config_directory,
-            ):
-                directory_path.mkdir(parents=True, exist_ok=True)
-
-            shutil.copy2(
-                Path(self.recipe_folder)
-                / "scripts"
-                / "installer"
-                / "Manage-SquidService.ps1",
-                installer_support_root / "svc.ps1",
-            )
-            shutil.copy2(
-                Path(self.recipe_folder)
-                / "packaging"
-                / "defaults"
-                / "squid.conf.template",
-                config_directory / "squid.conf.template",
-            )
-            shutil.copy2(
-                self._repository_license_path(),
-                licenses_root / "Repository-LICENSE.txt",
+            self._stage_packaging_support(
+                bundle_root,
+                source_root,
+                metadata,
+                configuration_label,
+                build_settings,
+                msys2_env_directory,
+                bundled_runtime_dlls,
             )
 
-            mime_destination_path = config_directory / "mime.conf"
-            if not mime_destination_path.is_file():
-                mime_candidates = (
-                    config_directory / "mime.conf.default",
-                    source_root / "src" / "mime.conf.default",
-                )
-                mime_source_path = next(
-                    (
-                        candidate
-                        for candidate in mime_candidates
-                        if candidate.is_file()
-                    ),
-                    None,
-                )
-                if mime_source_path is None:
-                    raise ConanException(
-                        "Unable to locate mime.conf for the assembled bundle under "
-                        f"{bundle_root}."
-                    )
-                shutil.copy2(mime_source_path, mime_destination_path)
+        self._require_squid_executable(bundle_root)
 
-            squid_copying_path = source_root / "COPYING"
-            if squid_copying_path.is_file():
-                shutil.copy2(squid_copying_path, licenses_root / "Squid-COPYING.txt")
+    def _stage_tray_bundle(self, bundle_root: Path) -> None:
+        tray_package_root = self._tray_package_root()
+        tray_bin_root = tray_package_root / "bin"
+        if not tray_bin_root.is_dir():
+            raise ConanException(f"Expected the tray package binaries at {tray_bin_root}.")
 
-            if bundled_runtime_dlls:
-                runtime_notice_packages = self._harvest_runtime_notice_bundle(
-                    bundle_root, build_settings, bundled_runtime_dlls
-                )
+        self._copy_directory_contents(tray_bin_root, bundle_root)
+        tray_executable = bundle_root / "Squid4Win.Tray.exe"
+        if not tray_executable.is_file():
+            raise ConanException(
+                f"Expected the bundled tray executable at {tray_executable}."
+            )
 
-            if self._option_enabled("with_tray"):
-                tray_third_party_packages = self._collect_tray_notice_bundle(
-                    bundle_root
-                )
+    def _stage_packaging_support(
+        self,
+        bundle_root: Path,
+        source_root: Path,
+        metadata: dict[str, object],
+        configuration_label: str,
+        build_settings: dict[str, object],
+        msys2_env_directory: str,
+        bundled_runtime_dlls: list[str],
+    ) -> None:
+        (
+            licenses_root,
+            installer_support_root,
+            config_directory,
+        ) = self._packaging_support_directories(bundle_root)
+        self._copy_packaging_support_files(
+            source_root,
+            bundle_root,
+            licenses_root,
+            installer_support_root,
+            config_directory,
+        )
+        runtime_notice_packages = self._runtime_notice_packages(
+            bundle_root, build_settings, bundled_runtime_dlls
+        )
+        tray_third_party_packages = self._tray_notice_packages(bundle_root)
+        self._write_source_manifest(
+            licenses_root,
+            metadata,
+            configuration_label,
+            msys2_env_directory,
+            bundled_runtime_dlls,
+            runtime_notice_packages,
+            tray_third_party_packages,
+        )
+        self._write_third_party_notices(
+            bundle_root,
+            metadata,
+            runtime_notice_packages,
+            tray_third_party_packages,
+        )
 
-            source_manifest = {
-                "generated_at": datetime.now(timezone.utc)
-                .isoformat(timespec="seconds")
-                .replace("+00:00", "Z"),
-                "configuration": configuration_label,
-                "squid": {
-                    "version": str(metadata["version"]),
-                    "tag": str(metadata["tag"]),
-                    "source_archive": str(metadata["assets"]["source_archive"]),
-                    "source_signature": str(
-                        metadata["assets"].get("source_signature", "")
-                    ),
-                    "source_archive_sha256": str(
-                        metadata["assets"]["source_archive_sha256"]
-                    ),
-                },
-                "repository": {"name": "squid4win", "license": "MIT"},
-                "windows_runtime": {
-                    "msys2_env": msys2_env_directory,
-                    "dlls": bundled_runtime_dlls,
-                    "packages": runtime_notice_packages,
-                },
+    @staticmethod
+    def _packaging_support_directories(
+        bundle_root: Path,
+    ) -> tuple[Path, Path, Path]:
+        licenses_root = bundle_root / "licenses"
+        installer_support_root = bundle_root / "installer"
+        config_directory = bundle_root / "etc"
+        for directory_path in (licenses_root, installer_support_root, config_directory):
+            directory_path.mkdir(parents=True, exist_ok=True)
+
+        return licenses_root, installer_support_root, config_directory
+
+    def _copy_packaging_support_files(
+        self,
+        source_root: Path,
+        bundle_root: Path,
+        licenses_root: Path,
+        installer_support_root: Path,
+        config_directory: Path,
+    ) -> None:
+        shutil.copy2(
+            Path(self.recipe_folder) / "scripts" / "installer" / "Manage-SquidService.ps1",
+            installer_support_root / "svc.ps1",
+        )
+        shutil.copy2(
+            Path(self.recipe_folder)
+            / "packaging"
+            / "defaults"
+            / "squid.conf.template",
+            config_directory / "squid.conf.template",
+        )
+        shutil.copy2(
+            self._repository_license_path(),
+            licenses_root / "Repository-LICENSE.txt",
+        )
+        self._ensure_mime_configuration(bundle_root, source_root, config_directory)
+
+        squid_copying_path = source_root / "COPYING"
+        if squid_copying_path.is_file():
+            shutil.copy2(squid_copying_path, licenses_root / "Squid-COPYING.txt")
+
+    def _ensure_mime_configuration(
+        self,
+        bundle_root: Path,
+        source_root: Path,
+        config_directory: Path,
+    ) -> None:
+        mime_destination_path = config_directory / "mime.conf"
+        if mime_destination_path.is_file():
+            return
+
+        mime_candidates = (
+            config_directory / "mime.conf.default",
+            source_root / "src" / "mime.conf.default",
+        )
+        mime_source_path = next(
+            (candidate for candidate in mime_candidates if candidate.is_file()),
+            None,
+        )
+        if mime_source_path is None:
+            raise ConanException(
+                "Unable to locate mime.conf for the assembled bundle under "
+                f"{bundle_root}."
+            )
+
+        shutil.copy2(mime_source_path, mime_destination_path)
+
+    def _runtime_notice_packages(
+        self,
+        bundle_root: Path,
+        build_settings: dict[str, object],
+        bundled_runtime_dlls: list[str],
+    ) -> list[dict[str, object]]:
+        if not bundled_runtime_dlls:
+            return []
+
+        return self._harvest_runtime_notice_bundle(
+            bundle_root, build_settings, bundled_runtime_dlls
+        )
+
+    def _tray_notice_packages(self, bundle_root: Path) -> list[dict[str, object]]:
+        if not self._option_enabled("with_tray"):
+            return []
+
+        return self._collect_tray_notice_bundle(bundle_root)
+
+    def _write_source_manifest(
+        self,
+        licenses_root: Path,
+        metadata: dict[str, object],
+        configuration_label: str,
+        msys2_env_directory: str,
+        bundled_runtime_dlls: list[str],
+        runtime_notice_packages: list[dict[str, object]],
+        tray_third_party_packages: list[dict[str, object]],
+    ) -> None:
+        source_manifest = {
+            "generated_at": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+            "configuration": configuration_label,
+            "squid": {
+                "version": str(metadata["version"]),
+                "tag": str(metadata["tag"]),
+                "source_archive": str(metadata["assets"]["source_archive"]),
+                "source_signature": str(metadata["assets"].get("source_signature", "")),
+                "source_archive_sha256": str(metadata["assets"]["source_archive_sha256"]),
+            },
+            "repository": {"name": "squid4win", "license": "MIT"},
+            "windows_runtime": {
+                "msys2_env": msys2_env_directory,
+                "dlls": bundled_runtime_dlls,
+                "packages": runtime_notice_packages,
+            },
+        }
+        if self._option_enabled("with_tray"):
+            source_manifest["tray"] = {
+                "package": self._dependency_reference("squid4win_tray")
+                or "squid4win_tray/0.1",
+                "third_party_packages": tray_third_party_packages,
             }
-            if self._option_enabled("with_tray"):
-                source_manifest["tray"] = {
-                    "package": self._dependency_reference("squid4win_tray")
-                    or "squid4win_tray/0.1",
-                    "third_party_packages": tray_third_party_packages,
-                }
-            save(
-                self,
-                os.fspath(licenses_root / "source-manifest.json"),
-                json.dumps(source_manifest, indent=2) + "\n",
-                encoding="ascii",
-            )
 
-            notices_content = "\n".join(
-                self._third_party_notice_lines(
-                    metadata,
-                    runtime_notice_packages,
-                    tray_third_party_packages,
-                )
-            )
-            save(
-                self,
-                os.fspath(bundle_root / "THIRD-PARTY-NOTICES.txt"),
-                notices_content + "\n",
-                encoding="ascii",
-            )
+        save(
+            self,
+            os.fspath(licenses_root / "source-manifest.json"),
+            json.dumps(source_manifest, indent=2) + "\n",
+            encoding="ascii",
+        )
 
+    def _write_third_party_notices(
+        self,
+        bundle_root: Path,
+        metadata: dict[str, object],
+        runtime_notice_packages: list[dict[str, object]],
+        tray_third_party_packages: list[dict[str, object]],
+    ) -> None:
+        notices_content = "\n".join(
+            self._third_party_notice_lines(
+                metadata,
+                runtime_notice_packages,
+                tray_third_party_packages,
+            )
+        )
+        save(
+            self,
+            os.fspath(bundle_root / "THIRD-PARTY-NOTICES.txt"),
+            notices_content + "\n",
+            encoding="ascii",
+        )
+
+    @staticmethod
+    def _require_squid_executable(bundle_root: Path) -> Path:
         squid_candidates = (
             bundle_root / "sbin" / "squid.exe",
             bundle_root / "bin" / "squid.exe",
         )
         squid_executable = next(
-            (candidate for candidate in squid_candidates if candidate.is_file()), None
+            (candidate for candidate in squid_candidates if candidate.is_file()),
+            None,
         )
         if squid_executable is None:
             raise ConanException(
                 f"Expected squid.exe under the assembled bundle root {bundle_root}."
             )
+
+        return squid_executable
 
     def _bundle_native_runtime_dlls(
         self,
@@ -567,73 +660,110 @@ class Squid4WinConan(ConanFile):
         declared_runtime_dlls: set[str] = set()
         harvested_notice_entries: list[dict[str, object]] = []
         for raw_notice_entry in raw_notice_entries:
-            notice_entry = dict(raw_notice_entry)
-            notice_id = str(notice_entry.get("id", "")).strip()
-            if not notice_id:
-                raise ConanException(
-                    "Each build.runtime_notice_artifacts entry in conandata.yml must declare a non-empty id."
-                )
-
-            runtime_dlls = self._deduplicate(
-                self._string_list(notice_entry.get("dlls", []))
+            harvested_entry, runtime_dlls = self._harvest_runtime_notice_entry(
+                bundle_root,
+                notice_root,
+                raw_notice_entry,
             )
-            if not runtime_dlls:
-                raise ConanException(
-                    f"Runtime notice entry '{notice_id}' must declare at least one bundled DLL."
-                )
-
+            harvested_notice_entries.append(harvested_entry)
             declared_runtime_dlls.update(runtime_dlls)
-            dependency_name = str(notice_entry.get("dependency", "")).strip()
-            if not dependency_name:
-                raise ConanException(
-                    f"Runtime notice entry '{notice_id}' must declare a dependency source."
-                )
 
-            dependency_root = self._dependency_package_root(dependency_name)
-            if dependency_root is None:
-                raise ConanException(
-                    f"Unable to locate the '{dependency_name}' dependency package for runtime notice entry '{notice_id}'."
-                )
+        self._validate_runtime_notice_coverage(
+            bundled_runtime_dll_set,
+            declared_runtime_dlls,
+        )
+        return harvested_notice_entries
 
-            destination_root = notice_root / notice_id
-            destination_root.mkdir(parents=True, exist_ok=True)
-            copied_notice_files: list[str] = []
-            for relative_path in self._deduplicate(
-                self._string_list(notice_entry.get("license_files", []))
-            ):
-                source_path = dependency_root / Path(relative_path)
-                if not source_path.is_file():
-                    raise ConanException(
-                        f"Unable to locate the runtime notice file '{relative_path}' for entry '{notice_id}' under {dependency_root}."
-                    )
-
-                destination_path = destination_root / source_path.name
-                shutil.copy2(source_path, destination_path)
-                copied_notice_files.append(
-                    os.fspath(destination_path.relative_to(bundle_root)).replace(
-                        "\\", "/"
-                    )
-                )
-
-            if not copied_notice_files:
-                raise ConanException(
-                    f"Runtime notice entry '{notice_id}' did not resolve any notice files."
-                )
-
-            harvested_notice_entries.append(
-                {
-                    "id": notice_id,
-                    "name": str(notice_entry.get("name", notice_id)).strip(),
-                    "package": str(notice_entry.get("package", notice_id)).strip(),
-                    "source_dependency": self._dependency_reference(dependency_name)
-                    or dependency_name,
-                    "license": str(notice_entry.get("license", "")).strip(),
-                    "project_url": str(notice_entry.get("project_url", "")).strip(),
-                    "dlls": runtime_dlls,
-                    "notice_files": copied_notice_files,
-                }
+    def _harvest_runtime_notice_entry(
+        self,
+        bundle_root: Path,
+        notice_root: Path,
+        raw_notice_entry: object,
+    ) -> tuple[dict[str, object], list[str]]:
+        notice_entry = dict(raw_notice_entry)
+        notice_id = str(notice_entry.get("id", "")).strip()
+        if not notice_id:
+            raise ConanException(
+                "Each build.runtime_notice_artifacts entry in conandata.yml must declare a non-empty id."
             )
 
+        runtime_dlls = self._deduplicate(self._string_list(notice_entry.get("dlls", [])))
+        if not runtime_dlls:
+            raise ConanException(
+                f"Runtime notice entry '{notice_id}' must declare at least one bundled DLL."
+            )
+
+        dependency_name = str(notice_entry.get("dependency", "")).strip()
+        if not dependency_name:
+            raise ConanException(
+                f"Runtime notice entry '{notice_id}' must declare a dependency source."
+            )
+
+        dependency_root = self._dependency_package_root(dependency_name)
+        if dependency_root is None:
+            raise ConanException(
+                f"Unable to locate the '{dependency_name}' dependency package for runtime notice entry '{notice_id}'."
+            )
+
+        copied_notice_files = self._copy_runtime_notice_files(
+            bundle_root,
+            notice_root / notice_id,
+            dependency_root,
+            notice_id,
+            notice_entry,
+        )
+        return (
+            {
+                "id": notice_id,
+                "name": str(notice_entry.get("name", notice_id)).strip(),
+                "package": str(notice_entry.get("package", notice_id)).strip(),
+                "source_dependency": self._dependency_reference(dependency_name)
+                or dependency_name,
+                "license": str(notice_entry.get("license", "")).strip(),
+                "project_url": str(notice_entry.get("project_url", "")).strip(),
+                "dlls": runtime_dlls,
+                "notice_files": copied_notice_files,
+            },
+            runtime_dlls,
+        )
+
+    def _copy_runtime_notice_files(
+        self,
+        bundle_root: Path,
+        destination_root: Path,
+        dependency_root: Path,
+        notice_id: str,
+        notice_entry: dict[str, object],
+    ) -> list[str]:
+        destination_root.mkdir(parents=True, exist_ok=True)
+        copied_notice_files: list[str] = []
+        for relative_path in self._deduplicate(
+            self._string_list(notice_entry.get("license_files", []))
+        ):
+            source_path = dependency_root / Path(relative_path)
+            if not source_path.is_file():
+                raise ConanException(
+                    f"Unable to locate the runtime notice file '{relative_path}' for entry '{notice_id}' under {dependency_root}."
+                )
+
+            destination_path = destination_root / source_path.name
+            shutil.copy2(source_path, destination_path)
+            copied_notice_files.append(
+                os.fspath(destination_path.relative_to(bundle_root)).replace("\\", "/")
+            )
+
+        if not copied_notice_files:
+            raise ConanException(
+                f"Runtime notice entry '{notice_id}' did not resolve any notice files."
+            )
+
+        return copied_notice_files
+
+    @staticmethod
+    def _validate_runtime_notice_coverage(
+        bundled_runtime_dll_set: set[str],
+        declared_runtime_dlls: set[str],
+    ) -> None:
         missing_notice_entries = sorted(bundled_runtime_dll_set - declared_runtime_dlls)
         if missing_notice_entries:
             raise ConanException(
@@ -649,8 +779,6 @@ class Squid4WinConan(ConanFile):
                 + ", ".join(unused_notice_entries)
                 + "."
             )
-
-        return harvested_notice_entries
 
     def _collect_tray_notice_bundle(
         self, bundle_root: Path
@@ -693,8 +821,9 @@ class Squid4WinConan(ConanFile):
 
         return tray_notice_packages
 
-    @staticmethod
+    @classmethod
     def _third_party_notice_lines(
+        cls,
         metadata: dict[str, object],
         runtime_notice_packages: list[dict[str, object]],
         tray_third_party_packages: list[dict[str, object]],
@@ -711,7 +840,10 @@ class Squid4WinConan(ConanFile):
             "- licenses/Squid-COPYING.txt (when the upstream source tree is available locally)",
         ]
 
-        if runtime_notice_packages or tray_third_party_packages:
+        component_lines = []
+        component_lines.extend(cls._runtime_notice_lines(runtime_notice_packages))
+        component_lines.extend(cls._tray_notice_lines(tray_third_party_packages))
+        if component_lines:
             notice_lines.extend(
                 (
                     "",
@@ -719,46 +851,7 @@ class Squid4WinConan(ConanFile):
                     "- Squid upstream sources and license text: licenses/Squid-COPYING.txt",
                 )
             )
-            for notice_entry in runtime_notice_packages:
-                asset_list = ", ".join(
-                    [
-                        str(asset).strip()
-                        for asset in notice_entry.get("dlls", [])
-                        if str(asset).strip()
-                    ]
-                )
-                entry_line = (
-                    f"- {notice_entry.get('name', notice_entry.get('id', 'runtime'))}"
-                    f" [{asset_list}]"
-                )
-                if notice_entry.get("license"):
-                    entry_line += f" - license: {notice_entry['license']}"
-                if notice_entry.get("source_dependency"):
-                    entry_line += f"; source: {notice_entry['source_dependency']}"
-                notice_lines.append(entry_line)
-                for notice_file in notice_entry.get("notice_files", []):
-                    notice_lines.append(f"  - {notice_file}")
-
-            for package_entry in tray_third_party_packages:
-                asset_list = ", ".join(
-                    [
-                        str(asset).strip()
-                        for asset in package_entry.get("shipped_assets", [])
-                        if str(asset).strip()
-                    ]
-                )
-                entry_line = (
-                    f"- {package_entry.get('id', 'tray-package')}"
-                    f" {package_entry.get('version', '')}"
-                ).rstrip()
-                if asset_list:
-                    entry_line += f" [{asset_list}]"
-                if package_entry.get("license"):
-                    entry_line += f" - license: {package_entry['license']}"
-                entry_line += "; source: NuGet package"
-                notice_lines.append(entry_line)
-                for notice_file in package_entry.get("notice_files", []):
-                    notice_lines.append(f"  - {notice_file}")
+            notice_lines.extend(component_lines)
 
         notice_lines.extend(
             (
@@ -766,6 +859,61 @@ class Squid4WinConan(ConanFile):
                 "Machine-readable provenance for the staged payload lives in licenses/source-manifest.json.",
             )
         )
+        return notice_lines
+
+    @staticmethod
+    def _runtime_notice_lines(
+        runtime_notice_packages: list[dict[str, object]],
+    ) -> list[str]:
+        notice_lines: list[str] = []
+        for notice_entry in runtime_notice_packages:
+            asset_list = ", ".join(
+                [
+                    str(asset).strip()
+                    for asset in notice_entry.get("dlls", [])
+                    if str(asset).strip()
+                ]
+            )
+            entry_line = (
+                f"- {notice_entry.get('name', notice_entry.get('id', 'runtime'))}"
+                f" [{asset_list}]"
+            )
+            if notice_entry.get("license"):
+                entry_line += f" - license: {notice_entry['license']}"
+            if notice_entry.get("source_dependency"):
+                entry_line += f"; source: {notice_entry['source_dependency']}"
+            notice_lines.append(entry_line)
+            for notice_file in notice_entry.get("notice_files", []):
+                notice_lines.append(f"  - {notice_file}")
+
+        return notice_lines
+
+    @staticmethod
+    def _tray_notice_lines(
+        tray_third_party_packages: list[dict[str, object]],
+    ) -> list[str]:
+        notice_lines: list[str] = []
+        for package_entry in tray_third_party_packages:
+            asset_list = ", ".join(
+                [
+                    str(asset).strip()
+                    for asset in package_entry.get("shipped_assets", [])
+                    if str(asset).strip()
+                ]
+            )
+            entry_line = (
+                f"- {package_entry.get('id', 'tray-package')}"
+                f" {package_entry.get('version', '')}"
+            ).rstrip()
+            if asset_list:
+                entry_line += f" [{asset_list}]"
+            if package_entry.get("license"):
+                entry_line += f" - license: {package_entry['license']}"
+            entry_line += "; source: NuGet package"
+            notice_lines.append(entry_line)
+            for notice_file in package_entry.get("notice_files", []):
+                notice_lines.append(f"  - {notice_file}")
+
         return notice_lines
 
     def _mirror_local_stage_root(self, bundle_root: Path) -> None:
