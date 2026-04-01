@@ -39,6 +39,9 @@ Repo-specific directives:
   downstream package-manager metadata.
 - Keep tag-triggered GitHub release publication gated by the `release-approval`
   environment after artifact build completion and before the GitHub release is
-  published.
+  published, and do not relax the signed-artifact checks that block unsigned
+  tag-triggered release publication.
+- Keep tag-triggered release/prerelease publication tied to the committed Conan
+  lockfile and to tags that point to commits already reachable from `main`.
 - Keep live feed publication credential-gated.
 - Never commit secrets or machine-specific paths.

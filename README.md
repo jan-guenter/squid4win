@@ -26,7 +26,10 @@ the result, and shipping a companion WPF tray app.
   app`, `Build MSYS2/MinGW-w64`, and `SonarCloud Code Analysis`.
 - Tag-triggered GitHub release publication now pauses on the
   `release-approval` environment after artifact build/upload and before the
-  GitHub release is published.
+  GitHub release is published, and it refuses to publish unsigned artifacts when
+  signing credentials are not configured. Tag-triggered publication now also
+  consumes the committed Conan lockfile as-is and only allows tags that point to
+  commits already reachable from `main`.
 
 ## What is validated today
 
@@ -47,7 +50,7 @@ successful run is explicitly cited.
   clean-host confirmation that MSI lifecycle behavior matches it and upgrade
   coverage
 - end-to-end installed Squid service plus tray-app interaction on a clean host
-- final release-signing flow
+- first signed tag publication with real release-signing credentials
 - first end-to-end downstream publication to winget, Chocolatey, and Scoop
 - manual repo-admin enablement of GitHub Copilot automatic review rules if that
   ruleset option remains UI-only
@@ -118,7 +121,9 @@ harvesting, and installer-support files are opt-in:
 ```
 
 `Update-ConanLockfile.ps1` refreshes the committed lockfile, and
-`Invoke-SquidBuild.ps1` consumes it when present.
+`Invoke-SquidBuild.ps1` consumes it when present. Tag-triggered GitHub
+release/prerelease publication now consumes that committed lockfile without
+refreshing it during the publish run.
 
 ### Root + tray editable iteration
 
@@ -143,7 +148,12 @@ GitHub Actions follows the same root-recipe path: `release.yml` handles stable
 assembly. When a tag-triggered run is allowed to publish a GitHub release, the
 workflow now builds and uploads the artifacts first, then waits on the
 `release-approval` environment before the final GitHub release publication
-step. Only stable published GitHub releases fan out into `package-managers.yml`.
+step. Those tag-triggered publish paths now fail early unless signing
+credentials are configured and both the portable zip payload and MSI are
+actually signed. They also require the tag to point to a commit already
+reachable from `main`. Workflow-dispatch runs can still build artifacts without
+publishing a GitHub release. Only stable published GitHub releases fan out into
+`package-managers.yml`.
 
 ### Runner-safe installed-service validation
 

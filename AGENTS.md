@@ -38,7 +38,11 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   app`, `Build MSYS2/MinGW-w64`, and `SonarCloud Code Analysis`.
 - Tag-triggered GitHub release publication now pauses on the
   `release-approval` environment after artifact build/upload and before the
-  GitHub release is published.
+  GitHub release is published, and it refuses to publish unsigned artifacts
+  when signing credentials are not configured.
+- Tag-triggered release/prerelease publication now consumes the committed
+  `conan\lockfiles\` state without refreshing it during the publish run and only
+  allows tags that point to commits already reachable from `main`.
 - Cited successful execution of that workflow, clean-host installer upgrade
   validation, and end-to-end installed-service plus tray-app lifecycle
   validation are still pending.
@@ -77,7 +81,11 @@ details here.
   `.github\workflows\package-managers.yml` synchronized.
 - Keep tag-triggered GitHub release publication gated by the `release-approval`
   environment after artifacts are built and before the GitHub release is
-  published.
+  published, and keep signed-artifact checks in place so release/prerelease tag
+  runs fail instead of publishing unsigned assets.
+- Keep tag-triggered release/prerelease publication tied to the committed Conan
+  lockfile and to commits already reachable from `main`; do not re-resolve the
+  reviewed lockfile graph during the publish run.
 - If native runtime DLL harvesting or MinGW-linked imports change, keep
   `conandata.yml`, `conanfile.py`, and the staged notice bundle synchronized.
 - Keep the committed `conan\lockfiles\` flow cache-backed; use

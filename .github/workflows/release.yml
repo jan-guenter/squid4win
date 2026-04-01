@@ -17,8 +17,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify-tag:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Require tag commit on main
+        shell: bash
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME does not point to a commit reachable from origin/main."
+            exit 1
+          fi
+
   release:
-    if: ${{ github.event_name != 'push' || !contains(github.ref_name, '-') }}
+    needs: verify-tag
+    if: ${{ (github.event_name != 'push' || !contains(github.ref_name, '-')) && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped') }}
     uses: ./.github/workflows/build-release-artifacts.yml
     with:
       artifact_name: squid4win-release
