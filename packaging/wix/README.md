@@ -28,6 +28,10 @@ Windows layout:
   can install isolated temporary instances on Windows runners; Squid's upstream
   `-n` contract requires that override to stay alphanumeric and no longer than
   32 characters
+- the installed service helper validates generated configs with
+  `squid.exe -k parse`, but it intentionally skips `squid.exe -z` because the
+  current native Windows build crashes during cache initialization on Windows
+  runners
 - the WiX service custom actions pass the install root to `installer\svc.ps1`
   as `"[INSTALLFOLDER]."` rather than raw `"[INSTALLFOLDER]"` so the trailing
   directory separator does not escape the closing quote in the underlying

@@ -21,6 +21,10 @@ Repo-specific directives:
   not route it back through Conan packaging, lockfiles, or editables.
 - Keep PowerShell only where Windows installer integration genuinely requires
   it, such as MSI custom actions or shipped install-time helper scripts.
+- Keep the installed service helper on the current `squid.exe -k parse` plus
+  `-i`/`-r` flow; do not reintroduce `squid.exe -z` without fresh runner
+  validation because the current native Windows build crashes during cache
+  initialization.
 - Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conandata.yml` aligned when the Squid pin changes. Prefer

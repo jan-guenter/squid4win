@@ -83,6 +83,10 @@ signing, smoke tests, dedicated installed-service validation, and historical
 fallbacks. Keep them narrow and do not extend them as the long-term
 orchestration model.
 
+The installed service helper currently validates generated configs with
+`squid.exe -k parse` but intentionally skips `squid.exe -z` because the current
+native Windows build crashes during cache initialization on Windows runners.
+
 Likewise, any remaining tray-related Conan packaging or editable flows should
 be treated as migration leftovers or compatibility shims, not as the future
 architecture.

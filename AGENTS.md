@@ -24,6 +24,9 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - Repo-level automation is moving to Python 3.14 + `uv`.
 - PowerShell remains allowed for MSI custom actions and install-time helper
   logic, not as the long-term repo orchestration layer.
+- The installed service helper intentionally skips `squid.exe -z` because the
+  current native Windows build crashes during cache initialization on Windows
+  runners.
 - WiX v4 MSI authoring and payload staging are already committed.
 - The repository's own code and docs are GPL-2.0-or-later.
 - The last cited validation still comes from the legacy PowerShell +

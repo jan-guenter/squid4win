@@ -98,8 +98,10 @@ The first committed installer contract is:
   so the root recipe can merge them into the staged bundle before MSI
   harvesting.
 - `scripts\installer\Manage-SquidService.ps1` runs inside the installed payload
-  and performs config materialization, `squid.exe -k parse`, `squid.exe -z`, and
-  service registration or removal.
+  and performs config materialization, `squid.exe -k parse`, then service
+  registration or removal. It intentionally skips `squid.exe -z` because the
+  current native Windows build crashes during cache initialization on Windows
+  runners.
 - `scripts\installer\Manage-SquidService.ps1` stops a running named service
   before removing it so reinstall and runner cleanup stay reliable.
 - `packaging\wix\Product.wxs` must pass the install root to

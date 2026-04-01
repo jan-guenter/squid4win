@@ -91,6 +91,10 @@ The target architecture is:
   tray-Conan implementation: native build, install tree creation, staged bundle
   assembly, portable zip creation, and MSI build. Clean-host and end-to-end
   target-state validation are still pending.
+- The installed service helper currently validates generated configs with
+  `squid.exe -k parse` but intentionally skips `squid.exe -z` because the
+  current native Windows build crashes during cache initialization on Windows
+  runners.
 
 ## Alternatives considered
 
