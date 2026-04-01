@@ -67,16 +67,20 @@ class Squid4WinTrayConan(ConanFile):
         local_project_root = (
             local_repository_root / "src" / "tray" / self.PROJECT_NAME
             if local_repository_root is not None
-            else Path()
+            else None
         )
         project_source_root = (
             exported_project_root
             if exported_project_root.is_dir()
             else local_project_root
         )
+        if project_source_root is None:
+            raise ConanException(
+                f"Exported tray app source tree is missing at {exported_project_root}, and no local repository root could be detected."
+            )
         if not project_source_root.is_dir():
             raise ConanException(
-                f"Exported tray app source tree is missing at {project_source_root}."
+                f"Tray app source tree is missing from both {exported_project_root} and {project_source_root}."
             )
 
         self._copy_directory_contents(
@@ -87,10 +91,12 @@ class Squid4WinTrayConan(ConanFile):
         )
         directory_build_props_path = exported_directory_build_props
         if not directory_build_props_path.is_file():
+            if local_repository_root is None:
+                raise ConanException(
+                    f"Unable to locate {self.DIRECTORY_BUILD_PROPS_FILE} under {exported_directory_build_props}, and no local repository root could be detected."
+                )
             directory_build_props_path = (
                 local_repository_root / self.DIRECTORY_BUILD_PROPS_FILE
-                if local_repository_root is not None
-                else Path()
             )
         if not directory_build_props_path.is_file():
             raise ConanException(
@@ -167,6 +173,7 @@ class Squid4WinTrayConan(ConanFile):
         self.cpp_info.bindirs = ["bin"]
         self.cpp_info.includedirs = []
         self.cpp_info.libdirs = []
+        self.runenv_info.prepend_path("PATH", os.path.join(self.package_folder, "bin"))
 
     def _project_root(self) -> Path:
         local_repository_root = self._local_repository_root()

@@ -66,8 +66,7 @@ function Get-SigningCertificate {
     )
 
     $storageFlags = `
-        [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet -bor `
-        [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+        [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
 
     try {
         return [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
