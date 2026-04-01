@@ -215,12 +215,25 @@ function Invoke-MsiExec {
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$Arguments,
+        [string]$LogPath,
         [int[]]$AcceptableExitCodes = @(0)
     )
 
-    $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $Arguments -Wait -PassThru -NoNewWindow
+    $resolvedLogPath = $null
+    $effectiveArguments = @($Arguments)
+    if ($LogPath) {
+        $resolvedLogPath = Get-NormalizedPath -Path $LogPath
+        $logDirectory = Split-Path -Parent $resolvedLogPath
+        if ($logDirectory) {
+            $null = New-Item -ItemType Directory -Path $logDirectory -Force
+        }
+        $effectiveArguments += @('/L*V', $resolvedLogPath)
+    }
+
+    $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $effectiveArguments -Wait -PassThru -NoNewWindow
     if ($process.ExitCode -notin $AcceptableExitCodes) {
-        throw "msiexec.exe $($Arguments -join ' ') failed with exit code $($process.ExitCode)."
+        $logHint = if ($resolvedLogPath) { " See $resolvedLogPath." } else { '' }
+        throw "msiexec.exe $($effectiveArguments -join ' ') failed with exit code $($process.ExitCode).$logHint"
     }
 
     return $process.ExitCode
@@ -378,18 +391,28 @@ try {
         -ArtifactRoot $resolvedValidationRoot `
         -RequireTray `
         -RequireNotices
+    $stagedPayloadRoot = Get-NormalizedPath -Path ([string]$stageResult.InstallPayloadRoot)
+    $stagedConfigTemplatePath = Join-Path $stagedPayloadRoot 'etc\squid.conf.template'
+    if (-not (Test-Path -LiteralPath $stagedConfigTemplatePath)) {
+        throw "The staged payload '$stagedPayloadRoot' is missing '$stagedConfigTemplatePath'."
+    }
+    $stagedConfigPath = Join-Path $stagedPayloadRoot 'etc\squid.conf'
+    if (Test-Path -LiteralPath $stagedConfigPath) {
+        throw "The staged payload already contains '$stagedConfigPath'. The installer contract requires shipping squid.conf.template and materializing squid.conf during install."
+    }
 
     $buildResult = & (Join-Path $PSScriptRoot 'Build-Installer.ps1') `
         -Configuration $Configuration `
         -RepositoryRoot $resolvedRepositoryRoot `
-        -InstallerPayloadRoot ([string]$stageResult.InstallPayloadRoot) `
+        -InstallerPayloadRoot $stagedPayloadRoot `
         -ArtifactRoot $resolvedValidationRoot `
         -ServiceName $resolvedServiceName
 
     $resolvedMsiPath = Get-NormalizedPath -Path ([string]$buildResult.MsiPath)
     $installAttempted = $true
     Write-Host "Installing $resolvedMsiPath to $resolvedInstallRoot using temporary service name '$resolvedServiceName'."
-    Invoke-MsiExec -Arguments @('/i', $resolvedMsiPath, '/qn', '/norestart', "INSTALLFOLDER=$resolvedInstallRoot") | Out-Null
+    $installLogPath = Join-Path $resolvedValidationRoot 'msi-install.log'
+    Invoke-MsiExec -Arguments @('/i', $resolvedMsiPath, '/qn', '/norestart', "INSTALLFOLDER=$resolvedInstallRoot") -LogPath $installLogPath | Out-Null
 
     $expectedPaths = @(
         (Join-Path $resolvedInstallRoot 'installer\svc.ps1'),
@@ -424,7 +447,8 @@ try {
     Wait-SquidServiceStatus -Name $resolvedServiceName -DesiredStatus ([System.ServiceProcess.ServiceControllerStatus]::Running) -TimeoutSeconds $ServiceTimeoutSeconds
     $null = Stop-SquidServiceIfPresent -Name $resolvedServiceName -TimeoutSeconds $ServiceTimeoutSeconds
 
-    Invoke-MsiExec -Arguments @('/x', $resolvedMsiPath, '/qn', '/norestart') | Out-Null
+    $uninstallLogPath = Join-Path $resolvedValidationRoot 'msi-uninstall.log'
+    Invoke-MsiExec -Arguments @('/x', $resolvedMsiPath, '/qn', '/norestart') -LogPath $uninstallLogPath | Out-Null
     $uninstallCompleted = $true
     Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $false -TimeoutSeconds $ServiceTimeoutSeconds
 }

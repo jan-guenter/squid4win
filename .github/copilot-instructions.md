@@ -31,6 +31,9 @@ Repo-specific directives:
 - Do not imply successful runner-safe installer validation, clean-host
   installer validation, or more installed-service proof than the committed
   automation and any explicitly cited successful runs.
+- Keep the staged payload free of a machine-specific `etc\squid.conf`; ship
+  `squid.conf.template` plus the upstream reference configs and let install
+  materialize the machine-local config.
 - Preserve current artifact names `squid4win.msi` and
   `squid4win-portable.zip` unless you also update the downstream packaging
   metadata flow.

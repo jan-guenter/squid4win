@@ -449,6 +449,9 @@ class Squid4WinConan(ConanFile):
             / "squid.conf.template",
             config_directory / "squid.conf.template",
         )
+        staged_config_path = config_directory / "squid.conf"
+        if staged_config_path.is_file():
+            staged_config_path.unlink()
         shutil.copy2(
             self._repository_license_path(),
             licenses_root / "Repository-LICENSE.txt",

@@ -75,6 +75,9 @@ details here.
 - Keep Squid service names passed through installer and runner-validation
   automation alphanumeric and at most 32 characters because upstream
   `squid.exe -n` enforces that contract.
+- Keep the staged payload free of a machine-specific `etc\squid.conf`; ship
+  `squid.conf.template` plus the upstream reference configs and let install
+  materialize the machine-local config.
 - If installer behavior changes, keep `conanfile.py`,
   `scripts\Stage-ReleasePayload.ps1`, `scripts\Build-Installer.ps1`, and
   `packaging\wix\` synchronized.
