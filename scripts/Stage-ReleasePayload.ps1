@@ -12,7 +12,7 @@ param(
     [switch]$RequireNotices,
     [string]$SigningCertificatePath = $env:SQUID4WIN_SIGNING_CERTIFICATE_PATH,
     [string]$SigningCertificateBase64 = $env:SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64,
-    [string]$SigningCertificatePassword = $env:SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD,
+    [string]$SigningCertificateSecret = $env:SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD,
     [string]$SigningTimestampServer = $env:SQUID4WIN_SIGNING_TIMESTAMP_URL,
     [string]$SignToolPath = $env:SQUID4WIN_SIGNTOOL_PATH
 )
@@ -84,7 +84,7 @@ if ($SignPayloadFiles) {
         -RequireMatches `
         -CertificatePath $SigningCertificatePath `
         -CertificateBase64 $SigningCertificateBase64 `
-        -CertificatePassword $SigningCertificatePassword `
+        -CertificateSecret $SigningCertificateSecret `
         -TimestampServer $SigningTimestampServer `
         -SignToolPath $SignToolPath
 }

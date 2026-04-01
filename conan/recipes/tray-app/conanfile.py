@@ -85,15 +85,13 @@ class Squid4WinTrayConan(ConanFile):
         exported_directory_build_props = (
             Path(self.recipe_folder) / "build-support" / self.DIRECTORY_BUILD_PROPS_FILE
         )
-        directory_build_props_path = (
-            exported_directory_build_props
-            if exported_directory_build_props.is_file()
-            else (
+        directory_build_props_path = exported_directory_build_props
+        if not directory_build_props_path.is_file():
+            directory_build_props_path = (
                 local_repository_root / self.DIRECTORY_BUILD_PROPS_FILE
                 if local_repository_root is not None
                 else Path()
             )
-        )
         if not directory_build_props_path.is_file():
             raise ConanException(
                 f"Unable to locate {self.DIRECTORY_BUILD_PROPS_FILE} for the tray recipe."

@@ -7,7 +7,7 @@ param(
     [switch]$RequireMatches,
     [string]$CertificatePath = $env:SQUID4WIN_SIGNING_CERTIFICATE_PATH,
     [string]$CertificateBase64 = $env:SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64,
-    [string]$CertificatePassword = $env:SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD,
+    [string]$CertificateSecret = $env:SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD,
     [string]$TimestampServer = $env:SQUID4WIN_SIGNING_TIMESTAMP_URL,
     [string]$SignToolPath = $env:SQUID4WIN_SIGNTOOL_PATH,
     [string[]]$SignableExtensions = @('.exe', '.msi', '.ps1', '.psm1', '.psd1')
@@ -58,11 +58,11 @@ function Resolve-SignToolPath {
     throw 'Unable to locate signtool.exe. Set SQUID4WIN_SIGNTOOL_PATH or install the Windows SDK signing tools.'
 }
 
-function New-SigningCertificate {
+function Get-SigningCertificate {
     param(
         [Parameter(Mandatory = $true)]
         [string]$CertificateFilePath,
-        [string]$Password
+        [string]$CertificateSecret
     )
 
     $storageFlags = `
@@ -72,7 +72,7 @@ function New-SigningCertificate {
     try {
         return [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
             $CertificateFilePath,
-            $Password,
+            $CertificateSecret,
             $storageFlags
         )
     }
@@ -81,7 +81,7 @@ function New-SigningCertificate {
     }
 }
 
-function Get-TargetFiles {
+function Get-TargetFile {
     param(
         [string[]]$InputPath,
         [string[]]$AllowedExtensions,
@@ -145,7 +145,7 @@ if ([string]::IsNullOrWhiteSpace($CertificatePath) -and [string]::IsNullOrWhiteS
     }
 }
 
-$targetFiles = @(Get-TargetFiles -InputPath $Path -AllowedExtensions $SignableExtensions -IncludeDescendants $Recurse.IsPresent)
+$targetFiles = @(Get-TargetFile -InputPath $Path -AllowedExtensions $SignableExtensions -IncludeDescendants $Recurse.IsPresent)
 if ($RequireMatches -and ($targetFiles.Count -eq 0)) {
     throw 'No signable files matched the requested signing targets.'
 }
@@ -173,9 +173,9 @@ try {
     }
 
     if ($targetFiles | Where-Object { $powerShellScriptExtensions -contains ([System.IO.Path]::GetExtension($_).ToLowerInvariant()) }) {
-        $signingCertificate = New-SigningCertificate `
+        $signingCertificate = Get-SigningCertificate `
             -CertificateFilePath $resolvedCertificatePath `
-            -Password $CertificatePassword
+            -CertificateSecret $CertificateSecret
     }
 
     if ($targetFiles | Where-Object { -not ($powerShellScriptExtensions -contains ([System.IO.Path]::GetExtension($_).ToLowerInvariant())) }) {
@@ -223,8 +223,8 @@ try {
                 '/f', $resolvedCertificatePath
             )
 
-            if (-not [string]::IsNullOrWhiteSpace($CertificatePassword)) {
-                $signToolArguments += @('/p', $CertificatePassword)
+            if (-not [string]::IsNullOrWhiteSpace($CertificateSecret)) {
+                $signToolArguments += @('/p', $CertificateSecret)
             }
 
             if (-not [string]::IsNullOrWhiteSpace($TimestampServer)) {
