@@ -18,6 +18,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Get-AbsolutePath.ps1')
+. (Join-Path $PSScriptRoot 'Assert-SquidServiceName.ps1')
+$resolvedServiceName = Assert-SquidServiceName -Name $ServiceName
 $resolvedRepositoryRoot = Get-AbsolutePath -Path $RepositoryRoot -BasePath (Get-Location).Path
 $resolvedProjectPath = Get-AbsolutePath -Path $ProjectPath -BasePath $resolvedRepositoryRoot
 $resolvedInstallerPayloadRoot = Get-AbsolutePath -Path $InstallerPayloadRoot -BasePath $resolvedRepositoryRoot
@@ -46,7 +48,7 @@ foreach ($pathToClear in @($configurationOutputRoot, $configurationIntermediateR
     --nologo `
     "-p:InstallerPayloadRoot=$resolvedInstallerPayloadRoot" `
     "-p:ProductVersion=$resolvedProductVersion" `
-    "-p:SquidServiceName=$ServiceName" | Out-Host
+    "-p:SquidServiceName=$resolvedServiceName" | Out-Host
 $dotnetBuildExitCode = $LASTEXITCODE
 if ($dotnetBuildExitCode -ne 0) {
     throw "dotnet build failed with exit code $dotnetBuildExitCode while building the installer."
@@ -85,7 +87,7 @@ if ($SignMsi) {
 }
 [PSCustomObject]@{
     ProductVersion = $resolvedProductVersion
-    ServiceName = $ServiceName
+    ServiceName = $resolvedServiceName
     MsiPath = $msiArtifactPath
     BuildOutputPath = $msiPath.FullName
     SigningEnabled = [bool]$msiSigning.SigningEnabled

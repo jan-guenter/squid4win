@@ -165,10 +165,12 @@ build is:
 ```
 
 The script stages a release payload under `artifacts\service-validation\`,
-builds an MSI with a unique temporary service name, installs it into an
-isolated root, starts and stops the service, uninstalls the MSI, and removes
-leftover runner-only state. By default it refuses to run outside GitHub Actions
-unless `-AllowNonRunnerExecution` is passed intentionally. This documents the
+builds an MSI with a unique short alphanumeric temporary service name,
+installs it into an isolated root, starts and stops the service, uninstalls
+the MSI, and removes leftover runner-only state. The temporary name stays
+within Squid's upstream `-n` contract of 32 alphanumeric characters. By
+default the script refuses to run outside GitHub Actions unless
+`-AllowNonRunnerExecution` is passed intentionally. This documents the
 committed automation path only; it does not by itself claim a cited successful
 runner execution.
 

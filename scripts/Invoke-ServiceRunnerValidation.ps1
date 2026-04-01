@@ -5,10 +5,8 @@ param(
     [string]$RepositoryRoot = (Join-Path $PSScriptRoot '..'),
     [string]$BuildRoot = 'build',
     [string]$ArtifactRoot = (Join-Path $PSScriptRoot '..\artifacts'),
-    [ValidatePattern('^[A-Za-z0-9-]+$')]
     [string]$ServiceName,
-    [ValidatePattern('^[A-Za-z0-9-]+$')]
-    [string]$ServiceNamePrefix = 'Squid4Win-Runner',
+    [string]$ServiceNamePrefix = 'Squid4WinRunner',
     [string]$InstallRoot,
     [int]$ServiceTimeoutSeconds = 60,
     [switch]$AllowNonRunnerExecution
@@ -16,6 +14,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Get-AbsolutePath.ps1')
+. (Join-Path $PSScriptRoot 'Assert-SquidServiceName.ps1')
 
 function Get-NormalizedPath {
     param(
@@ -79,18 +78,28 @@ function Get-ValidationServiceName {
         [string]$Token
     )
 
-    $normalizedPrefix = (($Prefix -replace '[^A-Za-z0-9-]', '-') -replace '-{2,}', '-').Trim('-')
+    $normalizedPrefix = ($Prefix -replace '[^A-Za-z0-9]', '')
     if ([string]::IsNullOrWhiteSpace($normalizedPrefix)) {
         throw 'The service name prefix must contain at least one letter or number.'
     }
 
-    $maxTokenLength = [Math]::Max(8, 80 - $normalizedPrefix.Length - 1)
-    $normalizedToken = (($Token -replace '[^A-Za-z0-9-]', '-') -replace '-{2,}', '-').Trim('-')
-    if ($normalizedToken.Length -gt $maxTokenLength) {
-        $normalizedToken = $normalizedToken.Substring(0, $maxTokenLength).TrimEnd('-')
+    $minimumTokenLength = 8
+    $maxNameLength = 32
+    $maxPrefixLength = $maxNameLength - $minimumTokenLength
+    if ($normalizedPrefix.Length -gt $maxPrefixLength) {
+        throw "The service name prefix '$Prefix' is too long. Leave at least $minimumTokenLength characters for the unique suffix so the final Squid service name stays within Squid's 32-character limit."
     }
 
-    return ('{0}-{1}' -f $normalizedPrefix, $normalizedToken)
+    $maxTokenLength = $maxNameLength - $normalizedPrefix.Length
+    $normalizedToken = ($Token -replace '[^A-Za-z0-9]', '')
+    if ([string]::IsNullOrWhiteSpace($normalizedToken)) {
+        $normalizedToken = [Guid]::NewGuid().ToString('N')
+    }
+    if ($normalizedToken.Length -gt $maxTokenLength) {
+        $normalizedToken = $normalizedToken.Substring($normalizedToken.Length - $maxTokenLength)
+    }
+
+    return Assert-SquidServiceName -Name ('{0}{1}' -f $normalizedPrefix, $normalizedToken) -ParameterName 'GeneratedServiceName'
 }
 
 function Get-SquidServiceController {
@@ -336,7 +345,7 @@ $resolvedRepositoryRoot = Get-AbsolutePath -Path $RepositoryRoot -BasePath (Get-
 $resolvedArtifactBaseRoot = Get-AbsolutePath -Path $ArtifactRoot -BasePath $resolvedRepositoryRoot
 $validationToken = Get-ValidationToken
 $resolvedServiceName = if ($ServiceName) {
-    $ServiceName
+    Assert-SquidServiceName -Name $ServiceName
 } else {
     Get-ValidationServiceName -Prefix $ServiceNamePrefix -Token $validationToken
 }

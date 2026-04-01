@@ -10,6 +10,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '..\Assert-SquidServiceName.ps1')
 
 function Get-NormalizedPath {
     param(
@@ -168,6 +169,7 @@ function Invoke-SquidCommand {
 }
 
 $resolvedInstallRoot = Get-NormalizedPath -Path $InstallRoot
+$resolvedServiceName = Assert-SquidServiceName -Name $ServiceName
 $resolvedSquidExecutable = Resolve-SquidExecutable -Root $resolvedInstallRoot
 
 switch ($Action) {
@@ -183,35 +185,35 @@ switch ($Action) {
 
         $configPath = Initialize-SquidConfiguration -Root $resolvedInstallRoot
 
-        if (Test-SquidServiceRegistration -Name $ServiceName) {
-            Write-Host "Removing existing service registration for $ServiceName before reinstalling it."
-            if (Stop-SquidServiceIfRunning -Name $ServiceName) {
-                Write-Host "Stopped Squid Windows service '$ServiceName' before removing the existing registration."
+        if (Test-SquidServiceRegistration -Name $resolvedServiceName) {
+            Write-Host "Removing existing service registration for $resolvedServiceName before reinstalling it."
+            if (Stop-SquidServiceIfRunning -Name $resolvedServiceName) {
+                Write-Host "Stopped Squid Windows service '$resolvedServiceName' before removing the existing registration."
             }
-            Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $ServiceName)
-            Wait-SquidServiceRegistrationState -Name $ServiceName -Present $false
+            Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $resolvedServiceName)
+            Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $false
         }
 
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-k', 'parse', '-f', $configPath)
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-z', '-f', $configPath)
-        Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $ServiceName, '-f', $configPath)
+        Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $resolvedServiceName, '-f', $configPath)
 
-        Wait-SquidServiceRegistrationState -Name $ServiceName -Present $true
+        Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $true
 
-        Write-Host "Installed Squid Windows service '$ServiceName' using $configPath."
+        Write-Host "Installed Squid Windows service '$resolvedServiceName' using $configPath."
     }
 
     'Uninstall' {
-        if (-not (Test-SquidServiceRegistration -Name $ServiceName)) {
-            Write-Host "Squid Windows service '$ServiceName' is already absent."
+        if (-not (Test-SquidServiceRegistration -Name $resolvedServiceName)) {
+            Write-Host "Squid Windows service '$resolvedServiceName' is already absent."
             return
         }
 
-        if (Stop-SquidServiceIfRunning -Name $ServiceName) {
-            Write-Host "Stopped Squid Windows service '$ServiceName' before removal."
+        if (Stop-SquidServiceIfRunning -Name $resolvedServiceName) {
+            Write-Host "Stopped Squid Windows service '$resolvedServiceName' before removal."
         }
-        Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $ServiceName)
-        Wait-SquidServiceRegistrationState -Name $ServiceName -Present $false
-        Write-Host "Removed Squid Windows service '$ServiceName'."
+        Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $resolvedServiceName)
+        Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $false
+        Write-Host "Removed Squid Windows service '$resolvedServiceName'."
     }
 }

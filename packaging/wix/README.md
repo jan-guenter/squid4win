@@ -17,7 +17,9 @@ Windows layout:
   `packaging\defaults\squid.conf.template` if the file is not already present
 - `scripts\Build-Installer.ps1 -ServiceName ...` can override the default
   service name so `.github\workflows\service-runner-validation.yml` can install
-  isolated temporary instances on Windows runners
+  isolated temporary instances on Windows runners; Squid's upstream `-n`
+  contract requires that override to stay alphanumeric and no longer than 32
+  characters
 - the staged payload already includes the harvested third-party notice bundle
   under `licenses\third-party\` before WiX harvests the file tree
 

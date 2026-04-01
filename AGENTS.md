@@ -72,6 +72,9 @@ details here.
 - Do not claim successful runner-safe, clean-host, or tray-app lifecycle proof
   beyond the committed automation and any explicitly cited successful
   validation.
+- Keep Squid service names passed through installer and runner-validation
+  automation alphanumeric and at most 32 characters because upstream
+  `squid.exe -n` enforces that contract.
 - If installer behavior changes, keep `conanfile.py`,
   `scripts\Stage-ReleasePayload.ps1`, `scripts\Build-Installer.ps1`, and
   `packaging\wix\` synchronized.
