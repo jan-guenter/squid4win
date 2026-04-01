@@ -857,19 +857,62 @@ class Squid4WinConan(ConanFile):
         if dependency_root is not None:
             return dependency_root
 
+        editable_root = self._tray_editable_package_root()
+        if editable_root is not None:
+            return editable_root
+
         raise ConanException(
-            "The squid4win_tray package dependency is not available to the root recipe."
+            "The squid4win_tray package dependency is not available to the root recipe. "
+            "Build it from the cache or use the tray editable flow so "
+            f"{self._configuration_label()}\\editable-package is materialized first."
         )
 
     def _dependency_package_root(self, dependency_name: str) -> Path | None:
         try:
             dependency = self.dependencies[dependency_name]
-            return Path(dependency.package_folder)
+            package_folder = getattr(dependency, "package_folder", None)
+            if package_folder:
+                return Path(package_folder)
         except Exception:
-            for dependency in self.dependencies.values():
-                dependency_ref = getattr(dependency, "ref", None)
-                if dependency_ref and getattr(dependency_ref, "name", None) == dependency_name:
-                    return Path(dependency.package_folder)
+            pass
+
+        for dependency in self.dependencies.values():
+            dependency_ref = getattr(dependency, "ref", None)
+            if dependency_ref and getattr(dependency_ref, "name", None) == dependency_name:
+                package_folder = getattr(dependency, "package_folder", None)
+                if package_folder:
+                    return Path(package_folder)
+
+        return None
+
+    def _dependency_recipe_folder(self, dependency_name: str) -> Path | None:
+        try:
+            dependency = self.dependencies[dependency_name]
+            recipe_folder = getattr(dependency, "recipe_folder", None)
+            if recipe_folder:
+                return Path(recipe_folder)
+        except Exception:
+            pass
+
+        for dependency in self.dependencies.values():
+            dependency_ref = getattr(dependency, "ref", None)
+            if dependency_ref and getattr(dependency_ref, "name", None) == dependency_name:
+                recipe_folder = getattr(dependency, "recipe_folder", None)
+                if recipe_folder:
+                    return Path(recipe_folder)
+
+        return None
+
+    def _tray_editable_package_root(self) -> Path | None:
+        recipe_folder = self._dependency_recipe_folder("squid4win_tray")
+        if recipe_folder is None:
+            return None
+
+        editable_root = (
+            recipe_folder / "build" / self._configuration_label() / "editable-package"
+        )
+        if editable_root.is_dir():
+            return editable_root
 
         return None
 

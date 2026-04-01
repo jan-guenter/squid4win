@@ -19,6 +19,9 @@ Repo-specific directives:
   synchronized between `conandata.yml`, the root `conanfile.py`, and
   `conan\recipes\tray-app\conanfile.py` when shipped runtime DLLs or tray-app
   package dependencies change.
+- Keep the committed `conan\lockfiles\` flow cache-backed; use
+  `-UseTrayEditable` only for local root+tray iteration so editable lockfiles
+  stay under `build\conan\`.
 - Treat `.agents\design\*.md` as project memory. If an accepted design changes,
   update the ADR and preserve its alternatives/history sections.
 - Treat `.agents\skills\` as vendored third-party content and update it
@@ -34,5 +37,8 @@ Repo-specific directives:
 - Keep prerelease and stable GitHub release workflows distinct; prereleases
   stop at GitHub prerelease assets, while stable published releases drive
   downstream package-manager metadata.
+- Keep tag-triggered GitHub release publication gated by the `release-approval`
+  environment after artifact build completion and before the GitHub release is
+  published.
 - Keep live feed publication credential-gated.
 - Never commit secrets or machine-specific paths.

@@ -7,7 +7,13 @@ param(
     [string]$InstallerPayloadRoot = (Join-Path $PSScriptRoot '..\artifacts\install-root'),
     [string]$ArtifactRoot = (Join-Path $PSScriptRoot '..\artifacts'),
     [string]$ProductVersion,
-    [string]$ServiceName = 'Squid4Win'
+    [string]$ServiceName = 'Squid4Win',
+    [switch]$SignMsi,
+    [string]$SigningCertificatePath = $env:SQUID4WIN_SIGNING_CERTIFICATE_PATH,
+    [string]$SigningCertificateBase64 = $env:SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64,
+    [string]$SigningCertificatePassword = $env:SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD,
+    [string]$SigningTimestampServer = $env:SQUID4WIN_SIGNING_TIMESTAMP_URL,
+    [string]$SignToolPath = $env:SQUID4WIN_SIGNTOOL_PATH
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -59,9 +65,32 @@ if ($null -eq $msiPath) {
 }
 $null = New-Item -ItemType Directory -Path $resolvedArtifactRoot -Force
 Copy-Item -LiteralPath $msiPath.FullName -Destination $msiArtifactPath -Force
+$msiSigning = [PSCustomObject]@{
+    SigningEnabled = $false
+    SignedFileCount = 0
+    SignedFiles = @()
+    SkippedFileCount = 0
+    SkippedFiles = @()
+}
+if ($SignMsi) {
+    $msiSigning = & (Join-Path $PSScriptRoot 'Invoke-AuthenticodeSigning.ps1') `
+        -Path $msiArtifactPath `
+        -RepositoryRoot $resolvedRepositoryRoot `
+        -RequireMatches `
+        -CertificatePath $SigningCertificatePath `
+        -CertificateBase64 $SigningCertificateBase64 `
+        -CertificatePassword $SigningCertificatePassword `
+        -TimestampServer $SigningTimestampServer `
+        -SignToolPath $SignToolPath
+}
 [PSCustomObject]@{
     ProductVersion = $resolvedProductVersion
     ServiceName = $ServiceName
     MsiPath = $msiArtifactPath
     BuildOutputPath = $msiPath.FullName
+    SigningEnabled = [bool]$msiSigning.SigningEnabled
+    SignedFileCount = [int]$msiSigning.SignedFileCount
+    SignedFiles = @($msiSigning.SignedFiles)
+    SkippedFileCount = [int]$msiSigning.SkippedFileCount
+    SkippedFiles = @($msiSigning.SkippedFiles)
 }

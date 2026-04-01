@@ -53,6 +53,9 @@ class Squid4WinTrayConan(ConanFile):
         self.folders.source = "source"
         self.folders.build = os.path.join("build", configuration_label)
         self.folders.generators = self._generators_folder()
+        self.cpp.build.bindirs = [os.path.join("editable-package", "bin")]
+        self.cpp.build.includedirs = []
+        self.cpp.build.libdirs = []
 
     def source(self) -> None:
         source_root = Path(self.source_folder)
@@ -60,11 +63,11 @@ class Squid4WinTrayConan(ConanFile):
         source_root.mkdir(parents=True, exist_ok=True)
 
         exported_project_root = Path(self.recipe_folder) / "src" / "tray" / self.PROJECT_NAME
+        local_repository_root = self._local_repository_root()
         local_project_root = (
-            Path(self.recipe_folder).parents[2]
-            / "src"
-            / "tray"
-            / self.PROJECT_NAME
+            local_repository_root / "src" / "tray" / self.PROJECT_NAME
+            if local_repository_root is not None
+            else Path()
         )
         project_source_root = (
             exported_project_root
@@ -82,12 +85,21 @@ class Squid4WinTrayConan(ConanFile):
         exported_directory_build_props = (
             Path(self.recipe_folder) / "build-support" / self.DIRECTORY_BUILD_PROPS_FILE
         )
-        if not exported_directory_build_props.is_file():
+        directory_build_props_path = (
+            exported_directory_build_props
+            if exported_directory_build_props.is_file()
+            else (
+                local_repository_root / self.DIRECTORY_BUILD_PROPS_FILE
+                if local_repository_root is not None
+                else Path()
+            )
+        )
+        if not directory_build_props_path.is_file():
             raise ConanException(
-                f"Exported {self.DIRECTORY_BUILD_PROPS_FILE} is missing at {exported_directory_build_props}."
+                f"Unable to locate {self.DIRECTORY_BUILD_PROPS_FILE} for the tray recipe."
             )
         shutil.copy2(
-            exported_directory_build_props,
+            directory_build_props_path,
             source_root / self.DIRECTORY_BUILD_PROPS_FILE,
         )
 
@@ -103,16 +115,12 @@ class Squid4WinTrayConan(ConanFile):
             )
 
     def build(self) -> None:
-        project_path = (
-            Path(self.source_folder)
-            / "src"
-            / "tray"
-            / self.PROJECT_NAME
-            / f"{self.PROJECT_NAME}.csproj"
-        )
+        project_path = self._project_root() / f"{self.PROJECT_NAME}.csproj"
         publish_root = Path(self.build_folder) / "publish"
+        editable_package_root = self._editable_package_root()
 
         shutil.rmtree(publish_root, ignore_errors=True)
+        shutil.rmtree(editable_package_root, ignore_errors=True)
 
         publish_command = [
             "dotnet",
@@ -141,28 +149,83 @@ class Squid4WinTrayConan(ConanFile):
                 f"Expected the published tray executable at {tray_executable}."
             )
 
+        self._materialize_package_root(publish_root, editable_package_root)
+
     def package(self) -> None:
-        publish_root = Path(self.build_folder) / "publish"
-        package_root = Path(self.package_folder)
-        exported_license_path = Path(self.recipe_folder) / "build-support" / "LICENSE"
-        local_license_path = Path(self.recipe_folder).parents[2] / "LICENSE"
+        editable_package_root = self._editable_package_root()
+        if not editable_package_root.is_dir():
+            raise ConanException(
+                f"Expected the tray editable package root at {editable_package_root}."
+            )
+
+        copy(
+            self,
+            "*",
+            src=os.fspath(editable_package_root),
+            dst=self.package_folder,
+        )
+
+    def package_info(self) -> None:
+        self.cpp_info.bindirs = ["bin"]
+        self.cpp_info.includedirs = []
+        self.cpp_info.libdirs = []
+
+    def _project_root(self) -> Path:
+        local_repository_root = self._local_repository_root()
+        if local_repository_root is not None:
+            project_root = local_repository_root / "src" / "tray" / self.PROJECT_NAME
+            if project_root.is_dir():
+                return project_root
+
+        return Path(self.source_folder) / "src" / "tray" / self.PROJECT_NAME
+
+    def _build_support_root(self) -> Path:
+        exported_build_support_root = Path(self.recipe_folder) / "build-support"
+        if exported_build_support_root.is_dir():
+            return exported_build_support_root
+
+        local_repository_root = self._local_repository_root()
+        if local_repository_root is not None:
+            return local_repository_root
+
+        raise ConanException(
+            f"Unable to locate the tray app build-support inputs under {self.recipe_folder}."
+        )
+
+    def _editable_package_root(self) -> Path:
+        return Path(self.build_folder) / "editable-package"
+
+    def _local_repository_root(self) -> Path | None:
+        for candidate_path in (self.build_folder, self.source_folder):
+            if not candidate_path:
+                continue
+
+            candidate = Path(candidate_path).resolve()
+            if any(part.lower() == ".conan2" for part in candidate.parts):
+                continue
+
+            for ancestor in (candidate, *candidate.parents):
+                if (ancestor / ".git").exists():
+                    return ancestor
+
+        return None
+
+    def _materialize_package_root(
+        self, publish_root: Path, package_root: Path
+    ) -> None:
+        package_root.mkdir(parents=True, exist_ok=True)
         copy(
             self,
             "*",
             src=os.fspath(publish_root),
-            dst=os.path.join(self.package_folder, "bin"),
+            dst=os.path.join(os.fspath(package_root), "bin"),
         )
         copy(
             self,
             "LICENSE",
-            src=os.fspath(
-                exported_license_path.parent
-                if exported_license_path.is_file()
-                else local_license_path.parent
-            ),
-            dst=os.path.join(self.package_folder, "licenses"),
+            src=os.fspath(self._build_support_root()),
+            dst=os.path.join(os.fspath(package_root), "licenses"),
         )
-
         third_party_packages = self._harvest_published_package_notices(
             publish_root, package_root
         )
@@ -179,12 +242,6 @@ class Squid4WinTrayConan(ConanFile):
             )
             + "\n",
             encoding="utf-8",
-        )
-
-    def package_info(self) -> None:
-        self.cpp_info.bindirs = ["bin"]
-        self.runenv_info.prepend_path(
-            "PATH", os.path.join(self.package_folder, "bin")
         )
 
     def _harvest_published_package_notices(

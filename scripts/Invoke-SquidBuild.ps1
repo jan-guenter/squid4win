@@ -16,7 +16,8 @@ param(
     [switch]$Clean,
     [switch]$WithTray,
     [switch]$WithRuntimeDlls,
-    [switch]$WithPackagingSupport
+    [switch]$WithPackagingSupport,
+    [switch]$UseTrayEditable
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -74,7 +75,8 @@ $bootstrapState = & (Join-Path $PSScriptRoot 'Invoke-ConanRootRecipe.ps1') `
     -BuildProfile $BuildProfile `
     -WithTray:$WithTray `
     -WithRuntimeDlls:$WithRuntimeDlls `
-    -WithPackagingSupport:$WithPackagingSupport
+    -WithPackagingSupport:$WithPackagingSupport `
+    -UseTrayEditable:$UseTrayEditable
 if ($BootstrapOnly) {
     $bootstrapState
     return
@@ -86,6 +88,8 @@ $buildLockPath = [string]$layout.BuildLockPath
 $repoLockfilePath = [string]$layout.RepoLockfilePath
 $resolvedLockfilePath = if ($LockfilePath) {
     Get-AbsolutePath -Path $LockfilePath -BasePath $resolvedRepositoryRoot
+} elseif ($UseTrayEditable) {
+    Join-Path $conanOutputRoot "lockfiles\msys2-mingw-x64-$configurationLabel.lock"
 } elseif (Test-Path -LiteralPath $repoLockfilePath) {
     $repoLockfilePath
 } else {
@@ -101,6 +105,17 @@ try {
     if ($Clean) {
         $sourceRoot = Join-Path $resolvedRepositoryRoot "sources\squid-$([string]$metadata.version)"
         Remove-Item -Path $conanOutputRoot, $installRoot, ([string]$layout.WorkRoot), $sourceRoot -Recurse -Force -ErrorAction SilentlyContinue
+        if ($UseTrayEditable) {
+            Remove-Item `
+                -Path (
+                    Join-Path $resolvedRepositoryRoot 'conan\recipes\tray-app\build'
+                ), (
+                    Join-Path $resolvedRepositoryRoot 'conan\recipes\tray-app\source'
+                ) `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
     }
     $null = New-Item -ItemType Directory -Path $resolvedBuildRoot, $conanOutputRoot, (Split-Path -Parent $resolvedLockfilePath) -Force
     if ($RefreshLockfile -or -not (Test-Path -LiteralPath $resolvedLockfilePath)) {
@@ -115,7 +130,8 @@ try {
             -SkipBootstrap `
             -WithTray:$WithTray `
             -WithRuntimeDlls:$WithRuntimeDlls `
-            -WithPackagingSupport:$WithPackagingSupport | Out-Null
+            -WithPackagingSupport:$WithPackagingSupport `
+            -UseTrayEditable:$UseTrayEditable | Out-Null
     }
     & (Join-Path $PSScriptRoot 'Invoke-ConanRootRecipe.ps1') `
         -Operation Source `
@@ -125,7 +141,8 @@ try {
         -SkipBootstrap `
         -WithTray:$WithTray `
         -WithRuntimeDlls:$WithRuntimeDlls `
-        -WithPackagingSupport:$WithPackagingSupport | Out-Null
+        -WithPackagingSupport:$WithPackagingSupport `
+        -UseTrayEditable:$UseTrayEditable | Out-Null
     $env:SQUID4WIN_MAKE_JOBS = [string]$MakeJobs
     if ($AdditionalConfigureArgs.Count -gt 0) {
         $env:SQUID4WIN_CONFIGURE_ARGS_JSON = ConvertTo-Json -Compress -InputObject @($AdditionalConfigureArgs)
@@ -144,7 +161,8 @@ try {
         -SkipBootstrap `
         -WithTray:$WithTray `
         -WithRuntimeDlls:$WithRuntimeDlls `
-        -WithPackagingSupport:$WithPackagingSupport | Out-Null
+        -WithPackagingSupport:$WithPackagingSupport `
+        -UseTrayEditable:$UseTrayEditable | Out-Null
 }
 finally {
     if ($hadMakeJobs) {

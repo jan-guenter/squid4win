@@ -70,8 +70,14 @@ details here.
   `.github\workflows\build-release-artifacts.yml`,
   `.github\workflows\prerelease.yml`, `.github\workflows\release.yml`, and
   `.github\workflows\package-managers.yml` synchronized.
+- Keep tag-triggered GitHub release publication gated by the `release-approval`
+  environment after artifacts are built and before the GitHub release is
+  published.
 - If native runtime DLL harvesting or MinGW-linked imports change, keep
   `conandata.yml`, `conanfile.py`, and the staged notice bundle synchronized.
+- Keep the committed `conan\lockfiles\` flow cache-backed; use
+  `-UseTrayEditable` only for local root+tray iteration so editable lockfiles
+  stay under `build\conan\`.
 - Treat `.agents\skills\` as vendored third-party content and update it
   deliberately.
 - Prefer repo-relative paths and repo-local state; do not introduce

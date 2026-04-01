@@ -113,11 +113,30 @@ harvesting, and installer-support files are opt-in:
 `Update-ConanLockfile.ps1` refreshes the committed lockfile, and
 `Invoke-SquidBuild.ps1` consumes it when present.
 
+### Root + tray editable iteration
+
+For local work on the root recipe and `conan\recipes\tray-app` together, use
+the tray package in editable mode:
+
+```powershell
+.\scripts\Update-ConanLockfile.ps1 -Configuration Release -WithTray -UseTrayEditable
+.\scripts\Invoke-SquidBuild.ps1 -Configuration Release -WithTray -UseTrayEditable
+```
+
+`-UseTrayEditable` keeps the committed `conan\lockfiles\` file untouched,
+registers `squid4win_tray/0.1` as an editable dependency in the repo-local
+`.\.conan2` home, and writes the matching local lockfile under
+`build\conan\msys2-mingw-x64-release\lockfiles\`. The default cache-backed flow
+is restored automatically the next time you run the same scripts without
+`-UseTrayEditable`.
+
 GitHub Actions follows the same root-recipe path: `release.yml` handles stable
 `v*` tags, `prerelease.yml` handles `v*-*` tags, and both drive
 `Invoke-ConanRootRecipe.ps1` explicitly before payload staging and MSI
-assembly. Only stable published GitHub releases fan out into
-`package-managers.yml`.
+assembly. When a tag-triggered run is allowed to publish a GitHub release, the
+workflow now builds and uploads the artifacts first, then waits on the
+`release-approval` environment before the final GitHub release publication
+step. Only stable published GitHub releases fan out into `package-managers.yml`.
 
 ### Runner-safe installed-service validation
 

@@ -14,6 +14,7 @@ param(
     [switch]$WithTray,
     [switch]$WithRuntimeDlls,
     [switch]$WithPackagingSupport,
+    [switch]$UseTrayEditable,
     [switch]$SkipBootstrap
 )
 Set-StrictMode -Version Latest
@@ -77,8 +78,13 @@ if ($null -eq $conanCommand) {
 }
 
 $conanExecutable = $conanCommand.Source
+$defaultLocalLockfilePath = Join-Path `
+    ([string]$layout.ConanOutputRoot) `
+    ("lockfiles\" + (Split-Path -Leaf ([string]$layout.RepoLockfilePath)))
 $resolvedLockfilePath = if ($LockfilePath) {
     Get-AbsolutePath -Path $LockfilePath -BasePath $resolvedRepositoryRoot
+} elseif ($UseTrayEditable) {
+    $defaultLocalLockfilePath
 } else {
     [string]$layout.RepoLockfilePath
 }
@@ -105,10 +111,12 @@ $state = [PSCustomObject]@{
     LockfilePath = $resolvedLockfilePath
     OutputRoot = $resolvedOutputRoot
     StageRoot = [string]$layout.StageRoot
+    TrayRecipeMode = if ($UseTrayEditable) { 'Editable' } else { 'Cache' }
     RecipeOptions = [PSCustomObject]@{
         WithTray = $WithTray.IsPresent
         WithRuntimeDlls = $WithRuntimeDlls.IsPresent
         WithPackagingSupport = $WithPackagingSupport.IsPresent
+        UseTrayEditable = $UseTrayEditable.IsPresent
     }
 }
 
@@ -118,7 +126,9 @@ if ($shouldBootstrapWorkspace) {
         -ConanExecutable $conanExecutable `
         -Arguments @('profile', 'detect', '--force') `
         -FailureDescription 'conan profile detect'
-    & (Join-Path $PSScriptRoot 'Export-ConanWorkspaceRecipes.ps1') -RepositoryRoot $resolvedRepositoryRoot | Out-Null
+    & (Join-Path $PSScriptRoot 'Export-ConanWorkspaceRecipes.ps1') `
+        -RepositoryRoot $resolvedRepositoryRoot `
+        -UseTrayEditable:$UseTrayEditable | Out-Null
 }
 
 if ($Operation -in @('LockCreate', 'Build') -and -not (Test-Path -LiteralPath $resolvedHostProfilePath)) {
@@ -173,6 +183,9 @@ switch ($Operation) {
             '-s:b', "build_type=$Configuration",
             '--build=missing'
         ) + $conanOptionArguments
+        if ($UseTrayEditable) {
+            $conanBuildArguments += '--build=editable'
+        }
         Invoke-ConanCommand `
             -ConanExecutable $conanExecutable `
             -Arguments $conanBuildArguments `

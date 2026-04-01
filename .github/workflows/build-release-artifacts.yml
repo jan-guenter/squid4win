@@ -21,9 +21,17 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64:
+        required: false
+      SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD:
+        required: false
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 env:
   DOTNET_NOLOGO: true
@@ -51,6 +59,24 @@ jobs:
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: 8.0.x
+
+      - name: Resolve release security configuration
+        id: release-security
+        env:
+          SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
+          SIGNING_TIMESTAMP_URL: ${{ vars.SQUID4WIN_SIGNING_TIMESTAMP_URL }}
+          SIGNTOOL_PATH: ${{ vars.SQUID4WIN_SIGNTOOL_PATH }}
+          DISABLE_GITHUB_ATTESTATION: ${{ vars.SQUID4WIN_DISABLE_GITHUB_ATTESTATION }}
+        run: |
+          $signingConfigured = -not [string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_PFX_BASE64)
+          $timestampConfigured = -not [string]::IsNullOrWhiteSpace($env:SIGNING_TIMESTAMP_URL)
+          $customSignToolConfigured = -not [string]::IsNullOrWhiteSpace($env:SIGNTOOL_PATH)
+          $attestationEnabled = ($env:GITHUB_SERVER_URL -eq 'https://github.com') -and ($env:DISABLE_GITHUB_ATTESTATION -ne 'true')
+
+          "signing_configured=$($signingConfigured.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "timestamp_configured=$($timestampConfigured.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "custom_signtool_configured=$($customSignToolConfigured.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "attestation_enabled=$($attestationEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Resolve build automation configuration
         id: build-config
@@ -155,27 +181,141 @@ jobs:
 
       - name: Stage release payload
         id: payload
+        env:
+          SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
+          SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD }}
+          SQUID4WIN_SIGNING_TIMESTAMP_URL: ${{ vars.SQUID4WIN_SIGNING_TIMESTAMP_URL }}
+          SQUID4WIN_SIGNTOOL_PATH: ${{ vars.SQUID4WIN_SIGNTOOL_PATH }}
         run: |
           $payload = .\scripts\Stage-ReleasePayload.ps1 `
             -Configuration Release `
             -RequireTray `
             -RequireNotices `
-            -CreatePortableZip
+            -CreatePortableZip `
+            -SignPayloadFiles
 
           "installer_payload_root=$($payload.InstallPayloadRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "portable_zip_path=$($payload.PortableZipPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "notices_path=$($payload.NoticesPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "payload_signing_enabled=$($payload.SigningEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "payload_signed_file_count=$($payload.SignedFileCount)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build MSI
         if: ${{ steps.packaging.outputs.has_wix_sources == 'true' }}
         id: wix
+        env:
+          SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
+          SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD }}
+          SQUID4WIN_SIGNING_TIMESTAMP_URL: ${{ vars.SQUID4WIN_SIGNING_TIMESTAMP_URL }}
+          SQUID4WIN_SIGNTOOL_PATH: ${{ vars.SQUID4WIN_SIGNTOOL_PATH }}
         run: |
           $build = .\scripts\Build-Installer.ps1 `
             -Configuration Release `
-            -InstallerPayloadRoot '${{ steps.payload.outputs.installer_payload_root }}'
+            -InstallerPayloadRoot '${{ steps.payload.outputs.installer_payload_root }}' `
+            -SignMsi
 
           "msi_path=$($build.MsiPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "product_version=$($build.ProductVersion)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "msi_signing_enabled=$($build.SigningEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "msi_signed_file_count=$($build.SignedFileCount)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Generate release integrity manifest
+        id: integrity
+        run: |
+          $artifactFiles = [System.Collections.Generic.List[string]]::new()
+          foreach ($candidatePath in @(
+            '${{ steps.payload.outputs.portable_zip_path }}',
+            '${{ steps.wix.outputs.msi_path }}'
+          )) {
+            if (-not [string]::IsNullOrWhiteSpace($candidatePath) -and (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+              $artifactFiles.Add([System.IO.Path]::GetFullPath($candidatePath))
+            }
+          }
+
+          $artifactFiles = @($artifactFiles | Sort-Object -Unique)
+          if ($artifactFiles.Count -eq 0) {
+            throw 'No release artifacts were available to hash.'
+          }
+
+          $checksumPath = Join-Path $PWD.Path 'artifacts\squid4win-artifacts.sha256'
+          $checksumLines = foreach ($artifactFile in $artifactFiles) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifactFile).Hash.ToLowerInvariant()
+            '{0} *{1}' -f $hash, (Split-Path -Leaf $artifactFile)
+          }
+
+          Set-Content -LiteralPath $checksumPath -Value (($checksumLines -join [Environment]::NewLine) + [Environment]::NewLine) -Encoding ascii
+
+          "checksums_path=$checksumPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "artifact_count=$($artifactFiles.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "subject_paths<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $artifactFiles | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Attest release artifacts
+        if: ${{ steps.release-security.outputs.attestation_enabled == 'true' }}
+        id: attest
+        continue-on-error: true
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ${{ steps.integrity.outputs.subject_paths }}
+
+      - name: Collect attestation bundle
+        if: ${{ steps.attest.outcome == 'success' && steps.attest.outputs.bundle-path != '' }}
+        id: attestation-bundle
+        run: |
+          $bundleArtifactPath = Join-Path $PWD.Path 'artifacts\squid4win-artifacts-attestation.sigstore.json'
+          Copy-Item -LiteralPath '${{ steps.attest.outputs.bundle-path }}' -Destination $bundleArtifactPath -Force
+          "bundle_path=$bundleArtifactPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Summarize release integrity scaffolding
+        if: always()
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+
+          $payloadSigningStatus = if ('${{ steps.payload.outputs.payload_signing_enabled }}' -eq 'true') {
+            '{0} file(s) signed before zipping' -f '${{ steps.payload.outputs.payload_signed_file_count }}'
+          } else {
+            'inactive (no signing material configured)'
+          }
+
+          $msiSigningStatus = if ('${{ steps.wix.outputs.msi_signing_enabled }}' -eq 'true') {
+            '{0} file(s) signed' -f '${{ steps.wix.outputs.msi_signed_file_count }}'
+          } elseif ('${{ steps.packaging.outputs.has_wix_sources }}' -ne 'true') {
+            'skipped (MSI packaging disabled)'
+          } else {
+            'inactive (no signing material configured)'
+          }
+
+          $attestationStatus = if ('${{ steps.release-security.outputs.attestation_enabled }}' -ne 'true') {
+            'skipped'
+          } elseif ('${{ steps.attest.outcome }}') {
+            '${{ steps.attest.outcome }}'
+          } else {
+            'not-run'
+          }
+
+          $summaryLines = @(
+            '## Release integrity scaffolding',
+            '',
+            ('- Signing certificate configured: `{0}`' -f ('${{ steps.release-security.outputs.signing_configured }}' -eq 'true')),
+            ('- Timestamp URL configured: `{0}`' -f ('${{ steps.release-security.outputs.timestamp_configured }}' -eq 'true')),
+            ('- Payload signing: {0}' -f $payloadSigningStatus),
+            ('- MSI signing: {0}' -f $msiSigningStatus),
+            ('- Artifact checksum manifest: `{0}`' -f '${{ steps.integrity.outputs.checksums_path }}'),
+            ('- GitHub attestation status: `{0}`' -f $attestationStatus)
+          )
+
+          if ('${{ steps.attest.outputs.attestation-url }}') {
+            $summaryLines += ('- GitHub attestation URL: {0}' -f '${{ steps.attest.outputs.attestation-url }}')
+          }
+
+          if ('${{ steps.attestation-bundle.outputs.bundle_path }}') {
+            $summaryLines += ('- Attestation bundle artifact: `{0}`' -f '${{ steps.attestation-bundle.outputs.bundle_path }}')
+          }
+
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
@@ -184,12 +324,28 @@ jobs:
           path: artifacts/**
           if-no-files-found: error
 
+  publish:
+    name: Publish ${{ inputs.release_channel }} release
+    needs: build
+    if: ${{ inputs.publish_github_release }}
+    runs-on: ubuntu-latest
+    environment: release-approval
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: artifacts
+
       - name: Publish GitHub release
-        if: ${{ inputs.publish_github_release }}
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           prerelease: ${{ inputs.prerelease }}
           files: |
             artifacts/*.zip
             artifacts/*.msi
+            artifacts/*.sha256
+            artifacts/*.sigstore.json
           fail_on_unmatched_files: false

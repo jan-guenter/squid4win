@@ -8,6 +8,9 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 concurrency:
   group: prerelease-${{ github.workflow }}-${{ github.ref }}
@@ -21,3 +24,6 @@ jobs:
       release_channel: prerelease
       prerelease: true
       publish_github_release: ${{ github.event_name == 'push' }}
+    secrets:
+      SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
+      SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD }}

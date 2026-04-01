@@ -9,7 +9,8 @@ param(
     [string]$LockfilePath,
     [switch]$WithTray,
     [switch]$WithRuntimeDlls,
-    [switch]$WithPackagingSupport
+    [switch]$WithPackagingSupport,
+    [switch]$UseTrayEditable
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -23,5 +24,6 @@ $state = & (Join-Path $PSScriptRoot 'Invoke-ConanRootRecipe.ps1') `
     -LockfilePath $LockfilePath `
     -WithTray:$WithTray `
     -WithRuntimeDlls:$WithRuntimeDlls `
-    -WithPackagingSupport:$WithPackagingSupport
+    -WithPackagingSupport:$WithPackagingSupport `
+    -UseTrayEditable:$UseTrayEditable
 Write-Output $state.LockfilePath
