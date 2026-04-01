@@ -27,6 +27,9 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - The installed service helper intentionally skips `squid.exe -z` because the
   current native Windows build crashes during cache initialization on Windows
   runners.
+- The installed service helper must rewrite the registered Windows service
+  command line after `squid.exe -i` so the installed service keeps the
+  materialized `etc\squid.conf` path instead of Squid's build-time default.
 - WiX v4 MSI authoring and payload staging are already committed.
 - The repository's own code and docs are GPL-2.0-or-later.
 - The last cited validation still comes from the legacy PowerShell +

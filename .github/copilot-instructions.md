@@ -24,7 +24,8 @@ Repo-specific directives:
 - Keep the installed service helper on the current `squid.exe -k parse` plus
   `-i`/`-r` flow; do not reintroduce `squid.exe -z` without fresh runner
   validation because the current native Windows build crashes during cache
-  initialization.
+  initialization. Keep the helper's post-`-i` service command-line rewrite so
+  the registered Windows service retains the installed `squid.conf` path.
 - Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conandata.yml` aligned when the Squid pin changes. Prefer

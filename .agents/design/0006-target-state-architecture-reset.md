@@ -94,7 +94,9 @@ The target architecture is:
 - The installed service helper currently validates generated configs with
   `squid.exe -k parse` but intentionally skips `squid.exe -z` because the
   current native Windows build crashes during cache initialization on Windows
-  runners.
+  runners. It also rewrites the registered Windows service command line after
+  `squid.exe -i` so the installed service keeps using the materialized
+  `etc\squid.conf` path instead of Squid's build-time default.
 
 ## Alternatives considered
 
