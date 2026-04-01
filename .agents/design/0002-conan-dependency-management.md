@@ -1,7 +1,14 @@
 # ADR 0002: Conan and dependency management
 
-- Status: Accepted
+- Status: Superseded by ADR 0006
 - Date: 2026-03-30
+- Superseded on: 2026-04-01
+
+## Superseded note
+
+ADR `0006` replaces this ADR as the target-state dependency and packaging
+direction. This ADR is preserved as historical rationale for the earlier
+Conan-first product graph and tray-app packaging split.
 
 ## Context
 
@@ -81,11 +88,13 @@ with a different platform stack.
 - The current committed build flow should be described honestly: MSYS2 still
   provides the shell-facing package ecosystem, while Conan now owns the
   top-level product recipe, versioned source metadata in `conandata.yml`, the
-  Windows compatibility patch set under `conan\patches\`, the Conan-managed tool
-  bootstrap, and the separate tray-app package consumed by the final bundle.
-- The committed repository lockfile remains cache-backed; local editable tray
-  work should use a build-local lockfile instead of rewriting
-  `conan\lockfiles\`.
+  Windows compatibility patch set under `conan\patches\`, and the Conan-managed
+  tool bootstrap.
+- The tray package is no longer a separate Conan recipe. The tray now builds
+  directly with `dotnet`, and the root recipe consumes the staged tray package
+  root through `SQUID4WIN_TRAY_PACKAGE_ROOT`.
+- The committed repository lockfile remains cache-backed; local experimentation
+  should use a build-local lockfile instead of rewriting `conan\lockfiles\`.
 - Tag-triggered GitHub release/prerelease publication now depends on the
   reviewed committed lockfile state instead of whatever ConanCenter serves at
   publication time.
@@ -100,13 +109,10 @@ with a different platform stack.
 - Keep `conan\profiles\msys2-mingw-x64` as the committed host profile for the
   native Squid path and let `conan profile detect --force` maintain the default
   build profile in the repo-local Conan home.
-- Keep `scripts\Resolve-ConanHome.ps1` and GitHub workflow environment settings
-  aligned on repo-local Conan state.
-- Export the repo-local `python_requires` helper before all local product builds
-  and lockfile refreshes.
-- Export the tray recipe before committed lockfile refreshes and cache-backed
-  product builds; use the tray recipe as a Conan editable for local root+tray
-  iteration.
+- Keep the Python 3.14 + `uv` automation entry points and GitHub workflow
+  environment settings aligned on repo-local Conan state.
+- The old `python_requires` helper and separate tray recipe were part of the
+  pre-reset design and are superseded by ADR `0006`.
 - Use `conan\lockfiles\` as the repository location for Conan lockfile outputs,
   refreshed by dedicated automation when the Conan-owned graph changes, and keep
   editable-only lockfiles under `build\conan\`.

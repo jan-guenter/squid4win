@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "squid4win-automation"
+version = "0.1.0"
+description = "Python automation foundation for squid4win build and release orchestration."
+license = { file = "LICENSE" }
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  # Keep Conan aligned with the existing automation baseline until the migration is complete.
+  "conan==2.27.0",
+  "httpx>=0.28.1,<0.29",
+  "jinja2>=3.1.6,<4",
+  "pydantic>=2.12.0,<3",
+  "pyyaml>=6.0.2,<7",
+]
+
+[project.scripts]
+squid4win-automation = "squid4win.cli:main"
+
+[dependency-groups]
+dev = [
+  "ruff>=0.15.8,<0.16",
+  "ty>=0.0.27,<0.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/squid4win"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+include = ["src/**/*.py"]
+line-length = 100
+src = ["src"]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.ruff.format]
+docstring-code-format = true
+quote-style = "double"
+
+[tool.ty.environment]
+extra-paths = ["src"]
+python-platform = "win32"
+python-version = "3.14"
+
+[tool.ty.rules]
+all = "error"

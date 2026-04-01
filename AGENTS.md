@@ -6,57 +6,47 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 ## Read first
 
 1. `README.md`
-2. every ADR under `.agents\design\`
+2. every ADR under `.agents\design\`, with ADR `0006` as the target-state
+   source of truth and ADRs `0001` through `0004` as historical context
 3. `config\squid-version.json`, `conan\squid-release.json`, and `conandata.yml`
    if you touch the Squid pin or native build metadata
-4. `scripts\`, `conanfile.py`, `packaging\wix\`, and `.github\workflows\` if you
-   touch automation, packaging, or release behavior
+4. `conanfile.py`, the Python automation package files, `scripts\`,
+   `packaging\wix\`, and `.github\workflows\` if you touch automation,
+   packaging, or release behavior
 5. `.github\copilot-instructions.md` and `.github\instructions\` if you touch
    contributor or Copilot guidance
 
 ## Current state summary
 
 - Upstream pin: Squid `7.5` (`SQUID_7_5`)
-- Native Windows builds remain Conan-first with Conan-managed MSYS2 + MinGW-w64.
-- The root `conanfile.py` owns Squid source retrieval, patch application,
-  native build, and bundle assembly.
-- The tray app is a separate `.NET 8` WPF deliverable packaged through
-  `conan\recipes\tray-app`.
-- WiX v4 MSI authoring and payload staging are committed.
-- Release automation now separates prerelease and stable GitHub release paths,
-  but both build from the root Conan recipe before payload staging and MSI
-  assembly.
-- The staged release bundle now carries harvested third-party notices for Squid,
-  the bundled native runtime DLL set, and the tray app's shipped NuGet package
-  dependency set.
-- The current repo state has been locally validated through native build,
-  native install tree creation, portable zip creation, and MSI build.
-- The repository now includes committed GitHub Actions automation for a
-  runner-safe installed-service lifecycle path on isolated Windows runners with
-  unique temporary service names and isolated cleanup.
-- `main` is protected by required checks for `Lint automation`, `Build tray
-  app`, `Build MSYS2/MinGW-w64`, and `SonarCloud Code Analysis`.
-- Tag-triggered GitHub release publication now pauses on the
-  `release-approval` environment after artifact build/upload and before the
-  GitHub release is published, and it refuses to publish unsigned artifacts
-  when signing credentials are not configured.
-- Tag-triggered release/prerelease publication now consumes the committed
-  `conan\lockfiles\` state without refreshing it during the publish run and only
-  allows tags that point to commits already reachable from `main`.
-- Cited successful execution of that workflow, clean-host installer upgrade
-  validation, and end-to-end installed-service plus tray-app lifecycle
-  validation are still pending.
+- The target architecture is one self-contained native Squid Conan recipe plus a
+  direct `.NET 10` tray build outside Conan.
+- Repo-level automation is moving to Python 3.14 + `uv`.
+- PowerShell remains allowed for MSI custom actions and install-time helper
+  logic, not as the long-term repo orchestration layer.
+- WiX v4 MSI authoring and payload staging are already committed.
+- The repository's own code and docs are GPL-2.0-or-later.
+- The last cited validation still comes from the legacy PowerShell +
+  tray-Conan implementation: native build, native install tree creation, staged
+  bundle assembly, portable zip creation, and MSI build.
+- Treat that legacy validation as historical proof only. It does not validate
+  the Python 3.14 + `uv` automation path, the direct `.NET 10` tray build
+  integration, or clean-host installer and installed-service plus tray lifecycle
+  behavior.
 
-For detailed Conan toolchain, installer, and automation rationale, use
-`README.md` plus ADRs `0001` through `0005` instead of duplicating those
-details here.
+For detailed architecture, quality, and distribution rationale, use
+`README.md` plus ADRs `0005` and `0006` instead of duplicating those details
+here.
 
 ## Project memory rule
 
 - Treat `.agents\design\*.md` as required project memory.
-- If an accepted design changes, update the relevant ADR in the same change.
-- Preserve ADR alternatives and history sections when updating an ADR.
-- If a new major decision is introduced, add a new numbered ADR.
+- ADR `0006` is the accepted target-state architecture decision.
+- ADR `0005` remains the current quality and distribution automation companion.
+- ADRs `0001` through `0004` are preserved for historical rationale after the
+  reset. Preserve their alternatives and any history notes if you touch them.
+- If the target architecture changes again, add or update an ADR instead of
+  relying on commit history.
 - If one ADR replaces another, mark the old ADR as superseded and point to the
   replacement.
 
@@ -66,53 +56,56 @@ details here.
   when contributor guidance changes.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conandata.yml` aligned when the Squid pin changes. Prefer
-  `.\scripts\Update-SquidVersion.ps1`.
-- Keep docs truthful about what is committed, what has only been locally
-  validated, and what is still unproven on a clean host.
-- Do not claim successful runner-safe, clean-host, or tray-app lifecycle proof
-  beyond the committed automation and any explicitly cited successful
-  validation.
-- Keep Squid service names passed through installer and runner-validation
-  automation alphanumeric and at most 32 characters because upstream
-  `squid.exe -n` enforces that contract.
-- Keep the staged payload free of a machine-specific `etc\squid.conf`; ship
-  `squid.conf.template` plus the upstream reference configs and let install
-  materialize the machine-local config.
-- If installer behavior changes, keep `conanfile.py`,
-  `scripts\Stage-ReleasePayload.ps1`, `scripts\Build-Installer.ps1`, and
-  `packaging\wix\` synchronized.
-- If release workflow behavior changes, keep
-  `.github\workflows\build-release-artifacts.yml`,
-  `.github\workflows\prerelease.yml`, `.github\workflows\release.yml`, and
-  `.github\workflows\package-managers.yml` synchronized.
-- Keep tag-triggered GitHub release publication gated by the `release-approval`
-  environment after artifacts are built and before the GitHub release is
-  published, and keep signed-artifact checks in place so release/prerelease tag
-  runs fail instead of publishing unsigned assets.
-- Keep tag-triggered release/prerelease publication tied to the committed Conan
-  lockfile and to commits already reachable from `main`; do not re-resolve the
-  reviewed lockfile graph during the publish run.
-- If native runtime DLL harvesting or MinGW-linked imports change, keep
-  `conandata.yml`, `conanfile.py`, and the staged notice bundle synchronized.
-- Keep the committed `conan\lockfiles\` flow cache-backed; use
-  `-UseTrayEditable` only for local root+tray iteration so editable lockfiles
-  stay under `build\conan\`.
-- Treat `.agents\skills\` as vendored third-party content and update it
-  deliberately.
-- Prefer repo-relative paths and repo-local state; do not introduce
-  machine-specific tool paths or secrets.
+  `uv run squid4win-automation upstream-version --execute`; keep
+  `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
+  Python automation environment is unavailable.
+- Keep `CONAN_HOME` repo-local at `.\.conan2`.
+- Keep the native Squid build owned by the root `conanfile.py`; do not split it
+  back into multiple primary Conan recipes.
+- Do not add new repo-level PowerShell orchestration. Put new contributor and
+  CI automation in the Python 3.14 + `uv` package and entry points.
+- Treat `uv run squid4win-automation ...` as the supported repo-level surface
+  for Squid builds, tray builds, bundle packaging, and Conan lockfile refresh.
+- Do not reintroduce tray-app Conan packaging or editable flows as the target
+  model; the tray builds directly with `dotnet` from
+  `src\tray\Squid4Win.Tray`.
+- Keep PowerShell limited to installer-time MSI custom actions or shipped
+  Windows helper scripts that genuinely need it.
+- Keep docs truthful about committed implementation, cited validation, and
+  migration plans.
+- Keep markdown guidance centralized. Use markdownlint,
+  `skills\gfm\SKILL.md`, and the repo-owned markdown audit direction instead of
+  scattered local rules.
+- Treat `skills\` as the canonical home for repo-owned custom skills.
+- Treat `.agents\skills\` as externally synced skills plus symlinks back to
+  `skills\`. Do not disturb unrelated skill-vendoring changes.
+- Preserve current artifact names `squid4win.msi` and
+  `squid4win-portable.zip` unless downstream packaging metadata changes too.
+- Keep live feed publication credential-gated.
+- The repository's own code and docs are GPL-2.0-or-later; do not revert or
+  dilute the license migration.
+- Do not copy GPL code from `diladele/squid-windows`; architectural inspiration
+  is acceptable, source reuse is not.
+- Never commit secrets or machine-specific paths.
 
 ## When current state changes
 
 At minimum, update:
 
-- `README.md` for contributor-facing state and common flows
+- `README.md` for contributor-facing state and migration status
 - `AGENTS.md` for future contributor guidance
 - the affected ADR under `.agents\design\`
 - `.github\copilot-instructions.md` or `.github\instructions\` when Copilot
   guidance changes
+- `skills\README.md` when repo-owned skill inventory or descriptions change
+- the relevant Python automation docs or package metadata when contributor entry
+  points change
 - `config\*.json`, `conan\*.json`, and `conandata.yml` when version metadata or
-  build defaults change
+  native build defaults change
+
+If markdown audit policy changes, update `skills\gfm\SKILL.md`,
+`skills\README.md`, markdown lint expectations, and top-level contributor docs
+together.
 
 Future contributors should be able to understand the current truth of the
 repository without reconstructing it from commit history.

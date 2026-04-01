@@ -29,7 +29,8 @@ jobs:
               'conandata.yml',
               'conan/lockfiles/',
               'conan/squid-release.json',
-              'requirements-automation.txt'
+              'pyproject.toml',
+              'uv.lock'
             ];
             const pullRequest = (await github.rest.pulls.get({
               owner: context.repo.owner,

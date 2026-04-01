@@ -1,7 +1,14 @@
 # ADR 0003: Automation and governance
 
-- Status: Accepted
+- Status: Superseded by ADR 0006
 - Date: 2026-03-30
+- Superseded on: 2026-04-01
+
+## Superseded note
+
+ADR `0006` replaces this ADR as the target-state automation and contributor
+guidance direction. This ADR is preserved as historical rationale for the
+earlier GitHub + PowerShell-oriented control plane.
 
 ## Context
 

@@ -1,7 +1,14 @@
 # ADR 0001: Native Windows build strategy
 
-- Status: Accepted
+- Status: Superseded by ADR 0006
 - Date: 2026-03-30
+- Superseded on: 2026-04-01
+
+## Superseded note
+
+ADR `0006` is the current target-state architecture record. This ADR is kept as
+historical rationale for why the project chose a Windows-native MSYS2/MinGW
+baseline in the first place.
 
 ## Context
 

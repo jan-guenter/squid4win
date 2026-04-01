@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 import json
 import os
 import re
@@ -30,8 +31,6 @@ class Squid4WinConan(ConanFile):
     package_type = "application"
     settings = "os", "arch", "compiler", "build_type"
     no_copy_source = True
-    python_requires = "squid4win_recipe_base/1.0"
-    python_requires_extend = "squid4win_recipe_base.Squid4WinRecipeBase"
     options = {
         "with_tray": [True, False],
         "with_runtime_dlls": [True, False],
@@ -89,10 +88,6 @@ class Squid4WinConan(ConanFile):
                 "with_runtime_dlls=True requires with_packaging_support=True so "
                 "the bundled notices and source manifest stay in sync."
             )
-
-    def requirements(self) -> None:
-        if self._option_enabled("with_tray"):
-            self.requires("squid4win_tray/0.1")
 
     def build_requirements(self) -> None:
         for reference in self._string_list(
@@ -332,6 +327,120 @@ class Squid4WinConan(ConanFile):
             "PATH", os.path.join(self.package_folder, "sbin")
         )
 
+    def _load_json_file(self, *relative_parts: str) -> dict[str, object]:
+        json_path = Path(self.recipe_folder).joinpath(*relative_parts)
+        return json.loads(load(self, os.fspath(json_path)))
+
+    def _release_metadata(self) -> dict[str, object]:
+        metadata_path = Path(self.recipe_folder) / "conan" / "squid-release.json"
+        if not metadata_path.is_file():
+            return {}
+
+        return self._load_json_file("conan", "squid-release.json")
+
+    def _build_settings(self) -> dict[str, object]:
+        build_settings = self.conan_data.get("build")
+        if not isinstance(build_settings, dict):
+            raise ConanInvalidConfiguration(
+                "conandata.yml must define a top-level 'build' mapping."
+            )
+
+        return build_settings
+
+    @staticmethod
+    def _string_list(values: object) -> list[str]:
+        if values is None:
+            return []
+
+        raw_values: Iterable[object]
+        if isinstance(values, str):
+            raw_values = [values]
+        elif isinstance(values, dict):
+            raw_values = values.values()
+        elif isinstance(values, Iterable):
+            raw_values = values
+        else:
+            raw_values = [values]
+
+        normalized_values: list[str] = []
+        for value in raw_values:
+            text = str(value).strip()
+            if text:
+                normalized_values.append(text)
+
+        return normalized_values
+
+    def _configuration_label(self) -> str:
+        return str(self.settings.build_type).lower()
+
+    def _generators_folder(self) -> str:
+        return os.path.join("build", self._configuration_label(), "conan")
+
+    def _build_setting(self, key: str, default: object | None = None) -> object:
+        return self._build_settings().get(key, default)
+
+    def _stage_root_template(self) -> str:
+        stage_root = str(
+            self._build_setting("stage_root", r"build\install\{configuration}")
+        ).strip()
+        return stage_root or r"build\install\{configuration}"
+
+    def _validate_native_windows(self) -> None:
+        if str(self.settings.os) != "Windows":
+            raise ConanInvalidConfiguration(
+                "The squid4win recipes only support native Windows builds."
+            )
+
+        if str(self.settings.arch) != "x86_64":
+            raise ConanInvalidConfiguration("Only x86_64 builds are supported.")
+
+        compiler = getattr(self.settings, "compiler", None)
+        if compiler is not None and str(compiler) != "gcc":
+            raise ConanInvalidConfiguration(
+                "Use the generated MSYS2 MinGW-w64 GCC host profile."
+            )
+
+    @staticmethod
+    def _to_msys_path(path: os.PathLike[str] | str) -> str:
+        normalized_path = os.path.abspath(os.fspath(path)).replace("\\", "/")
+        if len(normalized_path) >= 2 and normalized_path[1] == ":":
+            return f"/{normalized_path[0].lower()}{normalized_path[2:]}"
+
+        return normalized_path
+
+    @staticmethod
+    def _copy_directory_contents(
+        source: os.PathLike[str] | str, destination: os.PathLike[str] | str
+    ) -> None:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        destination_path.mkdir(parents=True, exist_ok=True)
+
+        for item in source_path.iterdir():
+            target = destination_path / item.name
+            if item.is_dir():
+                shutil.copytree(item, target, dirs_exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, target)
+
+    def _local_worktree_root(self) -> Path | None:
+        candidate = Path(self.recipe_folder)
+        if (candidate / ".git").exists():
+            return candidate
+
+        return None
+
+    def _local_stage_root(self) -> Path | None:
+        worktree_root = self._local_worktree_root()
+        if worktree_root is None:
+            return None
+
+        stage_root = self._stage_root_template().replace(
+            "{configuration}", self._configuration_label()
+        )
+        return (worktree_root / stage_root).resolve()
+
     def _augment_bundle(
         self,
         bundle_root: Path,
@@ -533,7 +642,7 @@ class Squid4WinConan(ConanFile):
                 "source_signature": str(metadata["assets"].get("source_signature", "")),
                 "source_archive_sha256": str(metadata["assets"]["source_archive_sha256"]),
             },
-            "repository": {"name": "squid4win", "license": "MIT"},
+            "repository": {"name": "squid4win", "license": "GPL-2.0-or-later"},
             "windows_runtime": {
                 "msys2_env": msys2_env_directory,
                 "dlls": bundled_runtime_dlls,
@@ -541,11 +650,9 @@ class Squid4WinConan(ConanFile):
             },
         }
         if self._option_enabled("with_tray"):
-            source_manifest["tray"] = {
-                "package": self._dependency_reference("squid4win_tray")
-                or "squid4win_tray/0.1",
-                "third_party_packages": tray_third_party_packages,
-            }
+            source_manifest["tray"] = self._tray_source_manifest(
+                tray_third_party_packages
+            )
 
         save(
             self,
@@ -839,7 +946,7 @@ class Squid4WinConan(ConanFile):
             "Squid4Win third-party notice bundle",
             "",
             f"This payload stages Squid {metadata['version']} from the upstream source archive listed in licenses/source-manifest.json.",
-            "Repository-local automation and packaging code in this project are MIT-licensed; see licenses/Repository-LICENSE.txt.",
+            "Repository-local automation and packaging code in this project are licensed under GPL-2.0-or-later; see licenses/Repository-LICENSE.txt.",
             "",
             "Bundled notice files:",
             "- licenses/source-manifest.json",
@@ -1008,19 +1115,56 @@ class Squid4WinConan(ConanFile):
         directories.append(candidate)
 
     def _tray_package_root(self) -> Path:
-        dependency_root = self._dependency_package_root("squid4win_tray")
-        if dependency_root is not None:
-            return dependency_root
+        configured_root = os.getenv("SQUID4WIN_TRAY_PACKAGE_ROOT", "").strip()
+        candidate_roots: list[Path] = []
+        if configured_root:
+            candidate_roots.append(Path(configured_root))
 
-        editable_root = self._tray_editable_package_root()
-        if editable_root is not None:
-            return editable_root
+        worktree_root = self._local_worktree_root()
+        if worktree_root is not None:
+            candidate_roots.append(
+                worktree_root / "build" / "tray" / self._configuration_label() / "package"
+            )
+
+        for candidate_root in candidate_roots:
+            if (candidate_root / "bin").is_dir():
+                return candidate_root
+
+        if configured_root:
+            raise ConanException(
+                "SQUID4WIN_TRAY_PACKAGE_ROOT must point to a tray package root "
+                "that contains a 'bin' directory."
+            )
 
         raise ConanException(
-            "The squid4win_tray package dependency is not available to the root recipe. "
-            "Build it from the cache or use the tray editable flow so "
-            f"{self._configuration_label()}\\editable-package is materialized first."
+            "Unable to locate the tray package root. Build it with "
+            r"`uv run squid4win-automation tray-build --execute` or set "
+            "SQUID4WIN_TRAY_PACKAGE_ROOT."
         )
+
+    def _tray_source_manifest(
+        self, tray_third_party_packages: list[dict[str, object]]
+    ) -> dict[str, object]:
+        tray_manifest: dict[str, object] = {
+            "project": "src/tray/Squid4Win.Tray",
+            "third_party_packages": tray_third_party_packages,
+        }
+        tray_package_root = self._tray_package_root()
+        worktree_root = self._local_worktree_root()
+        if worktree_root is None:
+            return tray_manifest
+
+        try:
+            relative_package_root = tray_package_root.resolve(strict=False).relative_to(
+                worktree_root.resolve(strict=False)
+            )
+        except ValueError:
+            return tray_manifest
+
+        tray_manifest["package_root"] = os.fspath(relative_package_root).replace(
+            "\\", "/"
+        )
+        return tray_manifest
 
     def _dependency_package_root(self, dependency_name: str) -> Path | None:
         try:
@@ -1037,37 +1181,6 @@ class Squid4WinConan(ConanFile):
                 package_folder = getattr(dependency, "package_folder", None)
                 if package_folder:
                     return Path(package_folder)
-
-        return None
-
-    def _dependency_recipe_folder(self, dependency_name: str) -> Path | None:
-        try:
-            dependency = self.dependencies[dependency_name]
-            recipe_folder = getattr(dependency, "recipe_folder", None)
-            if recipe_folder:
-                return Path(recipe_folder)
-        except Exception:
-            pass
-
-        for dependency in self.dependencies.values():
-            dependency_ref = getattr(dependency, "ref", None)
-            if dependency_ref and getattr(dependency_ref, "name", None) == dependency_name:
-                recipe_folder = getattr(dependency, "recipe_folder", None)
-                if recipe_folder:
-                    return Path(recipe_folder)
-
-        return None
-
-    def _tray_editable_package_root(self) -> Path | None:
-        recipe_folder = self._dependency_recipe_folder("squid4win_tray")
-        if recipe_folder is None:
-            return None
-
-        editable_root = (
-            recipe_folder / "build" / self._configuration_label() / "editable-package"
-        )
-        if editable_root.is_dir():
-            return editable_root
 
         return None
 

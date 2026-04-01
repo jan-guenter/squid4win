@@ -29,7 +29,6 @@ on:
 
 env:
   DOTNET_NOLOGO: true
-  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
   build:
@@ -40,11 +39,13 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
+    env:
+      CONAN_HOME: ${{ github.workspace }}\.conan2
     outputs:
       has_wix_sources: ${{ steps.packaging.outputs.has_wix_sources }}
       signing_configured: ${{ steps.release-security.outputs.signing_configured }}
-      payload_signing_enabled: ${{ steps.payload.outputs.payload_signing_enabled }}
-      msi_signing_enabled: ${{ steps.wix.outputs.msi_signing_enabled }}
+      payload_signing_enabled: ${{ steps.package.outputs.payload_signing_enabled }}
+      msi_signing_enabled: ${{ steps.package.outputs.msi_signing_enabled }}
     defaults:
       run:
         shell: pwsh
@@ -57,12 +58,28 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
+
+      - name: Sync automation environment
+        run: uv sync --locked
 
       - name: Setup .NET
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Resolve release security configuration
         id: release-security
@@ -85,83 +102,43 @@ jobs:
           "custom_signtool_configured=$($customSignToolConfigured.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "attestation_enabled=$($attestationEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Resolve build automation configuration
-        id: build-config
-        run: |
-          $layout = .\scripts\Resolve-SquidBuildLayout.ps1 -Configuration Release -RepositoryRoot $PWD.Path
-          $conanHome = .\scripts\Resolve-ConanHome.ps1 -RepositoryRoot $PWD.Path
-
-          "CONAN_HOME=$conanHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "conan_home=$conanHome" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "repo_lockfile_path=$($layout.RepoLockfilePath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "stage_root=$($layout.StageRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
       - name: Cache Conan home
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: ${{ steps.build-config.outputs.conan_home }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
+          path: ${{ env.CONAN_HOME }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'pyproject.toml', 'uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-conan-
 
       - name: Validate committed root Conan lockfile
         if: ${{ inputs.publish_github_release }}
         run: |
-          $repoLockfilePath = '${{ steps.build-config.outputs.repo_lockfile_path }}'
+          $repoLockfilePath = Join-Path $PWD.Path 'conan\lockfiles\msys2-mingw-x64-release.lock'
           if (-not (Test-Path -LiteralPath $repoLockfilePath -PathType Leaf)) {
             throw "Tag-triggered GitHub release publication requires the committed Conan lockfile at '$repoLockfilePath'."
           }
 
-      - name: Install automation dependencies
+      - name: Build native Squid bundle
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r .\requirements-automation.txt
-
-      - name: Bootstrap root Conan workspace
-        run: |
-          .\scripts\Invoke-ConanRootRecipe.ps1 `
-            -Operation Bootstrap `
-            -Configuration Release `
-            -RepositoryRoot $PWD.Path `
-            -WithTray `
-            -WithRuntimeDlls `
-            -WithPackagingSupport | Out-Null
-
-      - name: Refresh root Conan lockfile
-        if: ${{ !inputs.publish_github_release }}
-        run: |
-          .\scripts\Invoke-ConanRootRecipe.ps1 `
-            -Operation LockCreate `
-            -Configuration Release `
-            -RepositoryRoot $PWD.Path `
-            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}' `
-            -WithTray `
-            -WithRuntimeDlls `
-            -WithPackagingSupport `
-            -SkipBootstrap | Out-Null
-
-      - name: Materialize root Conan sources
-        run: |
-          .\scripts\Invoke-ConanRootRecipe.ps1 `
-            -Operation Source `
-            -Configuration Release `
-            -RepositoryRoot $PWD.Path `
-            -WithTray `
-            -WithRuntimeDlls `
-            -WithPackagingSupport `
-            -SkipBootstrap | Out-Null
-
-      - name: Build root Conan recipe
-        run: |
-          .\scripts\Invoke-ConanRootRecipe.ps1 `
-            -Operation Build `
-            -Configuration Release `
-            -RepositoryRoot $PWD.Path `
-            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}' `
-            -WithTray `
-            -WithRuntimeDlls `
-            -WithPackagingSupport `
-            -SkipBootstrap | Out-Null
+          $arguments = @(
+            'run',
+            'squid4win-automation',
+            'squid-build',
+            '--repository-root',
+            $PWD.Path,
+            '--configuration',
+            'Release',
+            '--lockfile-path',
+            'conan\lockfiles\msys2-mingw-x64-release.lock',
+            '--with-tray',
+            '--with-runtime-dlls',
+            '--with-packaging-support',
+            '--execute'
+          )
+          if ('${{ inputs.publish_github_release }}' -ne 'true') {
+            $arguments += '--refresh-lockfile'
+          }
+          & uv @arguments
 
       - name: Smoke test Squid
         run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release -RequireNotices
@@ -195,8 +172,8 @@ jobs:
             $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
 
-      - name: Stage release payload
-        id: payload
+      - name: Package release artifacts
+        id: package
         env:
           SQUID4WIN_SIGNING_CERTIFICATE_PATH: ${{ vars.SQUID4WIN_SIGNING_CERTIFICATE_PATH }}
           SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
@@ -204,46 +181,68 @@ jobs:
           SQUID4WIN_SIGNING_TIMESTAMP_URL: ${{ vars.SQUID4WIN_SIGNING_TIMESTAMP_URL }}
           SQUID4WIN_SIGNTOOL_PATH: ${{ vars.SQUID4WIN_SIGNTOOL_PATH }}
         run: |
-          $payload = .\scripts\Stage-ReleasePayload.ps1 `
-            -Configuration Release `
-            -RequireTray `
-            -RequireNotices `
-            -CreatePortableZip `
-            -SignPayloadFiles
+          $arguments = @(
+            'run',
+            'squid4win-automation',
+            'bundle-package',
+            '--repository-root',
+            $PWD.Path,
+            '--configuration',
+            'Release',
+            '--require-tray',
+            '--require-notices',
+            '--create-portable-zip',
+            '--sign-payload-files',
+            '--execute'
+          )
+          $hasWixSources = '${{ steps.packaging.outputs.has_wix_sources }}' -eq 'true'
+          if ($hasWixSources) {
+            $arguments += '--sign-msi'
+          } else {
+            $arguments += '--skip-installer'
+          }
+          & uv @arguments
 
-          "installer_payload_root=$($payload.InstallPayloadRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "portable_zip_path=$($payload.PortableZipPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "notices_path=$($payload.NoticesPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "payload_signing_enabled=$($payload.SigningEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "payload_signed_file_count=$($payload.SignedFileCount)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $artifactRoot = Join-Path $PWD.Path 'artifacts'
+          $installerPayloadRoot = Join-Path $artifactRoot 'install-root'
+          $portableZipPath = Join-Path $artifactRoot 'squid4win-portable.zip'
+          $noticesPath = Join-Path $installerPayloadRoot 'THIRD-PARTY-NOTICES.txt'
+          $msiPath = Join-Path $artifactRoot 'squid4win.msi'
+          $signingConfigured = '${{ steps.release-security.outputs.signing_configured }}' -eq 'true'
+          $payloadSigningEnabled = $signingConfigured
+          $msiSigningEnabled = $signingConfigured -and $hasWixSources
 
-      - name: Build MSI
-        if: ${{ steps.packaging.outputs.has_wix_sources == 'true' }}
-        id: wix
-        env:
-          SQUID4WIN_SIGNING_CERTIFICATE_PATH: ${{ vars.SQUID4WIN_SIGNING_CERTIFICATE_PATH }}
-          SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PFX_BASE64 }}
-          SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SQUID4WIN_SIGNING_CERTIFICATE_PASSWORD }}
-          SQUID4WIN_SIGNING_TIMESTAMP_URL: ${{ vars.SQUID4WIN_SIGNING_TIMESTAMP_URL }}
-          SQUID4WIN_SIGNTOOL_PATH: ${{ vars.SQUID4WIN_SIGNTOOL_PATH }}
-        run: |
-          $build = .\scripts\Build-Installer.ps1 `
-            -Configuration Release `
-            -InstallerPayloadRoot '${{ steps.payload.outputs.installer_payload_root }}' `
-            -SignMsi
+          if (-not (Test-Path -LiteralPath $installerPayloadRoot -PathType Container)) {
+            throw "Expected the installer payload root at '$installerPayloadRoot'."
+          }
+          if (-not (Test-Path -LiteralPath $portableZipPath -PathType Leaf)) {
+            throw "Expected the portable zip at '$portableZipPath'."
+          }
+          if (-not (Test-Path -LiteralPath $noticesPath -PathType Leaf)) {
+            throw "Expected the staged notices file at '$noticesPath'."
+          }
+          if ($hasWixSources -and -not (Test-Path -LiteralPath $msiPath -PathType Leaf)) {
+            throw "Expected the MSI at '$msiPath'."
+          }
 
-          "msi_path=$($build.MsiPath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "product_version=$($build.ProductVersion)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "msi_signing_enabled=$($build.SigningEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "msi_signed_file_count=$($build.SignedFileCount)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "installer_payload_root=$installerPayloadRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "portable_zip_path=$portableZipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "notices_path=$noticesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($hasWixSources) {
+            "msi_path=$msiPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "msi_path=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          "payload_signing_enabled=$($payloadSigningEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "msi_signing_enabled=$($msiSigningEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Generate release integrity manifest
         id: integrity
         run: |
           $artifactFiles = [System.Collections.Generic.List[string]]::new()
           foreach ($candidatePath in @(
-            '${{ steps.payload.outputs.portable_zip_path }}',
-            '${{ steps.wix.outputs.msi_path }}'
+            '${{ steps.package.outputs.portable_zip_path }}',
+            '${{ steps.package.outputs.msi_path }}'
           )) {
             if (-not [string]::IsNullOrWhiteSpace($candidatePath) -and (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
               $artifactFiles.Add([System.IO.Path]::GetFullPath($candidatePath))
@@ -292,14 +291,14 @@ jobs:
             exit 0
           }
 
-          $payloadSigningStatus = if ('${{ steps.payload.outputs.payload_signing_enabled }}' -eq 'true') {
-            '{0} file(s) signed before zipping' -f '${{ steps.payload.outputs.payload_signed_file_count }}'
+          $payloadSigningStatus = if ('${{ steps.package.outputs.payload_signing_enabled }}' -eq 'true') {
+            'enabled'
           } else {
             'inactive (no signing material configured)'
           }
 
-          $msiSigningStatus = if ('${{ steps.wix.outputs.msi_signing_enabled }}' -eq 'true') {
-            '{0} file(s) signed' -f '${{ steps.wix.outputs.msi_signed_file_count }}'
+          $msiSigningStatus = if ('${{ steps.package.outputs.msi_signing_enabled }}' -eq 'true') {
+            'enabled'
           } elseif ('${{ steps.packaging.outputs.has_wix_sources }}' -ne 'true') {
             'skipped (MSI packaging disabled)'
           } else {

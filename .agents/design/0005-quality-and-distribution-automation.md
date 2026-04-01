@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-03-31
+- Updated: 2026-04-01
 
 ## Context
 
@@ -11,9 +12,17 @@ distribution channels. The user has already provisioned SonarQube project
 credentials for GitHub Actions and wants the repository to prepare future
 publication to winget, Chocolatey, and Scoop.
 
-At the same time, the repository now vendors third-party skills under
-`.agents\skills\`, which should not be scanned or reviewed as first-party
-project code by default.
+At the same time, the repository now keeps externally synced skills under
+`.agents\skills\` while storing repo-owned skills canonically under
+`skills\` and exposing them back through `.agents\skills\` symlinks.
+Externally synced skill files should not be scanned or reviewed as first-party
+project code by default, except for repo-owned guidance such as
+`skills\gfm\SKILL.md`.
+
+Repository guidance now includes the repo-owned GFM skill at
+`skills\gfm\SKILL.md` plus a markdown audit path, so documentation quality
+needs to be part of the first-party quality story instead of an implicit side
+concern.
 
 ## Decision
 
@@ -26,8 +35,12 @@ The automation baseline is:
   workflow that builds an MSI with a unique temporary service name, installs it
   under an isolated root, starts and stops the service, and uninstalls it with
   cleanup
-- exclude generated outputs, local caches, and vendored `.agents\skills\`
-  content from scan scope
+- exclude generated outputs, local caches, and externally synced
+  `.agents\skills\` content from scan scope
+- keep markdownlint, `skills\gfm\SKILL.md`, and repo-owned markdown audits
+  as the first-party documentation quality path, while continuing to exclude
+  externally synced `.agents\skills\` content unless a change intentionally
+  updates it
 - keep prerelease artifact publication separate from stable release publication,
   and do not auto-generate downstream package-manager metadata from prerelease
   GitHub releases
@@ -63,6 +76,9 @@ The automation baseline is:
   service registration on the same machine.
 - Quality gates help keep automated version bumps and dependency updates from
   silently degrading maintainability.
+- Documentation quality is part of the repository's architecture control
+  surface, especially while contributor guidance is resetting around the GPL
+  migration and the automation split.
 - Package-manager metadata should be generated from the real release artifacts so
   URLs and checksums stay aligned with the published MSI and portable zip.
 - Release consumers need an integrity signal before final code-signing
@@ -86,6 +102,9 @@ The automation baseline is:
   package metadata generation depends on them.
 - Preview releases stop at GitHub prerelease assets; downstream package-manager
   metadata remains a stable-release concern.
+- `README.md`, `AGENTS.md`, `.github\copilot-instructions.md`, and
+  `skills\gfm\SKILL.md` now need to stay synchronized with the markdown
+  audit expectations.
 - Release assets may now include checksum and attestation sidecars in addition
   to the MSI and portable zip, while tag-triggered GitHub release publication
   now remains blocked until real Authenticode signing credentials are available.
@@ -105,12 +124,19 @@ The automation baseline is:
   the MSI, and cleaning up leftover runner state.
 - Keep `.github\workflows\service-runner-validation.yml` responsible for the
   isolated Windows runner lifecycle validation path.
-- Keep feed metadata generation in `scripts\Export-PackageManagerMetadata.ps1`.
+- Keep `.markdownlint-cli2.jsonc` as the baseline markdown lint
+  configuration, and align `skills\gfm\SKILL.md` plus any repo-owned
+  markdown audit helper with it.
+- Keep feed metadata generation in
+  `uv run squid4win-automation package-manager-export --execute`, backed by the
+  Python automation package.
 - Keep `scripts\Invoke-AuthenticodeSigning.ps1` responsible for optional
   Authenticode signing when a certificate path or base64-encoded PFX secret is
   provided.
-- Keep the package-manager publish helpers under `scripts\` responsible for the
-  credential-gated winget, Chocolatey, and Scoop hand-off steps.
+- Keep the credential-gated winget, Chocolatey, and Scoop hand-off steps in the
+  Python automation package, with workflows passing secrets and target
+  repositories through environment variables instead of repo-local PowerShell
+  wrappers.
 - Keep `.github\workflows\package-managers.yml` scoped to stable published
   releases; prerelease workflows should stop after GitHub prerelease asset
   publication.

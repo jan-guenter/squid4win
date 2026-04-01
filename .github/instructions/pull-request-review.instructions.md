@@ -16,11 +16,12 @@ When reviewing or preparing a change in this repository:
   actually validated.
 - Do not introduce machine-specific paths, secrets, or hidden global build
   state.
-- Treat `.agents\skills\` as vendored third-party content and avoid incidental
-  edits there.
+- Treat `.agents\skills\` as externally synced skill content plus
+  repo-owned symlinks into `skills\`; make repo-owned skill edits in
+  `skills\...` and avoid incidental edits under `.agents\skills\`.
 - If artifact names, release URLs, or package metadata/publication behavior
-  changed, update `scripts\Export-PackageManagerMetadata.ps1`, the package-
-  manager publish helpers under `scripts\`, `.github\workflows\package-managers.yml`,
+  changed, update `src\squid4win\package_managers.py`,
+  `.github\workflows\package-managers.yml`,
   `.github\workflows\package-manager-publish.yml`, and the related docs in the
   same change.
 - If a change affects an accepted design decision, update the relevant ADR under

@@ -1,7 +1,14 @@
 # ADR 0004: Installer payload contract
 
-- Status: Accepted
+- Status: Superseded by ADR 0006
 - Date: 2026-03-30
+- Superseded on: 2026-04-01
+
+## Superseded note
+
+ADR `0006` replaces this ADR as the target-state architecture direction. This
+ADR is preserved as historical rationale for the first committed MSI payload
+contract and its broader PowerShell helper model.
 
 ## Context
 
@@ -73,21 +80,23 @@ The first committed installer contract is:
 - `conandata.yml` also declares the runtime notice artifacts that the root
   recipe copies into `licenses\third-party\windows-runtime\` for the staged
   bundle.
-- `scripts\Stage-ReleasePayload.ps1` is now a thin wrapper that mirrors the
-  Conan-built staged bundle into `artifacts\install-root` and optionally creates
-  the portable zip.
+- `uv run squid4win-automation bundle-package --execute` is the supported
+  repo-level entry point that mirrors the Conan-built staged bundle into
+  `artifacts\install-root`, optionally creates the portable zip, and can build
+  the MSI from that staged payload.
 - The staged bundle should carry the installer helper entry point plus any
   helper scripts it imports under `installer\`.
 - That staged bundle should carry `squid.conf.template`,
   `squid.conf.default`, and `squid.conf.documented`, but not a generated
   `etc\squid.conf`.
-- `scripts\Build-Installer.ps1` is the preferred entry point for building the
-  MSI from the staged payload.
+- `scripts\Build-Installer.ps1` remains available as an internal validation
+  helper, but it is no longer the preferred contributor-facing entry point.
 - `packaging\wix\Squid4Win.Installer.wixproj` harvests the staged payload instead
   of hand-maintaining every Squid file in WiX XML.
-- `conan\recipes\tray-app\conanfile.py` harvests license and notice files for
-  shipped NuGet package dependencies so the root recipe can merge them into the
-  staged bundle before MSI harvesting.
+- `uv run squid4win-automation tray-build --execute` now publishes the tray app
+  and harvests license and notice files for shipped NuGet package dependencies
+  so the root recipe can merge them into the staged bundle before MSI
+  harvesting.
 - `scripts\installer\Manage-SquidService.ps1` runs inside the installed payload
   and performs config materialization, `squid.exe -k parse`, `squid.exe -z`, and
   service registration or removal.

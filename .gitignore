@@ -13,6 +13,10 @@ src/**/obj/
 packaging/wix/bin/
 packaging/wix/obj/
 __pycache__/
+.venv/
+.ruff_cache/
+*.egg-info/
+dist/
 *.cache
 *.suo
 *.tmp
