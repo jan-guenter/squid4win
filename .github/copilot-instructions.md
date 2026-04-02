@@ -39,8 +39,9 @@ Repo-specific directives:
 - Treat `.agents\design\*.md` as project memory. If an accepted design changes,
   update the ADR and preserve alternatives/history sections.
 - Treat `skills\` as the canonical home for repo-owned skills.
-- Treat `.agents\skills\` as externally synced skill content plus symlinks for
-  repo-owned skills under `skills\`; `skills\gfm\SKILL.md` is repo-owned
+- Treat `.agents\skills\` as externally synced skill content plus mirror
+  directories backed by symlinked files for repo-owned skills under `skills\`;
+  `skills\gfm\SKILL.md` is repo-owned
   guidance, not vendored content.
 - Keep markdown policy centralized in `skills\gfm\SKILL.md`, markdown audits,
   `.mega-linter.yml`, and markdownlint; do not create competing local markdown

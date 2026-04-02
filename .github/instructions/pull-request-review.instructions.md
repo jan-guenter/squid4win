@@ -16,9 +16,10 @@ When reviewing or preparing a change in this repository:
   actually validated.
 - Do not introduce machine-specific paths, secrets, or hidden global build
   state.
-- Treat `.agents\skills\` as externally synced skill content plus
-  repo-owned symlinks into `skills\`; make repo-owned skill edits in
-  `skills\...` and avoid incidental edits under `.agents\skills\`.
+- Treat `.agents\skills\` as externally synced skill content plus repo-owned
+  mirror directories backed by symlinked files into `skills\`; make repo-owned
+  skill edits in `skills\...` and avoid incidental edits under
+  `.agents\skills\`.
 - If artifact names, release URLs, or package metadata/publication behavior
   changed, update `src\squid4win\package_managers.py`,
   `.github\workflows\package-managers.yml`,

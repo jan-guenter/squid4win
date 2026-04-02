@@ -1,0 +1,1 @@
+../../../../skills/conan2-package-creation/references/recipe-patterns.md

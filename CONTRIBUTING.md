@@ -84,7 +84,7 @@ improvements when they stay within the current repository contracts.
 - Keep live package-feed publication credential-gated.
 - Do not hand-edit externally synced content under `.agents\skills\`.
   Keep repo-owned skills under `skills\` and expose them in
-  `.agents\skills\` via symlinks.
+  `.agents\skills\` through mirror directories backed by symlinked files.
 - Do not copy source code from `diladele/squid-windows`.
 - Never commit secrets, certificates, tokens, or machine-specific paths.
 - Do not claim clean-host installer proof, installed-service plus tray

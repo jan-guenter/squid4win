@@ -92,8 +92,9 @@ here.
 - Keep MegaLinter rule files under `.github\linters\` when new first-party lint
   configuration is required.
 - Treat `skills\` as the canonical home for repo-owned custom skills.
-- Treat `.agents\skills\` as externally synced skills plus symlinks back to
-  `skills\`. Do not disturb unrelated skill-vendoring changes.
+- Treat `.agents\skills\` as externally synced skills plus mirror directories
+  backed by symlinked files into `skills\`. Do not disturb unrelated
+  skill-vendoring changes.
 - Preserve current artifact names `squid4win.msi` and
   `squid4win-portable.zip` unless downstream packaging metadata changes too.
 - Keep live feed publication credential-gated.

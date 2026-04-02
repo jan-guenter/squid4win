@@ -66,8 +66,9 @@ The repository should not yet claim:
 - Do not copy GPL code from `diladele/squid-windows`; architectural inspiration
   is acceptable, source reuse is not.
 - Treat `skills\` as the canonical home for repo-owned skills.
-- Treat `.agents\skills\` as externally synced skills plus symlinks that expose
-  repo-owned skills from `skills\`; `skills\gfm\SKILL.md` is repo-owned
+- Treat `.agents\skills\` as externally synced skills plus mirror directories
+  backed by symlinked files that expose repo-owned skills from `skills\`;
+  `skills\gfm\SKILL.md` is repo-owned
   guidance, not vendored implementation.
 - Never imply more validation than has actually been cited.
 
@@ -124,8 +125,8 @@ admin-capable Windows runners rather than shared development machines.
 - `.agents\design\` - ADR-style project memory, with ADR `0006` describing the
   current target state
 - `skills\` - repo-owned custom skills and `skills\README.md`
-- `.agents\skills\` - externally synced skills plus symlinks that expose
-  repo-owned skills to Copilot
+- `.agents\skills\` - externally synced skills plus mirror directories backed
+  by symlinked files that expose repo-owned skills to Copilot
 - `conanfile.py` and `conan\` - native Squid recipe inputs, patch metadata,
   host profiles, and lockfiles
 - `scripts\` - installer-time helper scripts plus remaining narrow PowerShell

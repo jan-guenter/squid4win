@@ -1,0 +1,1 @@
+../../../skills/megalinter/SKILL.md
