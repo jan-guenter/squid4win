@@ -7,7 +7,9 @@ applyTo: "**"
 Use this checklist when a change updates the pinned upstream Squid release or
 the automation around that update flow.
 
-- Prefer `scripts\Update-SquidVersion.ps1` over hand-editing version files.
+- Prefer `uv run squid4win-automation upstream-version --execute` over
+  hand-editing version files. Keep `scripts\Update-SquidVersion.ps1` only as a
+  transitional fallback when the Python automation environment is unavailable.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conandata.yml` synchronized.
 - Re-check the ordered patch series under `conan\patches\squid\*.patch` and the

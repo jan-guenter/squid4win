@@ -1,0 +1,74 @@
+name: Feature request
+description: Propose a feature, workflow improvement, or architecture-aligned enhancement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: target-area
+    attributes:
+      label: Target area
+      options:
+        - Root Conan recipe and native build
+        - Python automation and uv
+        - Direct tray build
+        - MSI installer or service lifecycle
+        - GitHub Actions or release automation
+        - Package-manager metadata or publication
+        - Documentation or policy files
+        - Something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: relation
+    attributes:
+      label: How does this fit the current project direction?
+      options:
+        - It aligns with the accepted target state
+        - It changes the accepted target state
+        - It is a temporary compatibility or cleanup change
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this feature solve?
+      placeholder: Describe the pain point, missing capability, or repeated manual work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed feature
+      description: Explain the feature or improvement you want and why it fits this repository.
+      placeholder: Describe the preferred behavior or outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Expected impact on workflows, docs, or release behavior
+      description: Call out which files, workflows, or contracts would need to move together.
+      placeholder: README, ADR 0006, release workflows, package-manager scripts, and so on.
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Suggested validation
+      description: Describe how maintainers could prove the feature without overstating the result.
+      placeholder: Native build, markdown lint, workflow run, installer smoke test, clean-host validation, and so on.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I read `CONTRIBUTING.md` and the current architecture guidance before opening this request.
+          required: true
+        - label: I understand that release, installer, and clean-host claims must stay truthful and explicitly validated.
+          required: true

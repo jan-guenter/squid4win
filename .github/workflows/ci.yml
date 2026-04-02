@@ -16,7 +16,6 @@ concurrency:
 
 env:
   DOTNET_NOLOGO: true
-  PIP_DISABLE_PIP_VERSION_CHECK: "1"
   SONAR_HOST_URL: https://sonarcloud.io
 
 jobs:
@@ -29,43 +28,60 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+      - name: Run MegaLinter
+        id: megalinter
+        continue-on-error: true
+        uses: oxsecurity/megalinter@8fbdead70d1409964ab3d5afa885e18ee85388bb # v9.4.0
+        env:
+          VALIDATE_ALL_CODEBASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Upload MegaLinter reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
-          dotnet-version: 8.0.x
+          name: megalinter-reports
+          include-hidden-files: true
+          path: |
+            megalinter-reports
+            mega-linter.log
 
-      - name: Setup Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          node-version: 20
+          python-version: "3.14"
 
-      - name: Install markdownlint-cli2
-        run: npm install --global --ignore-scripts markdownlint-cli2
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
 
-      - name: Lint Markdown
-        run: markdownlint-cli2 "**/*.md"
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
 
-      - name: Lint GitHub Actions workflows
-        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2
+      - name: Sync automation environment
+        run: uv sync --locked
 
-      - name: Lint PowerShell
-        shell: pwsh
+      - name: Run ty
+        id: ty
+        continue-on-error: true
+        run: uv run ty check src
+
+      - name: Fail on lint findings
+        if: ${{ steps.megalinter.outcome != 'success' || steps.ty.outcome != 'success' }}
+        shell: bash
         run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
-          Invoke-ScriptAnalyzer -Path .\scripts -Recurse -Settings .\scripts\PSScriptAnalyzerSettings.psd1 -EnableExit
-
-      - name: Lint C#
-        shell: pwsh
-        run: |
-          $csharpFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Include *.cs,*.csproj,*.sln,*.slnx -File |
-            Where-Object { $_.FullName -notmatch '[/\\](bin|obj)[/\\]' }
-          if ($csharpFiles.Count -eq 0) {
-            Write-Host 'No C# files detected; skipping dotnet format.'
-            exit 0
-          }
-          $solutionPath = Join-Path $env:GITHUB_WORKSPACE 'Squid4Win.slnx'
-          dotnet format whitespace $solutionPath --verify-no-changes --verbosity minimal
+          if [[ "${{ steps.megalinter.outcome }}" != "success" ]]; then
+            echo "::error::MegaLinter reported blocking findings. See the megalinter-reports artifact for details."
+          fi
+          if [[ "${{ steps.ty.outcome }}" != "success" ]]; then
+            echo "::error::ty reported blocking findings."
+          fi
+          exit 1
 
   build-tray:
     name: Build tray app
@@ -81,45 +97,42 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
+
+      - name: Sync automation environment
+        run: uv sync --locked
 
       - name: Setup .NET
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
-      - name: Resolve Conan home
-        id: conan-home
+      - name: Build tray package
         run: |
-          $conanHome = .\scripts\Resolve-ConanHome.ps1 -RepositoryRoot $PWD.Path
-          "CONAN_HOME=$conanHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "path=$conanHome" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - name: Cache Conan home
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
-        with:
-          path: ${{ steps.conan-home.outputs.path }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-conan-
-
-      - name: Install automation dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r .\requirements-automation.txt
-
-      - name: Create Conan default profile
-        run: conan profile detect --force
-
-      - name: Build tray app Conan package
-        run: |
-          .\scripts\Export-ConanWorkspaceRecipes.ps1 -RepositoryRoot $PWD.Path | Out-Null
-          conan create .\conan\recipes\tray-app -s build_type=Release --build=missing
+          uv run squid4win-automation tray-build `
+            --repository-root $PWD.Path `
+            --configuration Release `
+            --execute
 
   build-msys2:
     name: Build MSYS2/MinGW-w64
     runs-on: windows-latest
     needs: lint
+    env:
+      CONAN_HOME: ${{ github.workspace }}\.conan2
     defaults:
       run:
         shell: pwsh
@@ -132,87 +145,51 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
+
+      - name: Sync automation environment
+        run: uv sync --locked
 
       - name: Setup .NET
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
-          dotnet-version: 8.0.x
-
-      - name: Resolve build automation configuration
-        id: build-config
-        run: |
-          $layout = .\scripts\Resolve-SquidBuildLayout.ps1 -Configuration Release -RepositoryRoot $PWD.Path
-          $conanHome = .\scripts\Resolve-ConanHome.ps1 -RepositoryRoot $PWD.Path
-          $configLogPath = Join-Path $layout.ConanOutputRoot 'build\release\config.log'
-
-          "CONAN_HOME=$conanHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "conan_home=$conanHome" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "repo_lockfile_path=$($layout.RepoLockfilePath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "stage_root=$($layout.StageRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "stage_root_glob=$($layout.StageRoot.Replace('\', '/'))/**" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "config_log_path=$($configLogPath.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          dotnet-version: 10.0.x
 
       - name: Cache Conan home
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: ${{ steps.build-config.outputs.conan_home }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'requirements-automation.txt') }}
+          path: ${{ env.CONAN_HOME }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'pyproject.toml', 'uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-conan-
 
-      - name: Install automation dependencies
+      - name: Build native Squid bundle
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r .\requirements-automation.txt
-
-      - name: Bootstrap root Conan workspace
-        run: |
-          .\scripts\Invoke-ConanRootRecipe.ps1 `
-            -Operation Bootstrap `
-            -Configuration Release `
-            -RepositoryRoot $PWD.Path `
-            -WithTray `
-            -WithRuntimeDlls `
-            -WithPackagingSupport | Out-Null
-
-      - name: Refresh root Conan lockfile
-        run: |
-          .\scripts\Invoke-ConanRootRecipe.ps1 `
-            -Operation LockCreate `
-            -Configuration Release `
-            -RepositoryRoot $PWD.Path `
-            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}' `
-            -WithTray `
-            -WithRuntimeDlls `
-            -WithPackagingSupport `
-            -SkipBootstrap | Out-Null
-
-      - name: Materialize root Conan sources
-        run: |
-          .\scripts\Invoke-ConanRootRecipe.ps1 `
-            -Operation Source `
-            -Configuration Release `
-            -RepositoryRoot $PWD.Path `
-            -WithTray `
-            -WithRuntimeDlls `
-            -WithPackagingSupport `
-            -SkipBootstrap | Out-Null
-
-      - name: Build root Conan recipe
-        run: |
-          .\scripts\Invoke-ConanRootRecipe.ps1 `
-            -Operation Build `
-            -Configuration Release `
-            -RepositoryRoot $PWD.Path `
-            -LockfilePath '${{ steps.build-config.outputs.repo_lockfile_path }}' `
-            -WithTray `
-            -WithRuntimeDlls `
-            -WithPackagingSupport `
-            -SkipBootstrap | Out-Null
+          uv run squid4win-automation squid-build `
+            --repository-root $PWD.Path `
+            --configuration Release `
+            --lockfile-path 'conan\lockfiles\msys2-mingw-x64-release.lock' `
+            --refresh-lockfile `
+            --with-tray `
+            --with-runtime-dlls `
+            --with-packaging-support `
+            --execute
 
       - name: Smoke test Squid
-        run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release -RequireNotices
+        run: uv run squid4win-automation smoke-test --execute --configuration Release --require-notices
 
       - name: Summarize SonarCloud scanner mode
         if: ${{ vars.SONAR_CI_SCAN_ENABLED != 'true' }}
@@ -239,12 +216,12 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
-            -Dsonar.organization=${{ secrets.COPILOT_MCP_SONARQUBE_ORG }}
+            -Dsonar.organization=${{ vars.SONARQUBE_ORG || github.repository_owner }}
             -Dsonar.projectVersion=${{ github.sha }}
             -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
             -Dsonar.pullrequest.branch=${{ github.head_ref }}
             -Dsonar.pullrequest.base=${{ github.base_ref }}
-            -Dsonar.python.version=3.12
+            -Dsonar.python.version=3.14
 
       - name: Run SonarQube scan for branches
         if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && github.event_name != 'pull_request' }}
@@ -255,10 +232,10 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
-            -Dsonar.organization=${{ secrets.COPILOT_MCP_SONARQUBE_ORG }}
+            -Dsonar.organization=${{ vars.SONARQUBE_ORG || github.repository_owner }}
             -Dsonar.projectVersion=${{ github.sha }}
             -Dsonar.branch.name=${{ github.ref_name }}
-            -Dsonar.python.version=3.12
+            -Dsonar.python.version=3.14
 
       - name: Check SonarQube quality gate
         if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') }}
@@ -273,6 +250,6 @@ jobs:
         with:
           name: squid-msys2-build
           path: |
-            ${{ steps.build-config.outputs.stage_root_glob }}
-            ${{ steps.build-config.outputs.config_log_path }}
+            build\install\release\**
+            build\conan\msys2-mingw-x64-release\build\**\config.log
           if-no-files-found: error

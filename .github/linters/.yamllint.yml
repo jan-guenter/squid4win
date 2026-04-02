@@ -1,0 +1,22 @@
+extends: default
+
+ignore: |
+  .venv/**
+  .conan2/**
+  artifacts/**
+  build/**
+  sources/**
+
+rules:
+  comments: disable
+  document-start: disable
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+  line-length: disable
+  new-lines: disable
+  truthy:
+    allowed-values:
+      - "true"
+      - "false"
+    check-keys: false

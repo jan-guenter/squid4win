@@ -1,0 +1,89 @@
+name: Bug report
+description: Report a reproducible bug in the source, build, installer, release, or workflow paths.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: repository-state
+    attributes:
+      label: Which repository state is affected?
+      description: Choose the closest match so maintainers can separate current behavior from migration work.
+      options:
+        - Current checked-in implementation
+        - Target-state migration direction
+        - Both
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Root Conan recipe and native build
+        - Python automation and uv
+        - Tray application
+        - MSI installer or service lifecycle
+        - GitHub Actions or release automation
+        - Package-manager metadata or publication
+        - Documentation or policy files
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug in one or two clear paragraphs.
+      placeholder: A concise description of the current behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+      placeholder: Describe the expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include exact commands, workflow names, tags, or file paths when possible.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Branch, tag, or commit
+      description: Tell us what you tested.
+      placeholder: main, v7.5.0, or a commit SHA
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, or additional evidence
+      description: Paste the smallest useful excerpt. Remove secrets and private information first.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I read `CONTRIBUTING.md` and checked for an existing issue.
+          required: true
+        - label: I removed secrets, credentials, private keys, and machine-specific private data from the report.
+          required: true

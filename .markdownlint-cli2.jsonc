@@ -9,6 +9,7 @@
   },
   "globs": [
     "**/*.md",
+    "!.venv/**/*.md",
     "!.conan2/**/*.md",
     "!artifacts/**/*.md",
     "!build/**/*.md",

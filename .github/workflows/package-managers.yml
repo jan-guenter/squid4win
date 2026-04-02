@@ -77,6 +77,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
+
+      - name: Sync automation environment
+        run: uv sync --locked
+
       - name: Resolve release metadata
         id: release
         env:
@@ -142,17 +161,15 @@ jobs:
         id: manifests
         run: |
           $downloadRoot = Join-Path $PWD.Path 'artifacts\downloads'
-          $result = .\scripts\Export-PackageManagerMetadata.ps1 `
-            -Version '${{ steps.release.outputs.version }}' `
-            -Tag '${{ steps.release.outputs.tag }}' `
-            -Repository '${{ steps.release.outputs.repository }}' `
-            -MsiPath (Join-Path $downloadRoot 'squid4win.msi') `
-            -PortableZipPath (Join-Path $downloadRoot 'squid4win-portable.zip') `
-            -OutputRoot (Join-Path $PWD.Path 'artifacts\package-managers')
-
-          "output_root=$($result.OutputRoot)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "msi_sha256=$($result.MsiSha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "portable_zip_sha256=$($result.PortableZipSha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          uv run squid4win-automation package-manager-export `
+            --repository-root $PWD.Path `
+            --version '${{ steps.release.outputs.version }}' `
+            --tag '${{ steps.release.outputs.tag }}' `
+            --repository '${{ steps.release.outputs.repository }}' `
+            --msi-path (Join-Path $downloadRoot 'squid4win.msi') `
+            --portable-zip-path (Join-Path $downloadRoot 'squid4win-portable.zip') `
+            --output-root (Join-Path $PWD.Path 'artifacts\package-managers') `
+            --execute
 
       - name: Upload package manager artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7

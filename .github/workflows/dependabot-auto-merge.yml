@@ -23,13 +23,16 @@ jobs:
           script: |
             const allowed = [
               '.github/workflows/',
+              '.github/linters/',
+              '.mega-linter.yml',
               '.github/dependabot.yml',
               '.markdownlint-cli2.jsonc',
               'config/squid-version.json',
               'conandata.yml',
               'conan/lockfiles/',
               'conan/squid-release.json',
-              'requirements-automation.txt'
+              'pyproject.toml',
+              'uv.lock'
             ];
             const pullRequest = (await github.rest.pulls.get({
               owner: context.repo.owner,

@@ -16,6 +16,11 @@
       "sourceType": "github",
       "computedHash": "5c99e32293271aef0270c279c2af8b62301e29257bf85f2ebf7e810c740b4404"
     },
+    "create-github-action-workflow-specification": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "computedHash": "527e6c77d921d58a9d0059aa95d0d14b441d2166f9c20518263048a56ca8fbbb"
+    },
     "csharp-developer": {
       "source": "jeffallan/claude-skills",
       "sourceType": "github",
@@ -70,6 +75,11 @@
       "source": "github/awesome-copilot",
       "sourceType": "github",
       "computedHash": "1f3e1f005fc40fda85d250ae906c8ee4f7e8e833e23adfeca6542c19609fd7cd"
+    },
+    "python-packaging": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "08ef72315247c1219da243898681713927b0dcdedf38b87bb7fe3e675b41d1ef"
     },
     "readme": {
       "source": "boshu2/agentops",

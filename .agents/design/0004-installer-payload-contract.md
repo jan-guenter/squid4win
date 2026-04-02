@@ -1,7 +1,14 @@
 # ADR 0004: Installer payload contract
 
-- Status: Accepted
+- Status: Superseded by ADR 0006
 - Date: 2026-03-30
+- Superseded on: 2026-04-01
+
+## Superseded note
+
+ADR `0006` replaces this ADR as the target-state architecture direction. This
+ADR is preserved as historical rationale for the first committed MSI payload
+contract and its broader PowerShell helper model.
 
 ## Context
 
@@ -73,24 +80,42 @@ The first committed installer contract is:
 - `conandata.yml` also declares the runtime notice artifacts that the root
   recipe copies into `licenses\third-party\windows-runtime\` for the staged
   bundle.
-- `scripts\Stage-ReleasePayload.ps1` is now a thin wrapper that mirrors the
-  Conan-built staged bundle into `artifacts\install-root` and optionally creates
-  the portable zip.
+- `uv run squid4win-automation bundle-package --execute` is the supported
+  repo-level entry point that mirrors the Conan-built staged bundle into
+  `artifacts\install-root`, optionally creates the portable zip, and can build
+  the MSI from that staged payload.
+- The staged bundle should carry the installer helper entry point plus any
+  helper scripts it imports under `installer\`.
 - That staged bundle should carry `squid.conf.template`,
   `squid.conf.default`, and `squid.conf.documented`, but not a generated
   `etc\squid.conf`.
-- `scripts\Build-Installer.ps1` is the preferred entry point for building the
-  MSI from the staged payload.
+- At the time, `scripts\Build-Installer.ps1` remained available as an internal
+  validation helper, but it was not the preferred contributor-facing entry
+  point.
 - `packaging\wix\Squid4Win.Installer.wixproj` harvests the staged payload instead
   of hand-maintaining every Squid file in WiX XML.
-- `conan\recipes\tray-app\conanfile.py` harvests license and notice files for
-  shipped NuGet package dependencies so the root recipe can merge them into the
-  staged bundle before MSI harvesting.
+- `uv run squid4win-automation tray-build --execute` now publishes the tray app
+  and harvests license and notice files for shipped NuGet package dependencies
+  so the root recipe can merge them into the staged bundle before MSI
+  harvesting.
 - `scripts\installer\Manage-SquidService.ps1` runs inside the installed payload
-  and performs config materialization, `squid.exe -k parse`, `squid.exe -z`, and
-  service registration or removal.
+  and performs config materialization, `squid.exe -k parse`,
+  `squid.exe -z`, then service registration or removal.
+  `squid.exe -i -f <config>` follows Squid's native Windows service model: the
+  service keeps Squid-controlled runtime startup parameters, while the selected
+  config association is persisted separately for the named service. The helper
+  must verify the registry-backed `ConfigFile` and `CommandLine` entries after
+  registration so the service and spawned Squid processes do not fall back to
+  the compiled default config path. Because upstream service startup splits the
+  stored `CommandLine` on whitespace without quote support, the install root
+  used for service registration must remain space-free.
 - `scripts\installer\Manage-SquidService.ps1` stops a running named service
   before removing it so reinstall and runner cleanup stay reliable.
+- `packaging\wix\Product.wxs` must pass the install root to
+  `installer\svc.ps1` as `"[INSTALLFOLDER]."` rather than raw
+  `"[INSTALLFOLDER]"`, because MSI directory properties include a trailing
+  backslash and that suffix would otherwise escape the closing quote in the raw
+  `WixQuietExec` command line.
 
 ## Alternatives considered
 

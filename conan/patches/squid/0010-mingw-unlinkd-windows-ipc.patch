@@ -1,0 +1,30 @@
+diff --git a/pristine/squid-7.5/src/unlinkd.cc b/patched/squid-7.5/src/unlinkd.cc
+--- a/pristine/squid-7.5/src/unlinkd.cc
++++ b/patched/squid-7.5/src/unlinkd.cc
+@@ -131,7 +131,7 @@
+ 
+ void
+ unlinkdClose(void)
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+ {
+ 
+     if (unlinkd_wfd > -1) {
+@@ -206,7 +206,7 @@
+ #if USE_POLL && _SQUID_OSF_
+               /* pipes and poll() don't get along on DUNIX -DW */
+               IPC_STREAM,
+-#elif _SQUID_WINDOWS_
++#elif _SQUID_WINDOWS_ || _SQUID_MINGW_
+               /* select() will fail on a pipe */
+               IPC_TCP_SOCKET,
+ #else
+@@ -247,7 +247,7 @@
+ 
+     debugs(2, DBG_IMPORTANT, "Unlinkd pipe opened on FD " << unlinkd_wfd);
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+ 
+     debugs(2, 4, "Unlinkd handle: 0x" << std::hex << hIpc << std::dec << ", PID: " << pid);
+ 

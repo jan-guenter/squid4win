@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import json
+from collections.abc import Iterable
 import os
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 
 from conan import ConanFile
 from conan.errors import ConanException, ConanInvalidConfiguration
-from conan.tools.env import Environment, VirtualBuildEnv, VirtualRunEnv
+from conan.tools.env import VirtualBuildEnv
 from conan.tools.files import (
     apply_conandata_patches,
     copy,
@@ -27,72 +26,64 @@ MACRO_NAME_PATTERN = re.compile(r"[A-Za-z_]\w*\Z", re.ASCII)
 
 class Squid4WinConan(ConanFile):
     name = "squid4win"
+    license = "GPL-2.0-or-later"
+    url = "https://github.com/jan-guenter/squid4win"
+    description = (
+        "Conan 2 recipe for building native Windows Squid with Conan-managed "
+        "MSYS2 and MinGW-w64."
+    )
+    topics = ("squid", "proxy", "windows", "msys2", "mingw")
     package_type = "application"
     settings = "os", "arch", "compiler", "build_type"
     no_copy_source = True
-    python_requires = "squid4win_recipe_base/1.0"
-    python_requires_extend = "squid4win_recipe_base.Squid4WinRecipeBase"
     options = {
-        "with_tray": [True, False],
-        "with_runtime_dlls": [True, False],
-        "with_packaging_support": [True, False],
+        "with_openssl": [True, False],
+        "enable_win32_service": [True, False],
+        "enable_default_hostsfile": [True, False],
+        "enable_strict_error_checking": [True, False],
+        "enable_dependency_tracking": [True, False],
+        "auth_basic_helpers": [None, "ANY"],
+        "auth_digest_helpers": [None, "ANY"],
+        "auth_negotiate_helpers": [None, "ANY"],
+        "external_acl_helpers": [None, "ANY"],
     }
     default_options = {
-        "with_tray": False,
-        "with_runtime_dlls": False,
-        "with_packaging_support": False,
+        "with_openssl": True,
+        "enable_win32_service": True,
+        "enable_default_hostsfile": True,
+        "enable_strict_error_checking": False,
+        "enable_dependency_tracking": False,
+        "auth_basic_helpers": "DB,NCSA,POP3,RADIUS,SMB,SSPI,fake",
+        "auth_digest_helpers": "file",
+        "auth_negotiate_helpers": "SSPI",
+        "external_acl_helpers": "LM_group,SQL_session,delayer,wbinfo_group",
     }
 
     def set_version(self) -> None:
-        metadata = self._release_metadata()
-        self.version = str(metadata["version"])
+        self.version = self._sole_supported_version()
 
-    def export(self) -> None:
+    def export_sources(self) -> None:
         export_conandata_patches(self)
-        copy(
-            self,
-            "squid-release.json",
-            src=os.path.join(self.recipe_folder, "conan"),
-            dst=os.path.join(self.export_folder, "conan"),
-        )
-        copy(
-            self,
-            "LICENSE",
-            src=self.recipe_folder,
-            dst=os.path.join(self.export_folder, "licenses"),
-        )
-        copy(
-            self,
-            "*",
-            src=os.path.join(self.recipe_folder, "packaging", "defaults"),
-            dst=os.path.join(self.export_folder, "packaging", "defaults"),
-        )
-        copy(
-            self,
-            "Manage-SquidService.ps1",
-            src=os.path.join(self.recipe_folder, "scripts", "installer"),
-            dst=os.path.join(self.export_folder, "scripts", "installer"),
-        )
 
     def layout(self) -> None:
         configuration_label = self._configuration_label()
         self.folders.source = os.path.join("sources", f"squid-{self.version}")
         self.folders.build = os.path.join("build", configuration_label)
-        self.folders.generators = self._generators_folder()
+        self.folders.generators = os.path.join("build", configuration_label, "conan")
 
     def validate(self) -> None:
         self._validate_native_windows()
-        if self._option_enabled("with_runtime_dlls") and not self._option_enabled(
-            "with_packaging_support"
+        for option_name in (
+            "auth_basic_helpers",
+            "auth_digest_helpers",
+            "auth_negotiate_helpers",
+            "external_acl_helpers",
         ):
-            raise ConanInvalidConfiguration(
-                "with_runtime_dlls=True requires with_packaging_support=True so "
-                "the bundled notices and source manifest stay in sync."
-            )
-
-    def requirements(self) -> None:
-        if self._option_enabled("with_tray"):
-            self.requires("squid4win_tray/0.1")
+            if self._string_option(option_name) == "":
+                raise ConanInvalidConfiguration(
+                    f"{option_name} cannot be an empty string. Use None to disable "
+                    "the corresponding helper family."
+                )
 
     def build_requirements(self) -> None:
         for reference in self._string_list(
@@ -101,31 +92,14 @@ class Squid4WinConan(ConanFile):
             self.tool_requires(reference)
 
     def generate(self) -> None:
-        metadata = self._release_metadata()
-        build_settings = self._build_settings()
-
         VirtualBuildEnv(self).generate()
-        VirtualRunEnv(self).generate()
-
-        release_env = Environment()
-        release_env.define("SQUID_VERSION", str(metadata["version"]))
-        release_env.define("SQUID_TAG", str(metadata["tag"]))
-        release_env.define(
-            "SQUID_SOURCE_ARCHIVE", str(metadata["assets"]["source_archive"])
-        )
-        release_env.define(
-            "SQUID_CONAN_TOOL_REQUIREMENTS",
-            ";".join(self._string_list(build_settings.get("tool_requires", []))),
-        )
-        release_env.vars(self, scope="build").save_script("squid-release")
-
         AutotoolsToolchain(self).generate()
 
     def source(self) -> None:
         source_data = dict(self.conan_data["sources"][str(self.version)])
         strip_root = bool(source_data.pop("strip_root", True))
         source_root = Path(self.source_folder)
-        source_ready_marker = source_root / ".squid4win-source-ready"
+        source_ready_marker = source_root / ".source-ready"
 
         if source_ready_marker.is_file():
             self.output.info(f"Reusing existing source tree at {source_root}.")
@@ -142,30 +116,28 @@ class Squid4WinConan(ConanFile):
         source_ready_marker.write_text("patched\n", encoding="ascii")
 
     def build(self) -> None:
-        metadata = self._release_metadata()
         build_settings = self._build_settings()
         source_root = Path(self.source_folder)
         build_root = Path(self.build_folder)
-        bundle_root = build_root / "bundle"
+        install_root = build_root / "package"
         config_site_path = build_root / "config.site"
-        bootstrap_marker_path = build_root / "squid4win-bootstrap-ran"
+        bootstrap_marker_path = build_root / "bootstrap-ran"
         generated_header_path = build_root / "include" / "autoconf.h"
-        confdefs_copy_path = build_root / "squid4win-confdefs.h"
+        confdefs_copy_path = build_root / "confdefs.generated.h"
         config_log_path = build_root / "config.log"
-        configuration_label = self._configuration_label()
         msys2_settings = dict(build_settings.get("msys2", {}))
         msys2_env_directory = str(msys2_settings.get("env", "mingw64")).lower()
-        msys2_env_name = str(msys2_settings.get("env", "mingw64")).upper()
+        msys2_env_name = msys2_env_directory.upper()
         msys2_prefix_path = f"/{msys2_env_directory}"
         pkg_config_binary_path = f"/{msys2_env_directory}/bin/pkg-config"
         pkg_config_lib_dir = (
-            f"/{msys2_env_directory}/lib/pkgconfig:/{msys2_env_directory}/share/pkgconfig"
+            f"/{msys2_env_directory}/lib/pkgconfig"
+            f":/{msys2_env_directory}/share/pkgconfig"
         )
         build_env_script = Path(self.generators_folder) / "conanbuild.sh"
         autotools_script = Path(self.generators_folder) / "conanautotoolstoolchain.sh"
-        release_script = Path(self.generators_folder) / "squid-release.sh"
 
-        shutil.rmtree(bundle_root, ignore_errors=True)
+        shutil.rmtree(install_root, ignore_errors=True)
         bootstrap_marker_path.unlink(missing_ok=True)
         build_root.mkdir(parents=True, exist_ok=True)
 
@@ -178,13 +150,14 @@ class Squid4WinConan(ConanFile):
                 encoding="ascii",
             )
 
+        host_triplet = str(build_settings["host_triplet"])
         configure_arguments = self._deduplicate(
             [
-                f"--prefix={self._to_msys_path(bundle_root)}",
-                f"--build={str(build_settings['host_triplet'])}",
-                f"--host={str(build_settings['host_triplet'])}",
+                f"--prefix={self._to_msys_path(install_root)}",
+                f"--build={host_triplet}",
+                f"--host={host_triplet}",
                 *self._string_list(build_settings.get("configure_args", [])),
-                *self._additional_configure_args(),
+                *self._recipe_configure_args(),
             ]
         )
         configure_argument_text = " ".join(
@@ -193,10 +166,11 @@ class Squid4WinConan(ConanFile):
         source_root_msys = self._to_msys_path(source_root)
         build_root_msys = self._to_msys_path(build_root)
         bootstrap_marker_path_msys = self._to_msys_path(bootstrap_marker_path)
+
         mingw_package_root = self._dependency_package_root("mingw-builds")
         if mingw_package_root is None:
             raise ConanException(
-                "The mingw-builds tool requirement is not available to the root recipe."
+                "The mingw-builds tool requirement is not available to the recipe."
             )
 
         mingw_bin_root = mingw_package_root / "bin"
@@ -220,8 +194,7 @@ class Squid4WinConan(ConanFile):
             "export CHERE_INVOKING=1",
             "set -o pipefail",
         ]
-
-        for generated_script in (build_env_script, autotools_script, release_script):
+        for generated_script in (build_env_script, autotools_script):
             if generated_script.is_file():
                 bash_common_lines.append(
                     f"source {self._bash_quote(self._to_msys_path(generated_script))}"
@@ -231,7 +204,8 @@ class Squid4WinConan(ConanFile):
             (
                 "source /etc/profile",
                 (
-                    f'export PATH="{mingw_bin_root_msys}:/{msys2_env_directory}/bin:$MSYS_BIN:/usr/bin:/usr/bin/core_perl:$PATH"'
+                    f'export PATH="{mingw_bin_root_msys}:/{msys2_env_directory}/bin:'
+                    '$MSYS_BIN:/usr/bin:/usr/bin/core_perl:$PATH"'
                 ),
                 f'export CPPFLAGS="-I{msys2_prefix_path}/include $CPPFLAGS"',
                 f'export LDFLAGS="-L{msys2_prefix_path}/lib $LDFLAGS"',
@@ -274,7 +248,7 @@ class Squid4WinConan(ConanFile):
                     f"{self._bash_quote(source_root_msys + '/configure')} "
                     f"{configure_argument_text} || exit $?"
                 ),
-                "if [ -f confdefs.h ]; then cp confdefs.h squid4win-confdefs.h; fi",
+                "if [ -f confdefs.h ]; then cp confdefs.h confdefs.generated.h; fi",
             )
         )
         self._run_bash(configure_lines, "Squid configure failed.")
@@ -293,730 +267,174 @@ class Squid4WinConan(ConanFile):
             (
                 f"cd {self._bash_quote(build_root_msys)}",
                 'echo "Building Squid..."',
-                f"make -j{self._make_jobs()} || exit $?",
+                f"make -j{self._build_jobs()} || exit $?",
                 f"cd {self._bash_quote(build_root_msys)}",
                 'echo "Installing Squid..."',
                 "make install || exit $?",
             )
         )
         self._run_bash(build_lines, "MSYS2 build failed.")
-
-        self._augment_bundle(
-            bundle_root,
-            source_root,
-            metadata,
-            configuration_label,
-            build_settings,
-            msys2_env_directory,
-        )
-        self._mirror_local_stage_root(bundle_root)
+        self._require_squid_executable(install_root)
 
     def package(self) -> None:
-        bundle_root = Path(self.build_folder) / "bundle"
-        if not bundle_root.is_dir():
+        install_root = Path(self.build_folder) / "package"
+        if not install_root.is_dir():
             raise ConanException(
-                f"Expected the assembled bundle root at {bundle_root}."
+                f"Expected the native Squid install root at {install_root}."
             )
 
-        copy(self, "*", src=os.fspath(bundle_root), dst=self.package_folder)
-        for relative_directory in ("var\\cache", "var\\logs", "var\\run"):
-            mkdir(self, os.path.join(self.package_folder, relative_directory))
+        upstream_license_path = Path(self.source_folder) / "COPYING"
+        if not upstream_license_path.is_file():
+            raise ConanException(
+                f"Expected the upstream Squid license at {upstream_license_path}."
+            )
+
+        copy(self, "*", src=os.fspath(install_root), dst=self.package_folder)
+        copy(
+            self,
+            "COPYING",
+            src=self.source_folder,
+            dst=os.path.join(self.package_folder, "licenses"),
+        )
 
     def package_info(self) -> None:
-        self.cpp_info.bindirs = [".", "bin", "sbin"]
-        self.runenv_info.prepend_path("PATH", self.package_folder)
-        self.runenv_info.prepend_path(
-            "PATH", os.path.join(self.package_folder, "bin")
-        )
-        self.runenv_info.prepend_path(
-            "PATH", os.path.join(self.package_folder, "sbin")
-        )
+        self.cpp_info.bindirs = ["bin", "sbin", "libexec"]
+        for bindir in self.cpp_info.bindirs:
+            self.runenv_info.prepend_path("PATH", os.path.join(self.package_folder, bindir))
 
-    def _augment_bundle(
-        self,
-        bundle_root: Path,
-        source_root: Path,
-        metadata: dict[str, object],
-        configuration_label: str,
-        build_settings: dict[str, object],
-        msys2_env_directory: str,
-    ) -> None:
-        if self._option_enabled("with_tray"):
-            self._stage_tray_bundle(bundle_root)
-
-        bundled_runtime_dlls: list[str] = []
-        if self._option_enabled("with_runtime_dlls"):
-            bundled_runtime_dlls = self._bundle_native_runtime_dlls(
-                bundle_root, build_settings, msys2_env_directory
+    def _sole_supported_version(self) -> str:
+        source_entries = self.conan_data.get("sources")
+        if not isinstance(source_entries, dict) or not source_entries:
+            raise ConanInvalidConfiguration(
+                "conandata.yml must define exactly one supported source version."
             )
 
-        if self._option_enabled("with_packaging_support"):
-            self._stage_packaging_support(
-                bundle_root,
-                source_root,
-                metadata,
-                configuration_label,
-                build_settings,
-                msys2_env_directory,
-                bundled_runtime_dlls,
+        source_versions = [
+            str(version).strip() for version in source_entries.keys() if str(version).strip()
+        ]
+        if len(source_versions) != 1:
+            raise ConanInvalidConfiguration(
+                "conandata.yml must define exactly one supported source version."
             )
 
-        self._require_squid_executable(bundle_root)
+        return source_versions[0]
 
-    def _stage_tray_bundle(self, bundle_root: Path) -> None:
-        tray_package_root = self._tray_package_root()
-        tray_bin_root = tray_package_root / "bin"
-        if not tray_bin_root.is_dir():
-            raise ConanException(f"Expected the tray package binaries at {tray_bin_root}.")
-
-        self._copy_directory_contents(tray_bin_root, bundle_root)
-        tray_executable = bundle_root / "Squid4Win.Tray.exe"
-        if not tray_executable.is_file():
-            raise ConanException(
-                f"Expected the bundled tray executable at {tray_executable}."
+    def _build_settings(self) -> dict[str, object]:
+        build_settings = self.conan_data.get("build")
+        if not isinstance(build_settings, dict):
+            raise ConanInvalidConfiguration(
+                "conandata.yml must define a top-level 'build' mapping."
             )
 
-    def _stage_packaging_support(
-        self,
-        bundle_root: Path,
-        source_root: Path,
-        metadata: dict[str, object],
-        configuration_label: str,
-        build_settings: dict[str, object],
-        msys2_env_directory: str,
-        bundled_runtime_dlls: list[str],
-    ) -> None:
-        (
-            licenses_root,
-            installer_support_root,
-            config_directory,
-        ) = self._packaging_support_directories(bundle_root)
-        self._copy_packaging_support_files(
-            source_root,
-            bundle_root,
-            licenses_root,
-            installer_support_root,
-            config_directory,
-        )
-        runtime_notice_packages = self._runtime_notice_packages(
-            bundle_root, build_settings, bundled_runtime_dlls
-        )
-        tray_third_party_packages = self._tray_notice_packages(bundle_root)
-        self._write_source_manifest(
-            licenses_root,
-            metadata,
-            configuration_label,
-            msys2_env_directory,
-            bundled_runtime_dlls,
-            runtime_notice_packages,
-            tray_third_party_packages,
-        )
-        self._write_third_party_notices(
-            bundle_root,
-            metadata,
-            runtime_notice_packages,
-            tray_third_party_packages,
-        )
+        return build_settings
 
     @staticmethod
-    def _packaging_support_directories(
-        bundle_root: Path,
-    ) -> tuple[Path, Path, Path]:
-        licenses_root = bundle_root / "licenses"
-        installer_support_root = bundle_root / "installer"
-        config_directory = bundle_root / "etc"
-        for directory_path in (licenses_root, installer_support_root, config_directory):
-            directory_path.mkdir(parents=True, exist_ok=True)
-
-        return licenses_root, installer_support_root, config_directory
-
-    def _copy_packaging_support_files(
-        self,
-        source_root: Path,
-        bundle_root: Path,
-        licenses_root: Path,
-        installer_support_root: Path,
-        config_directory: Path,
-    ) -> None:
-        shutil.copy2(
-            Path(self.recipe_folder) / "scripts" / "installer" / "Manage-SquidService.ps1",
-            installer_support_root / "svc.ps1",
-        )
-        shutil.copy2(
-            Path(self.recipe_folder)
-            / "packaging"
-            / "defaults"
-            / "squid.conf.template",
-            config_directory / "squid.conf.template",
-        )
-        staged_config_path = config_directory / "squid.conf"
-        if staged_config_path.is_file():
-            staged_config_path.unlink()
-        shutil.copy2(
-            self._repository_license_path(),
-            licenses_root / "Repository-LICENSE.txt",
-        )
-        self._ensure_mime_configuration(bundle_root, source_root, config_directory)
-
-        squid_copying_path = source_root / "COPYING"
-        if squid_copying_path.is_file():
-            shutil.copy2(squid_copying_path, licenses_root / "Squid-COPYING.txt")
-
-    def _ensure_mime_configuration(
-        self,
-        bundle_root: Path,
-        source_root: Path,
-        config_directory: Path,
-    ) -> None:
-        mime_destination_path = config_directory / "mime.conf"
-        if mime_destination_path.is_file():
-            return
-
-        mime_candidates = (
-            config_directory / "mime.conf.default",
-            source_root / "src" / "mime.conf.default",
-        )
-        mime_source_path = next(
-            (candidate for candidate in mime_candidates if candidate.is_file()),
-            None,
-        )
-        if mime_source_path is None:
-            raise ConanException(
-                "Unable to locate mime.conf for the assembled bundle under "
-                f"{bundle_root}."
-            )
-
-        shutil.copy2(mime_source_path, mime_destination_path)
-
-    def _runtime_notice_packages(
-        self,
-        bundle_root: Path,
-        build_settings: dict[str, object],
-        bundled_runtime_dlls: list[str],
-    ) -> list[dict[str, object]]:
-        if not bundled_runtime_dlls:
+    def _string_list(values: object) -> list[str]:
+        if values is None:
             return []
 
-        return self._harvest_runtime_notice_bundle(
-            bundle_root, build_settings, bundled_runtime_dlls
-        )
+        raw_values: Iterable[object]
+        if isinstance(values, str):
+            raw_values = [values]
+        elif isinstance(values, dict):
+            raw_values = values.values()
+        elif isinstance(values, Iterable):
+            raw_values = values
+        else:
+            raw_values = [values]
 
-    def _tray_notice_packages(self, bundle_root: Path) -> list[dict[str, object]]:
-        if not self._option_enabled("with_tray"):
-            return []
+        normalized_values: list[str] = []
+        for value in raw_values:
+            text = str(value).strip()
+            if text:
+                normalized_values.append(text)
 
-        return self._collect_tray_notice_bundle(bundle_root)
+        return normalized_values
 
-    def _write_source_manifest(
-        self,
-        licenses_root: Path,
-        metadata: dict[str, object],
-        configuration_label: str,
-        msys2_env_directory: str,
-        bundled_runtime_dlls: list[str],
-        runtime_notice_packages: list[dict[str, object]],
-        tray_third_party_packages: list[dict[str, object]],
-    ) -> None:
-        source_manifest = {
-            "generated_at": datetime.now(timezone.utc)
-            .isoformat(timespec="seconds")
-            .replace("+00:00", "Z"),
-            "configuration": configuration_label,
-            "squid": {
-                "version": str(metadata["version"]),
-                "tag": str(metadata["tag"]),
-                "source_archive": str(metadata["assets"]["source_archive"]),
-                "source_signature": str(metadata["assets"].get("source_signature", "")),
-                "source_archive_sha256": str(metadata["assets"]["source_archive_sha256"]),
-            },
-            "repository": {"name": "squid4win", "license": "MIT"},
-            "windows_runtime": {
-                "msys2_env": msys2_env_directory,
-                "dlls": bundled_runtime_dlls,
-                "packages": runtime_notice_packages,
-            },
-        }
-        if self._option_enabled("with_tray"):
-            source_manifest["tray"] = {
-                "package": self._dependency_reference("squid4win_tray")
-                or "squid4win_tray/0.1",
-                "third_party_packages": tray_third_party_packages,
-            }
+    def _configuration_label(self) -> str:
+        return str(self.settings.build_type).lower()
 
-        save(
-            self,
-            os.fspath(licenses_root / "source-manifest.json"),
-            json.dumps(source_manifest, indent=2) + "\n",
-            encoding="ascii",
-        )
-
-    def _write_third_party_notices(
-        self,
-        bundle_root: Path,
-        metadata: dict[str, object],
-        runtime_notice_packages: list[dict[str, object]],
-        tray_third_party_packages: list[dict[str, object]],
-    ) -> None:
-        notices_content = "\n".join(
-            self._third_party_notice_lines(
-                metadata,
-                runtime_notice_packages,
-                tray_third_party_packages,
+    def _validate_native_windows(self) -> None:
+        if str(self.settings.os) != "Windows":
+            raise ConanInvalidConfiguration(
+                "The squid4win recipe only supports native Windows builds."
             )
-        )
-        save(
-            self,
-            os.fspath(bundle_root / "THIRD-PARTY-NOTICES.txt"),
-            notices_content + "\n",
-            encoding="ascii",
-        )
+
+        if str(self.settings.arch) != "x86_64":
+            raise ConanInvalidConfiguration("Only x86_64 builds are supported.")
+
+        compiler = getattr(self.settings, "compiler", None)
+        if compiler is not None and str(compiler) != "gcc":
+            raise ConanInvalidConfiguration(
+                "Use the Conan-managed MSYS2 MinGW-w64 GCC host profile."
+            )
 
     @staticmethod
-    def _require_squid_executable(bundle_root: Path) -> Path:
-        squid_candidates = (
-            bundle_root / "sbin" / "squid.exe",
-            bundle_root / "bin" / "squid.exe",
-        )
-        squid_executable = next(
-            (candidate for candidate in squid_candidates if candidate.is_file()),
-            None,
-        )
-        if squid_executable is None:
-            raise ConanException(
-                f"Expected squid.exe under the assembled bundle root {bundle_root}."
-            )
+    def _to_msys_path(path: os.PathLike[str] | str) -> str:
+        normalized_path = os.path.abspath(os.fspath(path)).replace("\\", "/")
+        if len(normalized_path) >= 2 and normalized_path[1] == ":":
+            return f"/{normalized_path[0].lower()}{normalized_path[2:]}"
 
-        return squid_executable
+        return normalized_path
 
-    def _bundle_native_runtime_dlls(
-        self,
-        bundle_root: Path,
-        build_settings: dict[str, object],
-        msys2_env_directory: str,
-    ) -> list[str]:
-        runtime_dlls = self._string_list(build_settings.get("runtime_dlls", []))
-        if not runtime_dlls:
-            raise ConanException(
-                "conandata.yml must declare build.runtime_dlls for the staged "
-                "Windows bundle."
-            )
-
-        runtime_dll_sources = self._runtime_dll_source_directories(msys2_env_directory)
-        executable_directories = self._native_executable_directories(bundle_root)
-        copied_runtime_dlls: list[str] = []
-        missing_runtime_dlls: list[str] = []
-        for runtime_dll in runtime_dlls:
-            runtime_dll_source_path = next(
-                (
-                    source_directory / runtime_dll
-                    for source_directory in runtime_dll_sources
-                    if (source_directory / runtime_dll).is_file()
-                ),
-                None,
-            )
-            if runtime_dll_source_path is None:
-                missing_runtime_dlls.append(runtime_dll)
-                continue
-
-            for executable_directory in executable_directories:
-                shutil.copy2(
-                    runtime_dll_source_path, executable_directory / runtime_dll
-                )
-            copied_runtime_dlls.append(runtime_dll)
-
-        if missing_runtime_dlls:
-            raise ConanException(
-                "Unable to locate the required Windows runtime DLLs in the Conan "
-                "dependency graph: "
-                f"{', '.join(missing_runtime_dlls)}."
-            )
-
-        destination_labels = [
-            "."
-            if executable_directory == bundle_root
-            else os.fspath(executable_directory.relative_to(bundle_root))
-            for executable_directory in executable_directories
-        ]
-        source_labels = ", ".join(
-            os.fspath(source_directory) for source_directory in runtime_dll_sources
-        )
-        self.output.info(
-            "Bundled native runtime DLLs from "
-            f"{source_labels} into {', '.join(destination_labels)}."
-        )
-        return copied_runtime_dlls
-
-    def _harvest_runtime_notice_bundle(
-        self,
-        bundle_root: Path,
-        build_settings: dict[str, object],
-        bundled_runtime_dlls: list[str],
-    ) -> list[dict[str, object]]:
-        raw_notice_entries = list(build_settings.get("runtime_notice_artifacts", []))
-        if not raw_notice_entries:
-            raise ConanException(
-                "conandata.yml must declare build.runtime_notice_artifacts for the staged Windows runtime notice bundle."
-            )
-
-        notice_root = bundle_root / "licenses" / "third-party" / "windows-runtime"
-        bundled_runtime_dll_set = set(bundled_runtime_dlls)
-        declared_runtime_dlls: set[str] = set()
-        harvested_notice_entries: list[dict[str, object]] = []
-        for raw_notice_entry in raw_notice_entries:
-            harvested_entry, runtime_dlls = self._harvest_runtime_notice_entry(
-                bundle_root,
-                notice_root,
-                raw_notice_entry,
-            )
-            harvested_notice_entries.append(harvested_entry)
-            declared_runtime_dlls.update(runtime_dlls)
-
-        self._validate_runtime_notice_coverage(
-            bundled_runtime_dll_set,
-            declared_runtime_dlls,
-        )
-        return harvested_notice_entries
-
-    def _harvest_runtime_notice_entry(
-        self,
-        bundle_root: Path,
-        notice_root: Path,
-        raw_notice_entry: object,
-    ) -> tuple[dict[str, object], list[str]]:
-        notice_entry = dict(raw_notice_entry)
-        notice_id = str(notice_entry.get("id", "")).strip()
-        if not notice_id:
-            raise ConanException(
-                "Each build.runtime_notice_artifacts entry in conandata.yml must declare a non-empty id."
-            )
-
-        runtime_dlls = self._deduplicate(self._string_list(notice_entry.get("dlls", [])))
-        if not runtime_dlls:
-            raise ConanException(
-                f"Runtime notice entry '{notice_id}' must declare at least one bundled DLL."
-            )
-
-        dependency_name = str(notice_entry.get("dependency", "")).strip()
-        if not dependency_name:
-            raise ConanException(
-                f"Runtime notice entry '{notice_id}' must declare a dependency source."
-            )
-
-        dependency_root = self._dependency_package_root(dependency_name)
-        if dependency_root is None:
-            raise ConanException(
-                f"Unable to locate the '{dependency_name}' dependency package for runtime notice entry '{notice_id}'."
-            )
-
-        copied_notice_files = self._copy_runtime_notice_files(
-            bundle_root,
-            notice_root / notice_id,
-            dependency_root,
-            notice_id,
-            notice_entry,
-        )
-        return (
-            {
-                "id": notice_id,
-                "name": str(notice_entry.get("name", notice_id)).strip(),
-                "package": str(notice_entry.get("package", notice_id)).strip(),
-                "source_dependency": self._dependency_reference(dependency_name)
-                or dependency_name,
-                "license": str(notice_entry.get("license", "")).strip(),
-                "project_url": str(notice_entry.get("project_url", "")).strip(),
-                "dlls": runtime_dlls,
-                "notice_files": copied_notice_files,
-            },
-            runtime_dlls,
-        )
-
-    def _copy_runtime_notice_files(
-        self,
-        bundle_root: Path,
-        destination_root: Path,
-        dependency_root: Path,
-        notice_id: str,
-        notice_entry: dict[str, object],
-    ) -> list[str]:
-        destination_root.mkdir(parents=True, exist_ok=True)
-        copied_notice_files: list[str] = []
-        for relative_path in self._deduplicate(
-            self._string_list(notice_entry.get("license_files", []))
-        ):
-            source_path = dependency_root / Path(relative_path)
-            if not source_path.is_file():
-                raise ConanException(
-                    f"Unable to locate the runtime notice file '{relative_path}' for entry '{notice_id}' under {dependency_root}."
-                )
-
-            destination_path = destination_root / source_path.name
-            shutil.copy2(source_path, destination_path)
-            copied_notice_files.append(
-                os.fspath(destination_path.relative_to(bundle_root)).replace("\\", "/")
-            )
-
-        if not copied_notice_files:
-            raise ConanException(
-                f"Runtime notice entry '{notice_id}' did not resolve any notice files."
-            )
-
-        return copied_notice_files
-
-    @staticmethod
-    def _validate_runtime_notice_coverage(
-        bundled_runtime_dll_set: set[str],
-        declared_runtime_dlls: set[str],
-    ) -> None:
-        missing_notice_entries = sorted(bundled_runtime_dll_set - declared_runtime_dlls)
-        if missing_notice_entries:
-            raise ConanException(
-                "The bundled Windows runtime DLLs are missing notice mappings in conandata.yml: "
-                + ", ".join(missing_notice_entries)
-                + "."
-            )
-
-        unused_notice_entries = sorted(declared_runtime_dlls - bundled_runtime_dll_set)
-        if unused_notice_entries:
-            raise ConanException(
-                "build.runtime_notice_artifacts declares DLLs that were not bundled into the staged payload: "
-                + ", ".join(unused_notice_entries)
-                + "."
-            )
-
-    def _collect_tray_notice_bundle(
-        self, bundle_root: Path
-    ) -> list[dict[str, object]]:
-        tray_package_root = self._tray_package_root()
-        manifest_path = tray_package_root / "licenses" / "third-party-package-manifest.json"
-        if not manifest_path.is_file():
-            raise ConanException(
-                f"Expected the tray third-party notice manifest at {manifest_path}."
-            )
-
-        manifest = json.loads(load(self, os.fspath(manifest_path)))
-        tray_notice_packages: list[dict[str, object]] = []
-        for raw_package in manifest.get("packages", []):
-            package_entry = dict(raw_package)
-            copied_notice_files: list[str] = []
-            for notice_file in self._deduplicate(
-                self._string_list(package_entry.get("notice_files", []))
-            ):
-                source_path = tray_package_root / Path(notice_file)
-                if not source_path.is_file():
-                    raise ConanException(
-                        f"Unable to locate the tray third-party notice file '{notice_file}' under {tray_package_root}."
-                    )
-
-                destination_path = bundle_root / Path(notice_file)
-                destination_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_path, destination_path)
-                copied_notice_files.append(
-                    os.fspath(destination_path.relative_to(bundle_root)).replace(
-                        "\\", "/"
-                    )
-                )
-
-            package_entry["notice_files"] = copied_notice_files
-            package_entry["shipped_assets"] = self._deduplicate(
-                self._string_list(package_entry.get("shipped_assets", []))
-            )
-            tray_notice_packages.append(package_entry)
-
-        return tray_notice_packages
-
-    @classmethod
-    def _third_party_notice_lines(
-        cls,
-        metadata: dict[str, object],
-        runtime_notice_packages: list[dict[str, object]],
-        tray_third_party_packages: list[dict[str, object]],
-    ) -> list[str]:
-        notice_lines = [
-            "Squid4Win third-party notice bundle",
-            "",
-            f"This payload stages Squid {metadata['version']} from the upstream source archive listed in licenses/source-manifest.json.",
-            "Repository-local automation and packaging code in this project are MIT-licensed; see licenses/Repository-LICENSE.txt.",
-            "",
-            "Bundled notice files:",
-            "- licenses/source-manifest.json",
-            "- licenses/Repository-LICENSE.txt",
-            "- licenses/Squid-COPYING.txt (when the upstream source tree is available locally)",
+    def _recipe_configure_args(self) -> list[str]:
+        return [
+            self._toggle_configure_arg(
+                "with_openssl", "--with-openssl", "--without-openssl"
+            ),
+            self._toggle_configure_arg(
+                "enable_win32_service",
+                "--enable-win32-service",
+                "--disable-win32-service",
+            ),
+            self._toggle_configure_arg(
+                "enable_default_hostsfile",
+                "--enable-default-hostsfile",
+                "--disable-default-hostsfile",
+            ),
+            self._toggle_configure_arg(
+                "enable_strict_error_checking",
+                "--enable-strict-error-checking",
+                "--disable-strict-error-checking",
+            ),
+            self._toggle_configure_arg(
+                "enable_dependency_tracking",
+                "--enable-dependency-tracking",
+                "--disable-dependency-tracking",
+            ),
+            self._list_configure_arg("auth_basic_helpers", "auth-basic"),
+            self._list_configure_arg("auth_digest_helpers", "auth-digest"),
+            self._list_configure_arg("auth_negotiate_helpers", "auth-negotiate"),
+            self._list_configure_arg("external_acl_helpers", "external-acl-helpers"),
         ]
 
-        component_lines = []
-        component_lines.extend(cls._runtime_notice_lines(runtime_notice_packages))
-        component_lines.extend(cls._tray_notice_lines(tray_third_party_packages))
-        if component_lines:
-            notice_lines.extend(
-                (
-                    "",
-                    "Bundled third-party components:",
-                    "- Squid upstream sources and license text: licenses/Squid-COPYING.txt",
-                )
-            )
-            notice_lines.extend(component_lines)
+    def _toggle_configure_arg(
+        self, option_name: str, enabled_flag: str, disabled_flag: str
+    ) -> str:
+        return enabled_flag if self._option_enabled(option_name) else disabled_flag
 
-        notice_lines.extend(
-            (
-                "",
-                "Machine-readable provenance for the staged payload lives in licenses/source-manifest.json.",
-            )
-        )
-        return notice_lines
+    def _list_configure_arg(self, option_name: str, feature_name: str) -> str:
+        option_value = self._string_option(option_name)
+        if option_value is None:
+            return f"--disable-{feature_name}"
 
-    @staticmethod
-    def _runtime_notice_lines(
-        runtime_notice_packages: list[dict[str, object]],
-    ) -> list[str]:
-        notice_lines: list[str] = []
-        for notice_entry in runtime_notice_packages:
-            asset_list = ", ".join(
-                [
-                    str(asset).strip()
-                    for asset in notice_entry.get("dlls", [])
-                    if str(asset).strip()
-                ]
-            )
-            entry_line = (
-                f"- {notice_entry.get('name', notice_entry.get('id', 'runtime'))}"
-                f" [{asset_list}]"
-            )
-            if notice_entry.get("license"):
-                entry_line += f" - license: {notice_entry['license']}"
-            if notice_entry.get("source_dependency"):
-                entry_line += f"; source: {notice_entry['source_dependency']}"
-            notice_lines.append(entry_line)
-            for notice_file in notice_entry.get("notice_files", []):
-                notice_lines.append(f"  - {notice_file}")
-
-        return notice_lines
-
-    @staticmethod
-    def _tray_notice_lines(
-        tray_third_party_packages: list[dict[str, object]],
-    ) -> list[str]:
-        notice_lines: list[str] = []
-        for package_entry in tray_third_party_packages:
-            asset_list = ", ".join(
-                [
-                    str(asset).strip()
-                    for asset in package_entry.get("shipped_assets", [])
-                    if str(asset).strip()
-                ]
-            )
-            entry_line = (
-                f"- {package_entry.get('id', 'tray-package')}"
-                f" {package_entry.get('version', '')}"
-            ).rstrip()
-            if asset_list:
-                entry_line += f" [{asset_list}]"
-            if package_entry.get("license"):
-                entry_line += f" - license: {package_entry['license']}"
-            entry_line += "; source: NuGet package"
-            notice_lines.append(entry_line)
-            for notice_file in package_entry.get("notice_files", []):
-                notice_lines.append(f"  - {notice_file}")
-
-        return notice_lines
-
-    def _mirror_local_stage_root(self, bundle_root: Path) -> None:
-        local_stage_root = self._local_stage_root()
-        if local_stage_root is None:
-            return
-
-        shutil.rmtree(local_stage_root, ignore_errors=True)
-        local_stage_root.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(bundle_root, local_stage_root, dirs_exist_ok=True)
-        self.output.info(f"Mirrored the assembled bundle to {local_stage_root}.")
-
-    @staticmethod
-    def _native_executable_directories(bundle_root: Path) -> list[Path]:
-        executable_directories = sorted(
-            {executable_path.parent for executable_path in bundle_root.rglob("*.exe")},
-            key=lambda path: os.fspath(path).lower(),
-        )
-        if not executable_directories:
-            raise ConanException(
-                f"Expected at least one executable under the assembled bundle root {bundle_root}."
+        if not option_value:
+            raise ConanInvalidConfiguration(
+                f"{option_name} cannot be empty. Use None to disable {feature_name}."
             )
 
-        return executable_directories
+        return f"--enable-{feature_name}={option_value}"
 
-    def _runtime_dll_source_directories(
-        self, msys2_env_directory: str
-    ) -> list[Path]:
-        source_directories: list[Path] = []
-        seen_directories: set[str] = set()
+    def _string_option(self, option_name: str) -> str | None:
+        option_value = getattr(self.options, option_name)
+        if option_value is None:
+            return None
 
-        mingw_package_root = self._dependency_package_root("mingw-builds")
-        if mingw_package_root is not None:
-            self._append_existing_directory(
-                source_directories, seen_directories, mingw_package_root / "bin"
-            )
+        option_text = str(option_value).strip()
+        if option_text.lower() == "none":
+            return None
 
-        msys2_package_root = self._dependency_package_root("msys2")
-        if msys2_package_root is not None:
-            self._append_existing_directory(
-                source_directories,
-                seen_directories,
-                msys2_package_root / "bin" / "msys64" / msys2_env_directory / "bin",
-            )
-            self._append_existing_directory(
-                source_directories,
-                seen_directories,
-                msys2_package_root / "bin" / "msys64" / "usr" / "bin",
-            )
-
-        for dependency in self.dependencies.values():
-            package_folder = getattr(dependency, "package_folder", None)
-            if not package_folder:
-                continue
-
-            package_root = Path(package_folder)
-            for bindir in getattr(dependency.cpp_info, "bindirs", []):
-                bindir_path = Path(bindir)
-                if not bindir_path.is_absolute():
-                    bindir_path = package_root / bindir_path
-                self._append_existing_directory(
-                    source_directories, seen_directories, bindir_path
-                )
-
-        if not source_directories:
-            raise ConanException(
-                "Unable to locate any runtime DLL source directories from the Conan "
-                "dependency graph."
-            )
-
-        return source_directories
-
-    @staticmethod
-    def _append_existing_directory(
-        directories: list[Path], seen_directories: set[str], candidate: Path
-    ) -> None:
-        if not candidate.is_dir():
-            return
-
-        candidate_key = os.path.normcase(os.fspath(candidate.resolve(strict=False)))
-        if candidate_key in seen_directories:
-            return
-
-        seen_directories.add(candidate_key)
-        directories.append(candidate)
-
-    def _tray_package_root(self) -> Path:
-        dependency_root = self._dependency_package_root("squid4win_tray")
-        if dependency_root is not None:
-            return dependency_root
-
-        editable_root = self._tray_editable_package_root()
-        if editable_root is not None:
-            return editable_root
-
-        raise ConanException(
-            "The squid4win_tray package dependency is not available to the root recipe. "
-            "Build it from the cache or use the tray editable flow so "
-            f"{self._configuration_label()}\\editable-package is materialized first."
-        )
+        return option_text
 
     def _dependency_package_root(self, dependency_name: str) -> Path | None:
         try:
@@ -1036,71 +454,13 @@ class Squid4WinConan(ConanFile):
 
         return None
 
-    def _dependency_recipe_folder(self, dependency_name: str) -> Path | None:
-        try:
-            dependency = self.dependencies[dependency_name]
-            recipe_folder = getattr(dependency, "recipe_folder", None)
-            if recipe_folder:
-                return Path(recipe_folder)
-        except Exception:
-            pass
-
-        for dependency in self.dependencies.values():
-            dependency_ref = getattr(dependency, "ref", None)
-            if dependency_ref and getattr(dependency_ref, "name", None) == dependency_name:
-                recipe_folder = getattr(dependency, "recipe_folder", None)
-                if recipe_folder:
-                    return Path(recipe_folder)
-
-        return None
-
-    def _tray_editable_package_root(self) -> Path | None:
-        recipe_folder = self._dependency_recipe_folder("squid4win_tray")
-        if recipe_folder is None:
-            return None
-
-        editable_root = (
-            recipe_folder / "build" / self._configuration_label() / "editable-package"
-        )
-        if editable_root.is_dir():
-            return editable_root
-
-        return None
-
-    def _dependency_reference(self, dependency_name: str) -> str | None:
-        try:
-            dependency = self.dependencies[dependency_name]
-            dependency_ref = getattr(dependency, "ref", None)
-            if dependency_ref:
-                return str(dependency_ref)
-        except Exception:
-            for dependency in self.dependencies.values():
-                dependency_ref = getattr(dependency, "ref", None)
-                if dependency_ref and getattr(dependency_ref, "name", None) == dependency_name:
-                    return str(dependency_ref)
-
-        return None
-
-    def _repository_license_path(self) -> Path:
-        local_license_path = Path(self.recipe_folder) / "LICENSE"
-        if local_license_path.is_file():
-            return local_license_path
-
-        exported_license_path = Path(self.recipe_folder) / "licenses" / "LICENSE"
-        if exported_license_path.is_file():
-            return exported_license_path
-
-        raise ConanException(
-            f"Unable to locate the repository license under {self.recipe_folder}."
-        )
-
     def _configure_cache_lines(self, build_settings: dict[str, object]) -> list[str]:
         configure_cache = build_settings.get("configure_cache")
         if not configure_cache:
             return []
 
         configure_cache_lines = [
-            "# Generated by the squid4win Conan recipe to stabilize native MSYS2/MinGW-w64 configure checks."
+            "# Generated by the native Squid Conan recipe to stabilize MSYS2/MinGW-w64 configure checks."
         ]
         for cache_name, cache_value in dict(configure_cache).items():
             name = str(cache_name).strip()
@@ -1109,14 +469,6 @@ class Squid4WinConan(ConanFile):
                 configure_cache_lines.append(f"{name}={value}")
 
         return configure_cache_lines
-
-    def _additional_configure_args(self) -> list[str]:
-        raw_value = os.getenv("SQUID4WIN_CONFIGURE_ARGS_JSON", "").strip()
-        if not raw_value:
-            return []
-
-        parsed_value = json.loads(raw_value)
-        return self._string_list(parsed_value)
 
     @staticmethod
     def _deduplicate(values: list[str]) -> list[str]:
@@ -1150,20 +502,36 @@ class Squid4WinConan(ConanFile):
                 f"{failure_message} The bash command exited with code {result.returncode}."
             )
 
-    @staticmethod
-    def _make_jobs() -> int:
-        raw_value = os.getenv("SQUID4WIN_MAKE_JOBS", "1").strip()
+    def _build_jobs(self) -> int:
+        raw_value = self.conf.get("tools.build:jobs", default=1)
         try:
-            make_jobs = int(raw_value)
-        except ValueError as exc:
+            build_jobs = int(raw_value)
+        except (TypeError, ValueError) as exc:
             raise ConanException(
-                f"SQUID4WIN_MAKE_JOBS must be an integer, but was '{raw_value}'."
+                f"tools.build:jobs must be an integer, but was '{raw_value}'."
             ) from exc
 
-        if make_jobs < 1:
-            raise ConanException("SQUID4WIN_MAKE_JOBS must be greater than zero.")
+        if build_jobs < 1:
+            raise ConanException("tools.build:jobs must be greater than zero.")
 
-        return make_jobs
+        return build_jobs
+
+    @staticmethod
+    def _require_squid_executable(install_root: Path) -> Path:
+        squid_candidates = (
+            install_root / "sbin" / "squid.exe",
+            install_root / "bin" / "squid.exe",
+        )
+        squid_executable = next(
+            (candidate for candidate in squid_candidates if candidate.is_file()),
+            None,
+        )
+        if squid_executable is None:
+            raise ConanException(
+                f"Expected squid.exe under the native install root {install_root}."
+            )
+
+        return squid_executable
 
     def _repair_autoconf_header(
         self, generated_header_path: Path, confdefs_path: Path, config_log_path: Path

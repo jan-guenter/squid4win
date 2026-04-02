@@ -56,10 +56,15 @@
       <ComponentGroupRef Id="InstallerIntegration" />
     </Feature>
 
+    <!--
+      Append "." to INSTALLFOLDER when passing it as a quoted argument. MSI
+      directory properties end with a trailing backslash, which would otherwise
+      escape the closing quote in the raw QuietExec command line.
+    -->
     <SetProperty Id="InstallSquidService"
                  Sequence="execute"
                  After="CostFinalize"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\svc.ps1&quot; Install &quot;[INSTALLFOLDER]&quot; &quot;[SQUID4WIN_SERVICE_NAME]&quot;"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\svc.ps1&quot; Install &quot;[INSTALLFOLDER].&quot; &quot;[SQUID4WIN_SERVICE_NAME]&quot;"
                  Condition="NOT Installed" />
 
     <CustomAction Id="InstallSquidService"
@@ -72,7 +77,7 @@
     <SetProperty Id="RemoveSquidService"
                  Sequence="execute"
                  After="CostFinalize"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\svc.ps1&quot; Uninstall &quot;[INSTALLFOLDER]&quot; &quot;[SQUID4WIN_SERVICE_NAME]&quot;"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]installer\svc.ps1&quot; Uninstall &quot;[INSTALLFOLDER].&quot; &quot;[SQUID4WIN_SERVICE_NAME]&quot;"
                  Condition="REMOVE=&quot;ALL&quot;" />
 
     <CustomAction Id="RemoveSquidService"

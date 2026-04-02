@@ -1,0 +1,14 @@
+diff --git a/pristine/squid-7.5/src/base/File.cc b/patched/squid-7.5/src/base/File.cc
+index 11013e2..ac82224 100644
+--- a/pristine/squid-7.5/src/base/File.cc
++++ b/patched/squid-7.5/src/base/File.cc
+@@ -342,7 +342,8 @@ void
+ File::lockOnce(const FileOpeningConfig &cfg)
+ {
+ #if _SQUID_WINDOWS_ || _SQUID_MINGW_
+-    if (!LockFileEx(fd_, cfg.lockFlags, 0, 0, 1, 0)) {
++    OVERLAPPED lockOffset = {};
++    if (!LockFileEx(fd_, cfg.lockFlags, 0, 1, 0, &lockOffset)) {
+         const auto savedError = GetLastError();
+         throw TexcHere(sysCallFailure("LockFileEx", WindowsErrorMessage(savedError)));
+     }

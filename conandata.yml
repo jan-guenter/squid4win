@@ -6,8 +6,6 @@ sources:
 
 build:
   profile_name: "msys2-mingw-x64"
-  stage_root: "build\\install\\{configuration}"
-  service_name: "Squid4Win"
   host_triplet: "x86_64-w64-mingw32"
   tool_requires:
     - "msys2/cci.latest"
@@ -86,16 +84,7 @@ build:
     ac_cv_sizeof_off_t: "4"
     ac_cv_sizeof_size_t: "8"
   configure_args:
-    - "--disable-strict-error-checking"
-    - "--disable-dependency-tracking"
     - "--without-netfilter-conntrack"
-    - "--enable-auth-basic=DB,NCSA,POP3,RADIUS,SMB,SSPI,fake"
-    - "--enable-auth-digest=file"
-    - "--enable-auth-negotiate=SSPI"
-    - "--enable-external-acl-helpers=LM_group,SQL_session,delayer,wbinfo_group"
-    - "--with-openssl"
-    - "--enable-win32-service"
-    - "--enable-default-hostsfile"
 
 patches:
   "7.5":
@@ -125,5 +114,33 @@ patches:
       strip: 2
     - patch_file: "conan/patches/squid/0007-mingw-main-and-service-integration.patch"
       patch_description: "Wire MinGW into Squid runtime startup and Windows service paths."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0008-mingw-lockfileex-overlapped.patch"
+      patch_description: "Pass a valid OVERLAPPED structure to LockFileEx for Windows instance locking."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0009-mingw-setfilepointerex-truncate.patch"
+      patch_description: "Use SetFilePointerEx when truncating Windows-managed pid files."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0010-mingw-unlinkd-windows-ipc.patch"
+      patch_description: "Treat MinGW like Windows when choosing unlinkd IPC transports."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0011-mingw-ipc-params-address-lifetime.patch"
+      patch_description: "Store Windows IPC peer addresses with stable Ip::Address lifetime semantics."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0012-mingw-filerename-overwrite.patch"
+      patch_description: "Use the Windows overwrite-before-rename workaround for MinGW builds too."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0013-mingw-helper-windows-guards.patch"
+      patch_description: "Treat MinGW helper socket shutdown and process waits like Windows."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0014-mingw-windows-dns-registry.patch"
+      patch_description: "Treat MinGW like Windows for DNS registry discovery and messaging."
       base_path: "."
       strip: 2

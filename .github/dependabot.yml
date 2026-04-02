@@ -1,8 +1,8 @@
 version: 2
 updates:
-  # Dependabot can track the Conan CLI pin in requirements-automation.txt,
-  # but it cannot manage Conan package graphs directly. update-upstream.yml
-  # handles Squid release metadata instead.
+  # Dependabot can track the Python automation environment in pyproject.toml
+  # and uv.lock, but it cannot manage Conan package graphs directly.
+  # update-upstream.yml handles Squid release metadata instead.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -29,8 +29,6 @@ updates:
       day: monday
       time: "04:30"
       timezone: UTC
-    allow:
-      - dependency-name: conan
     commit-message:
       prefix: chore
       include: scope

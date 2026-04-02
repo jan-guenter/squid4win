@@ -105,6 +105,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
+
+      - name: Sync automation environment
+        run: uv sync --locked
+
       - name: Download package manager artifacts
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
@@ -142,16 +161,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
         run: |
-          $result = .\scripts\Publish-WingetManifest.ps1 `
-            -Version '${{ needs.metadata.outputs.version }}' `
-            -Tag '${{ needs.metadata.outputs.tag }}' `
-            -Repository '${{ needs.metadata.outputs.repository }}' `
-            -ManifestRoot (Join-Path $PWD.Path 'artifacts\package-managers') `
-            -TargetRepository '${{ steps.config.outputs.target_repository }}' `
-            -BaseBranch '${{ steps.config.outputs.base_branch }}'
-
-          "changed=$($result.Changed.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "pull_request_url=$($result.PullRequestUrl)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          uv run squid4win-automation publish-winget `
+            --repository-root $PWD.Path `
+            --version '${{ needs.metadata.outputs.version }}' `
+            --tag '${{ needs.metadata.outputs.tag }}' `
+            --repository '${{ needs.metadata.outputs.repository }}' `
+            --manifest-root (Join-Path $PWD.Path 'artifacts\package-managers') `
+            --target-repository '${{ steps.config.outputs.target_repository }}' `
+            --base-branch '${{ steps.config.outputs.base_branch }}' `
+            --execute
 
       - name: Summarize winget publication
         run: |
@@ -194,6 +212,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
+
+      - name: Sync automation environment
+        run: uv sync --locked
+
       - name: Download package manager artifacts
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
@@ -231,14 +268,13 @@ jobs:
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
-          $result = .\scripts\Publish-ChocolateyPackage.ps1 `
-            -Version '${{ needs.metadata.outputs.version }}' `
-            -PackageRoot (Join-Path $PWD.Path 'artifacts\package-managers\chocolatey') `
-            -PushSource '${{ steps.config.outputs.push_source }}' `
-            -QuerySource '${{ steps.config.outputs.query_source }}'
-
-          "already_published=$($result.AlreadyPublished.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "package_path=$($result.PackagePath)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          uv run squid4win-automation publish-chocolatey `
+            --repository-root $PWD.Path `
+            --version '${{ needs.metadata.outputs.version }}' `
+            --package-root (Join-Path $PWD.Path 'artifacts\package-managers\chocolatey') `
+            --push-source '${{ steps.config.outputs.push_source }}' `
+            --query-source '${{ steps.config.outputs.query_source }}' `
+            --execute
 
       - name: Summarize Chocolatey publication
         run: |
@@ -276,6 +312,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
+
+      - name: Sync automation environment
+        run: uv sync --locked
+
       - name: Download package manager artifacts
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
@@ -311,16 +366,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
         run: |
-          $result = .\scripts\Publish-ScoopManifest.ps1 `
-            -Version '${{ needs.metadata.outputs.version }}' `
-            -Tag '${{ needs.metadata.outputs.tag }}' `
-            -Repository '${{ needs.metadata.outputs.repository }}' `
-            -ManifestRoot (Join-Path $PWD.Path 'artifacts\package-managers') `
-            -TargetRepository '${{ steps.config.outputs.target_repository }}' `
-            -BaseBranch '${{ steps.config.outputs.base_branch }}'
-
-          "changed=$($result.Changed.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "pull_request_url=$($result.PullRequestUrl)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          uv run squid4win-automation publish-scoop `
+            --repository-root $PWD.Path `
+            --version '${{ needs.metadata.outputs.version }}' `
+            --tag '${{ needs.metadata.outputs.tag }}' `
+            --repository '${{ needs.metadata.outputs.repository }}' `
+            --manifest-root (Join-Path $PWD.Path 'artifacts\package-managers') `
+            --target-repository '${{ steps.config.outputs.target_repository }}' `
+            --base-branch '${{ steps.config.outputs.base_branch }}' `
+            --execute
 
       - name: Summarize Scoop publication
         run: |
