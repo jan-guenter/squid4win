@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from squid4win.commands import (
     run_bundle_package,
     run_conan_lockfile_update,
+    run_service_runner_validation,
+    run_smoke_test,
     run_squid_build,
     run_tray_build,
 )
@@ -17,11 +19,12 @@ from squid4win.logging_utils import configure_logging, get_logger
 from squid4win.models import (
     BundlePackageOptions,
     ConanLockfileUpdateOptions,
-    GitHubActionsContext,
     PackageManagerExportOptions,
     PublishChocolateyOptions,
     PublishScoopOptions,
     PublishWingetOptions,
+    ServiceRunnerValidationOptions,
+    SmokeTestOptions,
     SquidBuildOptions,
     TrayBuildOptions,
     UpstreamVersionOptions,
@@ -34,6 +37,7 @@ from squid4win.package_managers import (
 )
 from squid4win.runner import PlanExecutionError, PlanRunner
 from squid4win.upstream import GitHubReleaseClient
+from squid4win.utils.actions import context as github_actions_context
 from squid4win.version_helper import TargetUpstreamRelease, UpstreamVersionManager
 
 _DEFAULT_REPOSITORY = "jan-guenter/squid4win"
@@ -133,6 +137,48 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_package.add_argument("--service-name", default="Squid4Win")
     bundle_package.add_argument("--sign-msi", action="store_true")
     bundle_package.set_defaults(handler=_handle_bundle_package)
+
+    smoke_test = subparsers.add_parser(
+        "smoke-test",
+        help="Plan or validate the staged Squid bundle, runtime DLLs, and notices.",
+    )
+    _add_common_command_arguments(smoke_test)
+    smoke_test.add_argument("--configuration", choices=("Debug", "Release"), default="Release")
+    smoke_test.add_argument("--build-root", type=Path)
+    smoke_test.add_argument("--squid-stage-root", type=Path)
+    smoke_test.add_argument("--metadata-path", type=Path)
+    smoke_test.add_argument("--binary-path", type=Path)
+    smoke_test.add_argument("--require-notices", action="store_true")
+    smoke_test.set_defaults(handler=_handle_smoke_test)
+
+    service_runner_validation = subparsers.add_parser(
+        "service-runner-validation",
+        help="Plan or validate the MSI-installed Windows service lifecycle.",
+    )
+    _add_common_command_arguments(service_runner_validation)
+    service_runner_validation.add_argument(
+        "--configuration",
+        choices=("Debug", "Release"),
+        default="Release",
+    )
+    service_runner_validation.add_argument("--build-root", type=Path)
+    service_runner_validation.add_argument("--artifact-root", type=Path)
+    service_runner_validation.add_argument("--service-name")
+    service_runner_validation.add_argument(
+        "--service-name-prefix",
+        default="Squid4WinRunner",
+    )
+    service_runner_validation.add_argument("--install-root", type=Path)
+    service_runner_validation.add_argument(
+        "--service-timeout-seconds",
+        type=int,
+        default=60,
+    )
+    service_runner_validation.add_argument(
+        "--allow-non-runner-execution",
+        action="store_true",
+    )
+    service_runner_validation.set_defaults(handler=_handle_service_runner_validation)
 
     package_manager_export = subparsers.add_parser(
         "package-manager-export",
@@ -294,6 +340,37 @@ def _handle_bundle_package(args: argparse.Namespace, runner: PlanRunner) -> int:
     return run_bundle_package(options, runner, execute=args.execute)
 
 
+def _handle_smoke_test(args: argparse.Namespace, runner: PlanRunner) -> int:
+    options = SmokeTestOptions(
+        repository_root=args.repository_root,
+        configuration=args.configuration,
+        build_root=args.build_root,
+        squid_stage_root=args.squid_stage_root,
+        metadata_path=args.metadata_path,
+        binary_path=args.binary_path,
+        require_notices=args.require_notices,
+    )
+    return run_smoke_test(options, runner, execute=args.execute)
+
+
+def _handle_service_runner_validation(
+    args: argparse.Namespace,
+    runner: PlanRunner,
+) -> int:
+    options = ServiceRunnerValidationOptions(
+        repository_root=args.repository_root,
+        configuration=args.configuration,
+        build_root=args.build_root,
+        artifact_root=args.artifact_root,
+        service_name=args.service_name,
+        service_name_prefix=args.service_name_prefix,
+        install_root=args.install_root,
+        service_timeout_seconds=args.service_timeout_seconds,
+        allow_non_runner_execution=args.allow_non_runner_execution,
+    )
+    return run_service_runner_validation(options, runner, execute=args.execute)
+
+
 def _handle_package_manager_export(args: argparse.Namespace, runner: PlanRunner) -> int:
     options = PackageManagerExportOptions(
         repository_root=args.repository_root,
@@ -406,12 +483,25 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     configure_logging(args.log_level, force=True)
     logger = get_logger("squid4win")
-    github_context = GitHubActionsContext()
+    github_context = github_actions_context()
     if github_context.enabled:
         logger.debug(
-            "GitHub Actions context detected for %s at %s.",
+            "GitHub Actions context detected for %s at %s (%s on %s).",
             github_context.repository or "<unknown-repository>",
             github_context.workspace or "<unknown-workspace>",
+            github_context.event_name or "<unknown-event>",
+            github_context.ref_name or github_context.ref or "<unknown-ref>",
+        )
+        logger.debug(
+            "GitHub run %s attempt %s action=%s pr=%s base=%s head=%s outputs=%s summary=%s.",
+            github_context.run_number or "<unknown-run>",
+            github_context.run_attempt or "<unknown-attempt>",
+            github_context.event_action or "<none>",
+            github_context.pull_request_number or "<none>",
+            github_context.base_ref or github_context.base_sha or "<none>",
+            github_context.head_ref or github_context.head_sha or "<none>",
+            github_context.output_path or "<none>",
+            github_context.step_summary_path or "<none>",
         )
 
     runner = PlanRunner(logger)

@@ -141,7 +141,7 @@ jobs:
           & uv @arguments
 
       - name: Smoke test Squid
-        run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release -RequireNotices
+        run: uv run squid4win-automation smoke-test --execute --configuration Release --require-notices
 
       - name: Detect MSI packaging inputs
         id: packaging

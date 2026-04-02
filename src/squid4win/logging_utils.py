@@ -1,29 +1,16 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from typing import Final
+
+from squid4win.utils.actions import annotation_level_from_logging, format_annotation, is_enabled
 
 _DEFAULT_FORMAT: Final[str] = "%(levelname)s %(name)s: %(message)s"
 
 
 def is_github_actions() -> bool:
-    return os.getenv("GITHUB_ACTIONS", "").lower() == "true"
-
-
-def _escape_command_message(value: str) -> str:
-    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-
-
-def _escape_command_property(value: str) -> str:
-    return (
-        value.replace("%", "%25")
-        .replace("\r", "%0D")
-        .replace("\n", "%0A")
-        .replace(":", "%3A")
-        .replace(",", "%2C")
-    )
+    return is_enabled()
 
 
 class GitHubActionsFormatter(logging.Formatter):
@@ -32,36 +19,21 @@ class GitHubActionsFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         rendered = super().format(record)
-        command = self._annotation_command(record.levelno)
-        if command is None or not is_github_actions():
+        annotation_level = annotation_level_from_logging(record.levelno)
+        if annotation_level is None:
             return rendered
 
-        properties: list[str] = []
-        for attribute_name, property_name in (
-            ("gh_title", "title"),
-            ("gh_file", "file"),
-            ("gh_line", "line"),
-            ("gh_end_line", "endLine"),
-            ("gh_column", "col"),
-            ("gh_end_column", "endColumn"),
-        ):
-            value = getattr(record, attribute_name, None)
-            if value is not None:
-                properties.append(f"{property_name}={_escape_command_property(str(value))}")
-
-        prefix = f"::{command}"
-        if properties:
-            prefix = f"{prefix} {','.join(properties)}"
-
-        return f"{prefix}::{_escape_command_message(rendered)}"
-
-    @staticmethod
-    def _annotation_command(level: int) -> str | None:
-        if level >= logging.ERROR:
-            return "error"
-        if level >= logging.WARNING:
-            return "warning"
-        return None
+        return format_annotation(
+            annotation_level,
+            rendered,
+            title=getattr(record, "gh_title", None),
+            file=getattr(record, "gh_file", None),
+            line=getattr(record, "gh_line", None),
+            end_line=getattr(record, "gh_end_line", None),
+            column=getattr(record, "gh_column", None),
+            end_column=getattr(record, "gh_end_column", None),
+            enabled=is_enabled(),
+        )
 
 
 def configure_logging(level: str = "INFO", *, force: bool = False) -> logging.Logger:

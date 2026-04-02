@@ -21,7 +21,8 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - Upstream pin: Squid `7.5` (`SQUID_7_5`)
 - The target architecture is one self-contained native Squid Conan recipe plus a
   direct `.NET 10` tray build outside Conan.
-- Repo-level automation is moving to Python 3.14 + `uv`.
+- Python 3.14 + `uv` now owns the repo-level build, stage, smoke-test, and
+  package entry points.
 - Repository linting is centered on `.mega-linter.yml` plus
   `.github\linters\`; `ty` remains a companion Python type-check step outside
   MegaLinter.
@@ -35,13 +36,12 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   config association is persisted separately for the named service.
 - WiX v4 MSI authoring and payload staging are already committed.
 - The repository's own code and docs are GPL-2.0-or-later.
-- The last cited validation still comes from the legacy PowerShell +
-  tray-Conan implementation: native build, native install tree creation, staged
-  bundle assembly, portable zip creation, and MSI build.
-- Treat that legacy validation as historical proof only. It does not validate
-  the Python 3.14 + `uv` automation path, the direct `.NET 10` tray build
-  integration, or clean-host installer and installed-service plus tray lifecycle
-  behavior.
+- Current cited local validation covers the Python-owned target-state path:
+  `squid-build`, `smoke-test`, and `bundle-package` now run locally and produce
+  the staged payload, portable zip, and MSI.
+- Clean-host installer and isolated installed-service lifecycle validation are
+  still pending after the workflow migration to the Python
+  `service-runner-validation` command.
 
 For detailed architecture, quality, and distribution rationale, use
 `README.md` plus ADRs `0005` and `0006` instead of duplicating those details
@@ -74,12 +74,16 @@ here.
 - Do not add new repo-level PowerShell orchestration. Put new contributor and
   CI automation in the Python 3.14 + `uv` package and entry points.
 - Treat `uv run squid4win-automation ...` as the supported repo-level surface
-  for Squid builds, tray builds, bundle packaging, and Conan lockfile refresh.
+  for Squid builds, tray builds, bundle packaging, validation, metadata
+  updates, and Conan lockfile refresh.
 - Do not reintroduce tray-app Conan packaging or editable flows as the target
   model; the tray builds directly with `dotnet` from
   `src\tray\Squid4Win.Tray`.
 - Keep PowerShell limited to installer-time MSI custom actions or shipped
   Windows helper scripts that genuinely need it.
+- Treat `service-runner-validation` as an isolated admin-capable Windows runner
+  workflow; do not execute it on a shared machine unless the environment is
+  explicitly dedicated to that validation.
 - Keep docs truthful about committed implementation, cited validation, and
   migration plans.
 - Keep markdown guidance centralized. Use markdownlint,

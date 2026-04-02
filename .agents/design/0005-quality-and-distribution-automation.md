@@ -119,9 +119,11 @@ The automation baseline is:
 ## Implementation notes
 
 - Keep the Sonar scope in `sonar-project.properties`.
-- Keep `scripts\Invoke-ServiceRunnerValidation.ps1` responsible for generating a
-  unique temporary service name, staging an isolated validation root, invoking
-  the MSI, and cleaning up leftover runner state.
+ - Keep
+   `uv run squid4win-automation service-runner-validation --execute`
+   responsible for generating a unique temporary service name, staging an
+   isolated validation root, invoking the MSI, and cleaning up leftover runner
+   state.
 - Keep `.github\workflows\service-runner-validation.yml` responsible for the
   isolated Windows runner lifecycle validation path.
 - Keep `.markdownlint-cli2.jsonc` as the baseline markdown lint

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -22,13 +23,136 @@ class BuildConfiguration(StrEnum):
     RELEASE = "Release"
 
 
+def _string_from_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+
+    stripped = value.strip()
+    return stripped or None
+
+
 def _path_from_env(name: str) -> Path | None:
     value = os.getenv(name)
     return Path(value) if value else None
 
 
+def _bool_from_env(name: str) -> bool | None:
+    value = _string_from_env(name)
+    if value is None:
+        return None
+
+    normalized = value.lower()
+    if normalized in {"1", "true", "yes"}:
+        return True
+    if normalized in {"0", "false", "no"}:
+        return False
+    return None
+
+
+def _int_from_env(name: str) -> int | None:
+    value = _string_from_env(name)
+    if value is None:
+        return None
+
+    if not value.isdigit():
+        return None
+
+    return int(value)
+
+
+def _json_object_from_path(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.is_file():
+        return None
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+    if isinstance(payload, dict):
+        return payload
+
+    return None
+
+
+def _mapping_at_path(mapping: dict[str, Any] | None, *keys: str) -> dict[str, Any] | None:
+    current: object = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+
+    if isinstance(current, dict):
+        return current
+    return None
+
+
+def _string_at_path(mapping: dict[str, Any] | None, *keys: str) -> str | None:
+    current: object = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+
+    if isinstance(current, str):
+        stripped = current.strip()
+        return stripped or None
+    return None
+
+
+def _int_from_value(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _pull_request_number_from_event(payload: dict[str, Any] | None) -> int | None:
+    if payload is None:
+        return None
+
+    top_level_number = _int_from_value(payload.get("number"))
+    if top_level_number is not None:
+        return top_level_number
+
+    pull_request = _mapping_at_path(payload, "pull_request")
+    if pull_request is None:
+        return None
+
+    return _int_from_value(pull_request.get("number"))
+
+
+def _event_payload_from_env() -> dict[str, Any] | None:
+    return _json_object_from_path(_path_from_env("GITHUB_EVENT_PATH"))
+
+
 def _expected_squid_tag(version: str) -> str:
     return f"SQUID_{version.replace('.', '_')}"
+
+
+def validate_service_name(value: str, *, parameter_name: str = "ServiceName") -> str:
+    resolved_value = value.strip()
+    if not resolved_value:
+        msg = f"{parameter_name} must contain at least one alphanumeric character."
+        raise ValueError(msg)
+    if len(resolved_value) > 32:
+        msg = (
+            f"{parameter_name} '{resolved_value}' must be 32 characters or fewer because "
+            "Squid's -n option rejects longer Windows service names."
+        )
+        raise ValueError(msg)
+    if re.fullmatch(r"[A-Za-z0-9]+", resolved_value) is None:
+        msg = (
+            f"{parameter_name} '{resolved_value}' must be alphanumeric because Squid's "
+            "-n option rejects punctuation characters such as '-'."
+        )
+        raise ValueError(msg)
+
+    return resolved_value
 
 
 def _first_existing_path(candidates: tuple[Path, ...]) -> Path | None:
@@ -42,12 +166,118 @@ def _first_existing_path(candidates: tuple[Path, ...]) -> Path | None:
 class GitHubActionsContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    enabled: bool = Field(default_factory=lambda: os.getenv("GITHUB_ACTIONS", "").lower() == "true")
+    enabled: bool = Field(default_factory=lambda: _bool_from_env("GITHUB_ACTIONS") is True)
     workspace: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_WORKSPACE"))
-    repository: str | None = Field(default_factory=lambda: os.getenv("GITHUB_REPOSITORY"))
-    ref: str | None = Field(default_factory=lambda: os.getenv("GITHUB_REF"))
-    sha: str | None = Field(default_factory=lambda: os.getenv("GITHUB_SHA"))
-    actor: str | None = Field(default_factory=lambda: os.getenv("GITHUB_ACTOR"))
+    repository: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_REPOSITORY"))
+    server_url: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_SERVER_URL"))
+    api_url: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_API_URL"))
+    graphql_url: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_GRAPHQL_URL"))
+    ref: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_REF"))
+    ref_name: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_REF_NAME"))
+    ref_type: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_REF_TYPE"))
+    ref_protected: bool | None = Field(
+        default_factory=lambda: _bool_from_env("GITHUB_REF_PROTECTED")
+    )
+    sha: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_SHA"))
+    actor: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_ACTOR"))
+    actor_id: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_ACTOR_ID"))
+    triggering_actor: str | None = Field(
+        default_factory=lambda: _string_from_env("GITHUB_TRIGGERING_ACTOR")
+    )
+    base_ref: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_BASE_REF"))
+    head_ref: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_HEAD_REF"))
+    base_sha: str | None = None
+    head_sha: str | None = None
+    event_name: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_EVENT_NAME"))
+    event_path: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_EVENT_PATH"))
+    event_payload: dict[str, Any] | None = Field(default_factory=_event_payload_from_env)
+    event_action: str | None = None
+    pull_request_number: int | None = None
+    job: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_JOB"))
+    run_id: int | None = Field(default_factory=lambda: _int_from_env("GITHUB_RUN_ID"))
+    run_number: int | None = Field(default_factory=lambda: _int_from_env("GITHUB_RUN_NUMBER"))
+    run_attempt: int | None = Field(default_factory=lambda: _int_from_env("GITHUB_RUN_ATTEMPT"))
+    workflow: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_WORKFLOW"))
+    workflow_ref: str | None = Field(
+        default_factory=lambda: _string_from_env("GITHUB_WORKFLOW_REF")
+    )
+    workflow_sha: str | None = Field(
+        default_factory=lambda: _string_from_env("GITHUB_WORKFLOW_SHA")
+    )
+    action: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_ACTION"))
+    action_path: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_ACTION_PATH"))
+    action_ref: str | None = Field(default_factory=lambda: _string_from_env("GITHUB_ACTION_REF"))
+    action_repository: str | None = Field(
+        default_factory=lambda: _string_from_env("GITHUB_ACTION_REPOSITORY")
+    )
+    output_path: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_OUTPUT"))
+    env_path: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_ENV"))
+    path_file: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_PATH"))
+    step_summary_path: Path | None = Field(
+        default_factory=lambda: _path_from_env("GITHUB_STEP_SUMMARY")
+    )
+    state_path: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_STATE"))
+
+    @model_validator(mode="after")
+    def populate_event_details(self) -> GitHubActionsContext:
+        if self.event_payload is None:
+            return self
+
+        updates: dict[str, object] = {}
+        if self.repository is None:
+            repository = _string_at_path(self.event_payload, "repository", "full_name")
+            if repository is not None:
+                updates["repository"] = repository
+
+        if self.event_action is None:
+            event_action = _string_at_path(self.event_payload, "action")
+            if event_action is not None:
+                updates["event_action"] = event_action
+
+        if self.pull_request_number is None:
+            pull_request_number = _pull_request_number_from_event(self.event_payload)
+            if pull_request_number is not None:
+                updates["pull_request_number"] = pull_request_number
+
+        if self.base_ref is None:
+            base_ref = _string_at_path(self.event_payload, "pull_request", "base", "ref")
+            if base_ref is not None:
+                updates["base_ref"] = base_ref
+
+        if self.head_ref is None:
+            head_ref = _string_at_path(self.event_payload, "pull_request", "head", "ref")
+            if head_ref is not None:
+                updates["head_ref"] = head_ref
+
+        if self.base_sha is None:
+            base_sha = _string_at_path(self.event_payload, "pull_request", "base", "sha")
+            if base_sha is not None:
+                updates["base_sha"] = base_sha
+
+        if self.head_sha is None:
+            head_sha = _string_at_path(self.event_payload, "pull_request", "head", "sha")
+            if head_sha is not None:
+                updates["head_sha"] = head_sha
+
+        if self.sha is None:
+            sha = _string_at_path(self.event_payload, "after") or _string_at_path(
+                self.event_payload,
+                "pull_request",
+                "head",
+                "sha",
+            )
+            if sha is not None:
+                updates["sha"] = sha
+
+        if self.actor is None:
+            actor = _string_at_path(self.event_payload, "sender", "login")
+            if actor is not None:
+                updates["actor"] = actor
+
+        if updates:
+            return self.model_copy(update=updates)
+
+        return self
 
 
 class RepositoryPaths(BaseModel):
@@ -101,6 +331,8 @@ class SquidBuildLayout(BaseModel):
     sources_root: Path
     work_root: Path
     conan_output_root: Path
+    conan_build_root: Path
+    conan_install_root: Path
     conan_generators_root: Path
     repo_lockfile_path: Path
     build_lock_path: Path
@@ -128,8 +360,12 @@ class SquidBuildLayout(BaseModel):
             sources_root=build_root / "sources" / profile_stem,
             work_root=build_root / profile_stem,
             conan_output_root=build_root / "conan" / profile_stem,
+            conan_build_root=build_root / "conan" / profile_stem / "build" / configuration_label,
+            conan_install_root=(
+                build_root / "conan" / profile_stem / "build" / configuration_label / "package"
+            ),
             conan_generators_root=(
-                build_root / "conan" / profile_stem / f"build-{configuration_label}" / "conan"
+                build_root / "conan" / profile_stem / "build" / configuration_label / "conan"
             ),
             repo_lockfile_path=repository_root / "conan" / "lockfiles" / f"{profile_stem}.lock",
             build_lock_path=build_root / "locks" / f"{profile_stem}.lock",
@@ -362,10 +598,7 @@ class BundlePackageOptions(BaseModel):
     @field_validator("service_name")
     @classmethod
     def validate_service_name(cls, value: str) -> str:
-        if not re.fullmatch(r"[A-Za-z0-9]{1,32}", value):
-            msg = "Service names must be alphanumeric and at most 32 characters long."
-            raise ValueError(msg)
-        return value
+        return validate_service_name(value, parameter_name="ServiceName")
 
     @model_validator(mode="after")
     def validate_bundle_dependencies(self) -> BundlePackageOptions:
@@ -378,6 +611,67 @@ class BundlePackageOptions(BaseModel):
             raise ValueError(msg)
 
         return self
+
+
+class SmokeTestOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repository_root: Path | None = None
+    configuration: BuildConfiguration = BuildConfiguration.RELEASE
+    build_root: Path | None = None
+    squid_stage_root: Path | None = None
+    metadata_path: Path | None = None
+    binary_path: Path | None = None
+    require_notices: bool = False
+
+
+class SmokeTestResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    binary_path: Path
+    install_root: Path
+    version: str
+    executable_directories: tuple[Path, ...]
+    runtime_dlls: tuple[str, ...]
+    runtime_notice_packages: tuple[dict[str, Any], ...]
+    tray_notice_packages: tuple[dict[str, Any], ...]
+    notices_path: Path | None = None
+    security_file_certgen_path: Path | None = None
+
+
+class ServiceRunnerValidationOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repository_root: Path | None = None
+    configuration: BuildConfiguration = BuildConfiguration.RELEASE
+    build_root: Path | None = None
+    artifact_root: Path | None = None
+    service_name: str | None = None
+    service_name_prefix: str = "Squid4WinRunner"
+    install_root: Path | None = None
+    service_timeout_seconds: Annotated[int, Field(ge=1, le=600)] = 60
+    allow_non_runner_execution: bool = False
+    require_tray: bool = True
+    require_notices: bool = True
+
+    @field_validator("service_name")
+    @classmethod
+    def validate_explicit_service_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return validate_service_name(value, parameter_name="ServiceName")
+
+
+class ServiceRunnerValidationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    validation_root: Path
+    install_root: Path
+    msi_path: Path | None = None
+    service_name: str
+    service_command_line: str | None = None
+    cleanup_actions: tuple[str, ...]
+    cleanup_issues: tuple[str, ...]
 
 
 class PackageManagerExportOptions(BaseModel):

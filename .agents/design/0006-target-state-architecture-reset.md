@@ -20,12 +20,12 @@ toward without overstating what has already been validated locally or in CI.
 The target architecture is:
 
 - keep a single self-contained native Squid Conan recipe at the repo root; it
-  owns Squid source retrieval, patch application, native MSYS2 + MinGW-w64
-  build, staged bundle assembly, native runtime adjacency, and shipped native
-  notice harvesting
+  owns Squid source retrieval, patch application, and native MSYS2 + MinGW-w64
+  build only
 - move repo-level automation to Python 3.14 + `uv`; new developer entry points,
-  CI helpers, and metadata update flows should land there instead of in new
-  repo-level PowerShell wrappers
+  CI helpers, staged bundle assembly, runtime adjacency, notice harvesting,
+  validation, packaging, and metadata update flows should land there instead of
+  in new repo-level PowerShell wrappers
 - build the tray app directly with `.NET 10` from `src\tray\Squid4Win.Tray`; do
   not model it as a Conan package dependency of the root Squid product
 - keep PowerShell as a narrow Windows-specific exception for MSI custom actions
@@ -67,7 +67,8 @@ The target architecture is:
 - Contributor docs, Copilot guidance, and ADRs must stop describing the tray as
   a Conan-packaged dependency target.
 - The root `conanfile.py` remains the single source of truth for native Squid
-  build inputs and bundle assembly.
+  build inputs, while the Python automation package owns stage assembly,
+  packaging, and repo-level validation.
 - The repo must keep `CONAN_HOME` repo-local at `.\.conan2`.
 - Markdown changes should keep markdownlint passing and align with
   `skills\gfm\SKILL.md` plus the repo-owned markdown audit direction.
@@ -79,18 +80,22 @@ The target architecture is:
 - Update `README.md`, `AGENTS.md`, and `.github\copilot-instructions.md` when
   this target state changes.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
-  `conandata.yml` aligned when the Squid pin changes. Until the Python
-  replacement lands, existing update scripts may remain temporary fallbacks.
+  `conandata.yml` aligned when the Squid pin changes. Prefer
+  `uv run squid4win-automation upstream-version --execute`; keep
+  `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
+  Python automation environment is unavailable.
 - Preserve current artifact names `squid4win.msi` and
   `squid4win-portable.zip` unless downstream package metadata changes too.
 - Keep live feed publication credential-gated.
 - Do not disturb externally synced `.agents\skills\` content when landing
   repo-owned documentation guidance under `skills\`, which may be symlinked
   back into `.agents\skills\` for discovery.
-- The last cited local validation still comes from the legacy PowerShell +
-  tray-Conan implementation: native build, install tree creation, staged bundle
-  assembly, portable zip creation, and MSI build. Clean-host and end-to-end
-  target-state validation are still pending.
+- Current cited local validation now includes the Python-owned `squid-build`,
+  `smoke-test`, and `bundle-package` path, including local portable zip and MSI
+  generation. Workflow YAMLs have been migrated from PowerShell validator entry
+  points to Python CLI commands. Clean-host installer and isolated
+  installed-service lifecycle validation on a dedicated Windows runner are still
+  pending.
 - The installed service helper currently validates generated configs with
   `squid.exe -k parse`, initializes cache directories with `squid.exe -z`, and
   then registers the named Windows service with `squid.exe -i`.

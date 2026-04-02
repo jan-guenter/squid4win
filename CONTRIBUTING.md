@@ -23,9 +23,10 @@ and the distinction between validated behavior and planned target-state work.
 
 Keep your change aligned with these current project rules:
 
-- the repo root `conanfile.py` remains the single primary Conan recipe for the
-  native Squid build, staged bundle assembly, and related native packaging
-  inputs
+- the repo root `conanfile.py` is the single primary Conan recipe for the
+  native Squid build only; Python 3.14 + `uv` owns stage assembly, runtime DLL
+  adjacency, notice harvesting, smoke testing, bundle packaging, and
+  service-runner validation orchestration
 - repo-level automation is moving to Python 3.14 + `uv`
 - the tray app is moving toward a direct `.NET 10` build from
   `src\tray\Squid4Win.Tray`
@@ -36,11 +37,12 @@ Keep your change aligned with these current project rules:
 
 ## Current implementation versus target state
 
-The checked-in core build and update workflows now use Python 3.14 + `uv` and
-the direct `.NET 10` tray build path. Some packaging, publication, and Windows
-validation helpers still bridge through the current `scripts\*.ps1` surface,
-and those bridges remain part of the cited implementation until the remaining
-Python CLI coverage lands.
+The checked-in core build, staging, validation, and packaging workflows now use
+Python 3.14 + `uv` and the direct `.NET 10` tray build path. The major
+repo-level PowerShell orchestration scripts have been removed; the remaining
+`scripts\*.ps1` files are narrow exceptions: the installed-payload service
+helper, optional Authenticode signing, the version-update fallback, and small
+utilities.
 
 When you add new contributor or CI automation:
 

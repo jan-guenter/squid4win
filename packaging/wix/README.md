@@ -23,11 +23,11 @@ Windows layout:
   `packaging\defaults\squid.conf.template` if the file is not already present
 - `uv run squid4win-automation bundle-package --service-name ... --execute`
   is the supported repo-level entry point for building the MSI from the staged
-  payload, while `scripts\Build-Installer.ps1 -ServiceName ...` remains an
-  internal validation helper so `.github\workflows\service-runner-validation.yml`
-  can install isolated temporary instances on Windows runners; Squid's upstream
-  `-n` contract requires that override to stay alphanumeric and no longer than
-  32 characters
+  payload, while
+  `uv run squid4win-automation service-runner-validation --execute`
+  is the supported isolated Windows-runner path for installing temporary MSI
+  instances with unique service names; Squid's upstream `-n` contract requires
+  that override to stay alphanumeric and no longer than 32 characters
 - the installed service helper validates generated configs with
   `squid.exe -k parse`, initializes cache directories with `squid.exe -z`, and
   then registers the named service

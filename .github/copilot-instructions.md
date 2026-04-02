@@ -8,9 +8,11 @@ the architecture reset.
 Repo-specific directives:
 
 - Preserve the target state: one self-contained native Squid Conan recipe at
-  the repo root owns Squid source retrieval, patch application, native
-  MSYS2/MinGW build, staged bundle assembly, and native notice/runtime
-  harvesting for shipped Squid artifacts.
+  the repo root owns Squid source retrieval, patch application, and native
+  MSYS2/MinGW build only.
+- Keep Python 3.14 + `uv` responsible for staged bundle assembly, runtime DLL
+  adjacency, notice harvesting, smoke testing, bundle packaging, and other
+  repo-level orchestration around the pure Conan output.
 - Move repo-level automation toward Python 3.14 + `uv`. Do not add new
   repository-wide PowerShell orchestration for build, packaging, release, or
   contributor workflows.
@@ -32,9 +34,8 @@ Repo-specific directives:
   `uv run squid4win-automation upstream-version --execute`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
-- Keep staged native notice harvesting synchronized with the root
-  `conanfile.py`, `conandata.yml`, and any direct tray release assets that
-  ship.
+- Keep staged native notice harvesting synchronized between the Python
+  automation, `conandata.yml`, and any direct tray release assets that ship.
 - Treat `.agents\design\*.md` as project memory. If an accepted design changes,
   update the ADR and preserve alternatives/history sections.
 - Treat `skills\` as the canonical home for repo-owned skills.
@@ -47,12 +48,11 @@ Repo-specific directives:
 - Keep MegaLinter rule files under `.github\linters\` and preserve `ty` as the
   companion Python type-check step until the repo intentionally adopts a
   MegaLinter-native replacement.
-- The last cited end-to-end validation still comes from the legacy PowerShell +
-  tray-Conan flow that predated the current Python-owned entry points.
-- Treat that legacy validation as historical proof only. Do not claim
-  target-state validation for Python 3.14 + `uv` orchestration, direct
-  `.NET 10` tray builds, clean-host installer behavior, or installed-service
-  plus tray lifecycle behavior unless it is explicitly cited.
+- Local target-state validation now includes the Python-owned `squid-build`,
+  `smoke-test`, and `bundle-package` path.
+- Do not claim clean-host installer behavior or installed-service plus tray
+  lifecycle validation after the workflow migration unless that validation is
+  explicitly cited.
 - Do not copy GPL code from `diladele/squid-windows`. Architectural inspiration
   is acceptable; source reuse is not.
 - Preserve current artifact names `squid4win.msi` and

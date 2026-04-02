@@ -6,8 +6,6 @@ sources:
 
 build:
   profile_name: "msys2-mingw-x64"
-  stage_root: "build\\install\\{configuration}"
-  service_name: "Squid4Win"
   host_triplet: "x86_64-w64-mingw32"
   tool_requires:
     - "msys2/cci.latest"
@@ -86,16 +84,7 @@ build:
     ac_cv_sizeof_off_t: "4"
     ac_cv_sizeof_size_t: "8"
   configure_args:
-    - "--disable-strict-error-checking"
-    - "--disable-dependency-tracking"
     - "--without-netfilter-conntrack"
-    - "--enable-auth-basic=DB,NCSA,POP3,RADIUS,SMB,SSPI,fake"
-    - "--enable-auth-digest=file"
-    - "--enable-auth-negotiate=SSPI"
-    - "--enable-external-acl-helpers=LM_group,SQL_session,delayer,wbinfo_group"
-    - "--with-openssl"
-    - "--enable-win32-service"
-    - "--enable-default-hostsfile"
 
 patches:
   "7.5":

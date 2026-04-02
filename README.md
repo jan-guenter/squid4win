@@ -8,9 +8,10 @@ Windows.
 The repository is being reset toward the target state defined in ADR `0006`:
 
 - one self-contained native Squid Conan recipe at the repo root owns Squid
-  source retrieval, patch application, native MSYS2 + MinGW-w64 build, staged
-  bundle assembly, and native notice/runtime harvesting for shipped Squid
-  artifacts
+  source retrieval, patch application, and native MSYS2 + MinGW-w64 build
+- Python 3.14 + `uv` owns repo-level stage assembly, runtime DLL adjacency,
+  notice harvesting, smoke testing, MSI/portable packaging, and release-helper
+  orchestration
 - repo-level contributor and CI automation moves to Python 3.14 + `uv` instead
   of additional PowerShell orchestration
 - the tray app builds directly with `.NET 10` from `src\tray\Squid4Win.Tray`
@@ -24,20 +25,20 @@ The repository is being reset toward the target state defined in ADR `0006`:
 
 ## Current validation status
 
-### Legacy validated path (pre-ADR 0006)
+### Cited local target-state validation
 
-The most recent cited validation comes from the pre-reset implementation:
+The current cited local validation for the reset architecture is:
 
-- local native Squid build on Windows
-- local install tree creation
-- staged bundle assembly
-- portable zip creation
-- MSI build from that staged payload
+- local `uv run squid4win-automation squid-build --execute --with-tray --with-runtime-dlls --with-packaging-support`
+- local `uv run squid4win-automation smoke-test --execute --configuration Release --require-notices`
+- local `uv run squid4win-automation bundle-package --execute --configuration Release --create-portable-zip`
+- generated local artifacts at `artifacts\squid4win-portable.zip` and
+  `artifacts\squid4win.msi`
 
-That legacy validation is useful project memory, but it does not prove the
-target-state Python 3.14 + `uv` orchestration, the direct `.NET 10` tray build
-path, or the narrowed installer-time PowerShell boundary. Keep docs explicit
-about that distinction.
+That validates the Python-owned build, staging, direct `.NET 10` tray
+integration, smoke-test, and packaging path on a development machine. It does
+not yet prove clean-host installer behavior or installed-service lifecycle
+validation on an isolated runner.
 
 ### Target-state validation still pending
 
@@ -45,10 +46,8 @@ The repository should not yet claim:
 
 - clean-host installer validation for the in-progress architecture reset
 - end-to-end installed-service plus tray lifecycle proof on a clean host
-- cited successful end-to-end validation of the Python 3.14 + `uv` automation
-  path
-- cited successful end-to-end validation of the direct `.NET 10` tray build
-  integration into released artifacts
+- cited successful execution of the Python `service-runner-validation` command
+  on a dedicated isolated Windows runner
 
 ## Contributor guardrails
 
@@ -75,13 +74,12 @@ The repository should not yet claim:
 ## Transitional implementation note
 
 The supported repo-level entry points for Squid builds, tray builds, bundle
-packaging, and Conan lockfile refresh now live under
+packaging, validation, metadata updates, and Conan lockfile refresh now live under
 `uv run squid4win-automation ...`.
 
 Some checked-in `scripts\*.ps1` files still remain for installer-time behavior,
-signing, smoke tests, dedicated installed-service validation, and historical
-fallbacks. Keep them narrow and do not extend them as the long-term
-orchestration model.
+optional signing, and historical update fallbacks. Keep them narrow and do not
+extend them as the long-term orchestration model.
 
 CI linting is now centered on MegaLinter via `.mega-linter.yml` and
 `.github\linters\`, with `ty` kept as a companion Python type-check step
@@ -111,13 +109,12 @@ Plan future contributor and CI work around:
 - internet access to ConanCenter so the native Squid recipe can restore its
   managed MSYS2 and MinGW toolchain inputs
 
-Current fallback validation may still rely on the older PowerShell helper
-scripts for smoke tests and installed-service lifecycle validation, but new
-contributor and CI automation should use `pyproject.toml`, `uv.lock`,
-Python 3.14, and `uv` as the primary repo-level automation path. The core
-automation commands — `squid-build`, `tray-build`, `bundle-package`, and
-`conan-lockfile-update` — are now native Python orchestration with no
-PowerShell bridge.
+Contributor and CI automation should use `pyproject.toml`, `uv.lock`, Python
+3.14, and `uv` as the primary repo-level automation path. The core automation
+commands — `squid-build`, `tray-build`, `bundle-package`, `smoke-test`,
+`service-runner-validation`, and `conan-lockfile-update` — are now native
+Python orchestration. `service-runner-validation` is intended for isolated
+admin-capable Windows runners rather than shared development machines.
 
 ## Repository map
 
@@ -131,8 +128,8 @@ PowerShell bridge.
   repo-owned skills to Copilot
 - `conanfile.py` and `conan\` - native Squid recipe inputs, patch metadata,
   host profiles, and lockfiles
-- `scripts\` - transitional PowerShell automation plus installer-time helper
-  scripts
+- `scripts\` - installer-time helper scripts plus remaining narrow PowerShell
+  exceptions such as optional signing and version-update fallback
 - `src\tray\Squid4Win.Tray\` - direct `.NET 10` tray app source
 - `packaging\wix\` - WiX v4 MSI authoring
 - `.github\workflows\` - CI and release automation; do not infer the long-term

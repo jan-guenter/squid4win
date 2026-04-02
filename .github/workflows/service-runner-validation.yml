@@ -100,10 +100,10 @@ jobs:
             --execute
 
       - name: Smoke test Squid
-        run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release -RequireNotices
+        run: uv run squid4win-automation smoke-test --execute --configuration Release --require-notices
 
       - name: Validate installed service lifecycle
-        run: .\scripts\Invoke-ServiceRunnerValidation.ps1 -Configuration Release -RepositoryRoot $PWD.Path
+        run: uv run squid4win-automation service-runner-validation --execute --configuration Release
 
       - name: Upload runner validation artifacts
         if: ${{ failure() }}

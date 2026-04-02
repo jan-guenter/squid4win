@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import re
 import shutil
 import subprocess
+import time
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -12,6 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 import yaml
 
@@ -24,12 +27,19 @@ from squid4win.models import (
     ConanLockfileUpdateOptions,
     ProcessInvocation,
     RepositoryPaths,
+    ServiceRunnerValidationOptions,
+    ServiceRunnerValidationResult,
+    SmokeTestOptions,
+    SmokeTestResult,
     SquidBuildLayout,
     SquidBuildOptions,
     TrayBuildLayout,
     TrayBuildOptions,
+    validate_service_name,
 )
 from squid4win.paths import resolve_path
+from squid4win.utils.actions import append_step_summary
+from squid4win.utils.actions import context as github_actions_context
 
 if TYPE_CHECKING:
     from squid4win.runner import PlanRunner
@@ -57,6 +67,16 @@ class TrayContext:
     license_path: Path
 
 
+@dataclass(frozen=True)
+class CleanupResult:
+    actions: tuple[str, ...]
+    issues: tuple[str, ...]
+
+    @property
+    def clean(self) -> bool:
+        return not self.issues
+
+
 def _resolved_or_default(value: Path | None, default: Path, *, base: Path) -> Path:
     return resolve_path(value, base=base) or default
 
@@ -71,10 +91,6 @@ def _string_list(value: object) -> list[str]:
         if text:
             strings.append(text)
     return strings
-
-
-def _bool_text(enabled: bool) -> str:
-    return str(enabled)
 
 
 def _powershell_executable() -> str:
@@ -129,20 +145,8 @@ def _load_build_settings(paths: RepositoryPaths) -> dict[str, Any]:
 
 def _recipe_option_arguments(
     paths: RepositoryPaths,
-    *,
-    with_tray: bool,
-    with_runtime_dlls: bool,
-    with_packaging_support: bool,
 ) -> list[str]:
-    arguments = [
-        "-o",
-        f"&:with_tray={_bool_text(with_tray)}",
-        "-o",
-        f"&:with_runtime_dlls={_bool_text(with_runtime_dlls)}",
-        "-o",
-        f"&:with_packaging_support={_bool_text(with_packaging_support)}",
-    ]
-
+    arguments: list[str] = []
     build_settings = _load_build_settings(paths)
     msys2_settings = build_settings.get("msys2") or {}
     if isinstance(msys2_settings, dict):
@@ -240,6 +244,781 @@ def _resolve_tray_context(options: TrayBuildOptions) -> TrayContext:
         package_root=package_root,
         license_path=paths.repository_root / "LICENSE",
     )
+
+
+def _load_conan_graph_info(
+    context: ConanContext,
+    *,
+    build_profile: str,
+    configuration: BuildConfiguration,
+) -> dict[str, Any]:
+    completed = subprocess.run(
+        (
+            "conan",
+            "graph",
+            "info",
+            str(context.paths.repository_root),
+            "--profile:host",
+            str(context.host_profile_path),
+            "--profile:build",
+            build_profile,
+            "--lockfile",
+            str(context.lockfile_path),
+            "-s:h",
+            f"build_type={configuration.value}",
+            "-s:b",
+            f"build_type={configuration.value}",
+            _BUILD_MISSING_ARGUMENT,
+            *_recipe_option_arguments(context.paths),
+            "--format=json",
+        ),
+        cwd=context.paths.repository_root,
+        env={**os.environ, **_base_conan_environment(context.paths)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        output = "\n".join(
+            part.strip()
+            for part in (completed.stdout, completed.stderr)
+            if part is not None and part.strip()
+        )
+        msg = output or "conan graph info failed."
+        raise RuntimeError(msg)
+
+    loaded = json.loads(completed.stdout)
+    if not isinstance(loaded, dict):
+        msg = "Expected 'conan graph info --format=json' to return a JSON object."
+        raise ValueError(msg)
+
+    return cast(dict[str, Any], loaded)
+
+
+def _conan_graph_nodes(graph_info: dict[str, Any]) -> list[dict[str, Any]]:
+    graph = graph_info.get("graph")
+    if not isinstance(graph, dict):
+        msg = "Expected the Conan graph info payload to contain a 'graph' object."
+        raise ValueError(msg)
+
+    raw_nodes = graph.get("nodes")
+    if not isinstance(raw_nodes, dict):
+        msg = "Expected the Conan graph info payload to contain graph.nodes."
+        raise ValueError(msg)
+
+    return [cast(dict[str, Any], node) for node in raw_nodes.values() if isinstance(node, dict)]
+
+
+def _graph_dependency_node(
+    graph_info: dict[str, Any],
+    dependency_name: str,
+) -> dict[str, Any]:
+    for node in _conan_graph_nodes(graph_info):
+        node_name = str(node.get("name", "")).strip()
+        node_ref = str(node.get("ref", "")).strip()
+        if node_name == dependency_name or node_ref.startswith(f"{dependency_name}/"):
+            return node
+
+    msg = f"Unable to locate the '{dependency_name}' dependency in the Conan graph."
+    raise FileNotFoundError(msg)
+
+
+def _package_reference_from_graph_node(graph_node: dict[str, Any]) -> str:
+    ref = str(graph_node.get("ref", "")).strip()
+    package_id = str(graph_node.get("package_id", "")).strip()
+    prev = str(graph_node.get("prev", "")).strip()
+    if not ref or not package_id or not prev:
+        msg = f"Unable to derive a Conan package reference from graph node {graph_node!r}."
+        raise ValueError(msg)
+
+    return f"{ref}:{package_id}#{prev}"
+
+
+def _resolve_dependency_package_root(
+    paths: RepositoryPaths,
+    graph_node: dict[str, Any],
+) -> Path:
+    completed = subprocess.run(
+        ("conan", "cache", "path", _package_reference_from_graph_node(graph_node)),
+        cwd=paths.repository_root,
+        env={**os.environ, **_base_conan_environment(paths)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        output = "\n".join(
+            part.strip()
+            for part in (completed.stdout, completed.stderr)
+            if part is not None and part.strip()
+        )
+        msg = output or "conan cache path failed."
+        raise RuntimeError(msg)
+
+    package_root = Path(completed.stdout.strip())
+    if not package_root.is_dir():
+        msg = f"Resolved Conan package root '{package_root}' does not exist."
+        raise FileNotFoundError(msg)
+
+    return package_root
+
+
+def _runtime_dependency_names(build_settings: dict[str, Any]) -> list[str]:
+    dependency_names = ["mingw-builds", "msys2"]
+    for raw_notice_entry in cast(list[Any], build_settings.get("runtime_notice_artifacts", [])):
+        if not isinstance(raw_notice_entry, dict):
+            continue
+
+        dependency_name = str(raw_notice_entry.get("dependency", "")).strip()
+        if dependency_name:
+            dependency_names.append(dependency_name)
+
+    return _deduplicate(dependency_names)
+
+
+def _resolve_dependency_metadata(
+    context: ConanContext,
+    *,
+    build_profile: str,
+    configuration: BuildConfiguration,
+    dependency_names: list[str],
+) -> tuple[dict[str, str], dict[str, Path]]:
+    graph_info = _load_conan_graph_info(
+        context,
+        build_profile=build_profile,
+        configuration=configuration,
+    )
+    dependency_refs: dict[str, str] = {}
+    dependency_roots: dict[str, Path] = {}
+    for dependency_name in dependency_names:
+        graph_node = _graph_dependency_node(graph_info, dependency_name)
+        dependency_ref = str(graph_node.get("ref", "")).strip()
+        if not dependency_ref:
+            msg = f"Unable to resolve a Conan reference for '{dependency_name}'."
+            raise ValueError(msg)
+
+        dependency_refs[dependency_name] = dependency_ref
+        dependency_roots[dependency_name] = _resolve_dependency_package_root(
+            context.paths,
+            graph_node,
+        )
+
+    return dependency_refs, dependency_roots
+
+
+def _append_existing_directory(
+    directories: list[Path],
+    seen_directories: set[str],
+    candidate: Path,
+) -> None:
+    if not candidate.is_dir():
+        return
+
+    candidate_key = os.path.normcase(os.fspath(candidate.resolve(strict=False)))
+    if candidate_key in seen_directories:
+        return
+
+    seen_directories.add(candidate_key)
+    directories.append(candidate)
+
+
+def _runtime_dll_source_directories(
+    dependency_roots: dict[str, Path],
+    *,
+    msys2_env_directory: str,
+) -> list[Path]:
+    source_directories: list[Path] = []
+    seen_directories: set[str] = set()
+
+    mingw_root = dependency_roots.get("mingw-builds")
+    if mingw_root is not None:
+        _append_existing_directory(source_directories, seen_directories, mingw_root / "bin")
+
+    msys2_root = dependency_roots.get("msys2")
+    if msys2_root is not None:
+        _append_existing_directory(
+            source_directories,
+            seen_directories,
+            msys2_root / "bin" / "msys64" / msys2_env_directory / "bin",
+        )
+        _append_existing_directory(
+            source_directories,
+            seen_directories,
+            msys2_root / "bin" / "msys64" / "usr" / "bin",
+        )
+
+    if not source_directories:
+        msg = "Unable to locate runtime DLL source directories from the Conan dependency graph."
+        raise FileNotFoundError(msg)
+
+    return source_directories
+
+
+def _native_executable_directories(bundle_root: Path) -> list[Path]:
+    executable_directories = sorted(
+        {executable_path.parent for executable_path in bundle_root.rglob("*.exe")},
+        key=lambda path: os.fspath(path).lower(),
+    )
+    if not executable_directories:
+        msg = f"Expected at least one executable under '{bundle_root}'."
+        raise FileNotFoundError(msg)
+
+    return executable_directories
+
+
+def _require_squid_executable(bundle_root: Path) -> Path:
+    squid_candidates = (
+        bundle_root / "sbin" / "squid.exe",
+        bundle_root / "bin" / "squid.exe",
+    )
+    squid_executable = next(
+        (candidate for candidate in squid_candidates if candidate.is_file()),
+        None,
+    )
+    if squid_executable is None:
+        msg = f"Expected squid.exe under '{bundle_root}'."
+        raise FileNotFoundError(msg)
+
+    return squid_executable
+
+
+def _bundle_native_runtime_dlls(
+    bundle_root: Path,
+    build_settings: dict[str, Any],
+    dependency_roots: dict[str, Path],
+    *,
+    msys2_env_directory: str,
+) -> list[str]:
+    runtime_dlls = _string_list(build_settings.get("runtime_dlls", []))
+    if not runtime_dlls:
+        msg = "conandata.yml must declare build.runtime_dlls for the staged Windows bundle."
+        raise ValueError(msg)
+
+    runtime_dll_sources = _runtime_dll_source_directories(
+        dependency_roots,
+        msys2_env_directory=msys2_env_directory,
+    )
+    executable_directories = _native_executable_directories(bundle_root)
+    copied_runtime_dlls: list[str] = []
+    missing_runtime_dlls: list[str] = []
+    for runtime_dll in runtime_dlls:
+        runtime_dll_source_path = next(
+            (
+                source_directory / runtime_dll
+                for source_directory in runtime_dll_sources
+                if (source_directory / runtime_dll).is_file()
+            ),
+            None,
+        )
+        if runtime_dll_source_path is None:
+            missing_runtime_dlls.append(runtime_dll)
+            continue
+
+        for executable_directory in executable_directories:
+            shutil.copy2(runtime_dll_source_path, executable_directory / runtime_dll)
+        copied_runtime_dlls.append(runtime_dll)
+
+    if missing_runtime_dlls:
+        msg = (
+            "Unable to locate the required Windows runtime DLLs in the Conan dependency graph: "
+            + ", ".join(missing_runtime_dlls)
+            + "."
+        )
+        raise FileNotFoundError(msg)
+
+    return copied_runtime_dlls
+
+
+def _copy_runtime_notice_files(
+    bundle_root: Path,
+    destination_root: Path,
+    dependency_root: Path,
+    *,
+    notice_id: str,
+    notice_entry: dict[str, Any],
+) -> list[str]:
+    destination_root.mkdir(parents=True, exist_ok=True)
+    copied_notice_files: list[str] = []
+    for relative_path in _deduplicate(_string_list(notice_entry.get("license_files", []))):
+        source_path = dependency_root / Path(relative_path)
+        if not source_path.is_file():
+            msg = (
+                f"Unable to locate the runtime notice file '{relative_path}' for entry "
+                f"'{notice_id}' under '{dependency_root}'."
+            )
+            raise FileNotFoundError(msg)
+
+        destination_path = destination_root / source_path.name
+        shutil.copy2(source_path, destination_path)
+        copied_notice_files.append(_relative_package_path(destination_path, bundle_root))
+
+    if not copied_notice_files:
+        msg = f"Runtime notice entry '{notice_id}' did not resolve any notice files."
+        raise RuntimeError(msg)
+
+    return copied_notice_files
+
+
+def _validate_runtime_notice_coverage(
+    bundled_runtime_dlls: list[str],
+    declared_runtime_dlls: set[str],
+) -> None:
+    bundled_runtime_dll_set = set(bundled_runtime_dlls)
+    missing_notice_entries = sorted(bundled_runtime_dll_set - declared_runtime_dlls)
+    if missing_notice_entries:
+        msg = (
+            "The bundled Windows runtime DLLs are missing notice mappings in conandata.yml: "
+            + ", ".join(missing_notice_entries)
+            + "."
+        )
+        raise ValueError(msg)
+
+    unused_notice_entries = sorted(declared_runtime_dlls - bundled_runtime_dll_set)
+    if unused_notice_entries:
+        msg = (
+            "build.runtime_notice_artifacts declares DLLs that were not bundled into the "
+            "staged payload: "
+            + ", ".join(unused_notice_entries)
+            + "."
+        )
+        raise ValueError(msg)
+
+
+def _harvest_runtime_notice_bundle(
+    bundle_root: Path,
+    build_settings: dict[str, Any],
+    bundled_runtime_dlls: list[str],
+    dependency_roots: dict[str, Path],
+    dependency_refs: dict[str, str],
+) -> list[dict[str, Any]]:
+    raw_notice_entries = cast(list[Any], build_settings.get("runtime_notice_artifacts", []))
+    if not raw_notice_entries:
+        msg = "conandata.yml must declare build.runtime_notice_artifacts."
+        raise ValueError(msg)
+
+    notice_root = bundle_root / "licenses" / "third-party" / "windows-runtime"
+    declared_runtime_dlls: set[str] = set()
+    harvested_notice_entries: list[dict[str, Any]] = []
+    for raw_notice_entry in raw_notice_entries:
+        if not isinstance(raw_notice_entry, dict):
+            msg = "Runtime notice entries in conandata.yml must be mappings."
+            raise ValueError(msg)
+
+        notice_entry = cast(dict[str, Any], raw_notice_entry)
+        notice_id = str(notice_entry.get("id", "")).strip()
+        if not notice_id:
+            msg = "Each build.runtime_notice_artifacts entry must declare a non-empty id."
+            raise ValueError(msg)
+
+        runtime_dlls = _deduplicate(_string_list(notice_entry.get("dlls", [])))
+        if not runtime_dlls:
+            msg = f"Runtime notice entry '{notice_id}' must declare at least one bundled DLL."
+            raise ValueError(msg)
+
+        dependency_name = str(notice_entry.get("dependency", "")).strip()
+        if not dependency_name:
+            msg = f"Runtime notice entry '{notice_id}' must declare a dependency."
+            raise ValueError(msg)
+
+        dependency_root = dependency_roots.get(dependency_name)
+        if dependency_root is None:
+            msg = f"Unable to locate dependency '{dependency_name}' for '{notice_id}'."
+            raise FileNotFoundError(msg)
+
+        copied_notice_files = _copy_runtime_notice_files(
+            bundle_root,
+            notice_root / notice_id,
+            dependency_root,
+            notice_id=notice_id,
+            notice_entry=notice_entry,
+        )
+        harvested_notice_entries.append(
+            {
+                "id": notice_id,
+                "name": str(notice_entry.get("name", notice_id)).strip(),
+                "package": str(notice_entry.get("package", notice_id)).strip(),
+                "source_dependency": dependency_refs.get(dependency_name, dependency_name),
+                "license": str(notice_entry.get("license", "")).strip(),
+                "project_url": str(notice_entry.get("project_url", "")).strip(),
+                "dlls": runtime_dlls,
+                "notice_files": copied_notice_files,
+            }
+        )
+        declared_runtime_dlls.update(runtime_dlls)
+
+    _validate_runtime_notice_coverage(bundled_runtime_dlls, declared_runtime_dlls)
+    return harvested_notice_entries
+
+
+def _collect_tray_notice_bundle(
+    bundle_root: Path,
+    tray_package_root: Path,
+) -> list[dict[str, Any]]:
+    manifest_path = tray_package_root / "licenses" / "third-party-package-manifest.json"
+    if not manifest_path.is_file():
+        msg = f"Expected the tray third-party notice manifest at '{manifest_path}'."
+        raise FileNotFoundError(msg)
+
+    manifest = _load_json_object(manifest_path)
+    tray_notice_packages: list[dict[str, Any]] = []
+    for raw_package in cast(list[Any], manifest.get("packages", [])):
+        if not isinstance(raw_package, dict):
+            msg = f"Unexpected tray notice entry in '{manifest_path}'."
+            raise ValueError(msg)
+
+        package_entry = cast(dict[str, Any], dict(raw_package))
+        copied_notice_files: list[str] = []
+        for notice_file in _deduplicate(_string_list(package_entry.get("notice_files", []))):
+            source_path = tray_package_root / Path(notice_file)
+            if not source_path.is_file():
+                msg = (
+                    f"Unable to locate the tray third-party notice file '{notice_file}' "
+                    f"under '{tray_package_root}'."
+                )
+                raise FileNotFoundError(msg)
+
+            destination_path = bundle_root / Path(notice_file)
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, destination_path)
+            copied_notice_files.append(_relative_package_path(destination_path, bundle_root))
+
+        package_entry["notice_files"] = copied_notice_files
+        package_entry["shipped_assets"] = _deduplicate(
+            _string_list(package_entry.get("shipped_assets", []))
+        )
+        tray_notice_packages.append(package_entry)
+
+    return tray_notice_packages
+
+
+def _tray_source_manifest(
+    repository_root: Path,
+    tray_package_root: Path,
+    tray_notice_packages: list[dict[str, Any]],
+) -> dict[str, Any]:
+    tray_manifest: dict[str, Any] = {
+        "project": "src/tray/Squid4Win.Tray",
+        "third_party_packages": tray_notice_packages,
+    }
+    try:
+        relative_package_root = tray_package_root.resolve(strict=False).relative_to(
+            repository_root.resolve(strict=False)
+        )
+    except ValueError:
+        return tray_manifest
+
+    tray_manifest["package_root"] = relative_package_root.as_posix()
+    return tray_manifest
+
+
+def _runtime_notice_lines(runtime_notice_packages: list[dict[str, Any]]) -> list[str]:
+    notice_lines: list[str] = []
+    for notice_entry in runtime_notice_packages:
+        asset_list = ", ".join(
+            [
+                str(asset).strip()
+                for asset in cast(list[Any], notice_entry.get("dlls", []))
+                if str(asset).strip()
+            ]
+        )
+        entry_line = f"- {notice_entry.get('name', notice_entry.get('id', 'runtime'))}"
+        if asset_list:
+            entry_line += f" [{asset_list}]"
+        if notice_entry.get("license"):
+            entry_line += f" - license: {notice_entry['license']}"
+        if notice_entry.get("source_dependency"):
+            entry_line += f"; source: {notice_entry['source_dependency']}"
+        notice_lines.append(entry_line)
+        for notice_file in cast(list[Any], notice_entry.get("notice_files", [])):
+            notice_lines.append(f"  - {notice_file}")
+
+    return notice_lines
+
+
+def _tray_notice_lines(tray_notice_packages: list[dict[str, Any]]) -> list[str]:
+    notice_lines: list[str] = []
+    for package_entry in tray_notice_packages:
+        asset_list = ", ".join(
+            [
+                str(asset).strip()
+                for asset in cast(list[Any], package_entry.get("shipped_assets", []))
+                if str(asset).strip()
+            ]
+        )
+        entry_line = f"- {package_entry.get('id', 'tray-package')}"
+        if asset_list:
+            entry_line += f" [{asset_list}]"
+        if package_entry.get("license"):
+            entry_line += f" - license: {package_entry['license']}"
+        if package_entry.get("project_url"):
+            entry_line += f"; project: {package_entry['project_url']}"
+        notice_lines.append(entry_line)
+        for notice_file in cast(list[Any], package_entry.get("notice_files", [])):
+            notice_lines.append(f"  - {notice_file}")
+
+    return notice_lines
+
+
+def _third_party_notice_lines(
+    metadata: dict[str, Any],
+    runtime_notice_packages: list[dict[str, Any]],
+    tray_notice_packages: list[dict[str, Any]],
+) -> list[str]:
+    notice_lines = [
+        "Squid4Win third-party notice bundle",
+        "",
+        (
+            f"This payload stages Squid {metadata['version']} from the upstream source archive "
+            "listed in licenses/source-manifest.json."
+        ),
+        (
+            "Repository-local automation and packaging code in this project are licensed "
+            "under GPL-2.0-or-later; see licenses/Repository-LICENSE.txt."
+        ),
+        "",
+        "Bundled notice files:",
+        "- licenses/source-manifest.json",
+        "- licenses/Repository-LICENSE.txt",
+        "- licenses/Squid-COPYING.txt (when the upstream source tree is available locally)",
+    ]
+
+    component_lines = [
+        *_runtime_notice_lines(runtime_notice_packages),
+        *_tray_notice_lines(tray_notice_packages),
+    ]
+    if component_lines:
+        notice_lines.extend(
+            (
+                "",
+                "Bundled third-party components:",
+                "- Squid upstream sources and license text: licenses/Squid-COPYING.txt",
+            )
+        )
+        notice_lines.extend(component_lines)
+
+    notice_lines.extend(
+        (
+            "",
+            "Machine-readable provenance for the staged payload lives in "
+            "licenses/source-manifest.json.",
+        )
+    )
+    return notice_lines
+
+
+def _write_source_manifest(
+    paths: RepositoryPaths,
+    licenses_root: Path,
+    metadata: dict[str, Any],
+    *,
+    configuration_label: str,
+    msys2_env_directory: str,
+    bundled_runtime_dlls: list[str],
+    runtime_notice_packages: list[dict[str, Any]],
+    tray_notice_packages: list[dict[str, Any]],
+    tray_package_root: Path | None,
+) -> None:
+    source_manifest: dict[str, Any] = {
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "configuration": configuration_label,
+        "squid": {
+            "version": str(metadata["version"]),
+            "tag": str(metadata["tag"]),
+            "source_archive": str(cast(dict[str, Any], metadata["assets"])["source_archive"]),
+            "source_signature": str(
+                cast(dict[str, Any], metadata["assets"]).get("source_signature", "")
+            ),
+            "source_archive_sha256": str(
+                cast(dict[str, Any], metadata["assets"])["source_archive_sha256"]
+            ),
+        },
+        "repository": {"name": "squid4win", "license": "GPL-2.0-or-later"},
+        "windows_runtime": {
+            "msys2_env": msys2_env_directory,
+            "dlls": bundled_runtime_dlls,
+            "packages": runtime_notice_packages,
+        },
+    }
+    if tray_package_root is not None:
+        source_manifest["tray"] = _tray_source_manifest(
+            paths.repository_root,
+            tray_package_root,
+            tray_notice_packages,
+        )
+
+    (licenses_root / "source-manifest.json").write_text(
+        json.dumps(source_manifest, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_third_party_notices(
+    bundle_root: Path,
+    metadata: dict[str, Any],
+    runtime_notice_packages: list[dict[str, Any]],
+    tray_notice_packages: list[dict[str, Any]],
+) -> None:
+    notices_content = "\n".join(
+        _third_party_notice_lines(metadata, runtime_notice_packages, tray_notice_packages)
+    )
+    (bundle_root / "THIRD-PARTY-NOTICES.txt").write_text(
+        notices_content + "\n",
+        encoding="utf-8",
+    )
+
+
+def _ensure_mime_configuration(
+    bundle_root: Path,
+    source_root: Path,
+    config_directory: Path,
+) -> None:
+    mime_destination_path = config_directory / "mime.conf"
+    if mime_destination_path.is_file():
+        return
+
+    mime_candidates = (
+        config_directory / "mime.conf.default",
+        source_root / "src" / "mime.conf.default",
+    )
+    mime_source_path = next(
+        (candidate for candidate in mime_candidates if candidate.is_file()),
+        None,
+    )
+    if mime_source_path is None:
+        msg = f"Unable to locate mime.conf for the assembled bundle under '{bundle_root}'."
+        raise FileNotFoundError(msg)
+
+    shutil.copy2(mime_source_path, mime_destination_path)
+
+
+def _copy_packaging_support_files(
+    paths: RepositoryPaths,
+    bundle_root: Path,
+    source_root: Path,
+) -> tuple[Path, Path, Path]:
+    licenses_root = bundle_root / "licenses"
+    installer_support_root = bundle_root / "installer"
+    config_directory = bundle_root / "etc"
+    for directory_path in (licenses_root, installer_support_root, config_directory):
+        directory_path.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(
+        paths.scripts_root / "installer" / "Manage-SquidService.ps1",
+        installer_support_root / "svc.ps1",
+    )
+    shutil.copy2(
+        paths.scripts_root / "Assert-SquidServiceName.ps1",
+        installer_support_root / "Assert-SquidServiceName.ps1",
+    )
+    shutil.copy2(
+        paths.repository_root / "packaging" / "defaults" / "squid.conf.template",
+        config_directory / "squid.conf.template",
+    )
+    (config_directory / "squid.conf").unlink(missing_ok=True)
+    shutil.copy2(paths.repository_root / "LICENSE", licenses_root / "Repository-LICENSE.txt")
+    _ensure_mime_configuration(bundle_root, source_root, config_directory)
+
+    squid_copying_path = source_root / "COPYING"
+    if squid_copying_path.is_file():
+        shutil.copy2(squid_copying_path, licenses_root / "Squid-COPYING.txt")
+
+    return licenses_root, installer_support_root, config_directory
+
+
+def _materialize_staged_squid_bundle(
+    context: ConanContext,
+    options: SquidBuildOptions,
+    release_metadata: dict[str, Any],
+) -> None:
+    if not context.layout.conan_install_root.is_dir():
+        msg = f"Expected the pure Conan install root at '{context.layout.conan_install_root}'."
+        raise FileNotFoundError(msg)
+
+    build_settings = _load_build_settings(context.paths)
+    msys2_settings = cast(dict[str, Any], build_settings.get("msys2") or {})
+    msys2_env_directory = str(msys2_settings.get("env", "mingw64")).lower()
+    stage_root = context.layout.stage_root
+    _remove_tree(stage_root)
+    stage_root.mkdir(parents=True, exist_ok=True)
+    _copy_directory_contents(context.layout.conan_install_root, stage_root)
+
+    tray_context: TrayContext | None = None
+    if options.with_tray:
+        tray_context = _resolve_tray_context(
+            TrayBuildOptions(
+                repository_root=context.paths.repository_root,
+                configuration=options.configuration,
+                build_root=context.build_root,
+            )
+        )
+        tray_bin_root = tray_context.package_root / "bin"
+        if not tray_bin_root.is_dir():
+            msg = f"Expected the tray package binaries at '{tray_bin_root}'."
+            raise FileNotFoundError(msg)
+
+        _copy_directory_contents(tray_bin_root, stage_root)
+
+    bundled_runtime_dlls: list[str] = []
+    runtime_notice_packages: list[dict[str, Any]] = []
+    dependency_refs: dict[str, str] = {}
+    dependency_roots: dict[str, Path] = {}
+    if options.with_runtime_dlls:
+        dependency_refs, dependency_roots = _resolve_dependency_metadata(
+            context,
+            build_profile=options.build_profile,
+            configuration=options.configuration,
+            dependency_names=_runtime_dependency_names(build_settings),
+        )
+        bundled_runtime_dlls = _bundle_native_runtime_dlls(
+            stage_root,
+            build_settings,
+            dependency_roots,
+            msys2_env_directory=msys2_env_directory,
+        )
+        runtime_notice_packages = _harvest_runtime_notice_bundle(
+            stage_root,
+            build_settings,
+            bundled_runtime_dlls,
+            dependency_roots,
+            dependency_refs,
+        )
+
+    if options.with_packaging_support:
+        source_root = (
+            context.paths.repository_root
+            / "sources"
+            / f"squid-{release_metadata['version']}"
+        )
+        licenses_root, _, _ = _copy_packaging_support_files(
+            context.paths,
+            stage_root,
+            source_root,
+        )
+        tray_notice_packages: list[dict[str, Any]] = []
+        if tray_context is not None:
+            tray_notice_packages = _collect_tray_notice_bundle(
+                stage_root,
+                tray_context.package_root,
+            )
+        _write_source_manifest(
+            context.paths,
+            licenses_root,
+            release_metadata,
+            configuration_label=context.layout.configuration_label,
+            msys2_env_directory=msys2_env_directory,
+            bundled_runtime_dlls=bundled_runtime_dlls,
+            runtime_notice_packages=runtime_notice_packages,
+            tray_notice_packages=tray_notice_packages,
+            tray_package_root=None if tray_context is None else tray_context.package_root,
+        )
+        _write_third_party_notices(
+            stage_root,
+            release_metadata,
+            runtime_notice_packages,
+            tray_notice_packages,
+        )
+
+    _require_squid_executable(stage_root)
 
 
 def _infer_build_root_from_stage_root(
@@ -385,9 +1164,9 @@ def _derive_installer_version(metadata_path: Path) -> str:
         normalized_parts.append(0)
 
     revision = 0
-    raw_run_number = os.getenv("GITHUB_RUN_NUMBER", "").strip()
-    if raw_run_number.isdigit():
-        revision = min(int(raw_run_number), 65535)
+    github_context = github_actions_context()
+    if github_context.run_number is not None:
+        revision = min(github_context.run_number, 65535)
 
     normalized_parts.append(revision)
     return ".".join(str(part) for part in normalized_parts)
@@ -612,12 +1391,15 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
         options.host_profile_path,
         options.lockfile_path,
     )
-    recipe_option_arguments = _recipe_option_arguments(
-        context.paths,
-        with_tray=options.with_tray,
-        with_runtime_dlls=options.with_runtime_dlls,
-        with_packaging_support=options.with_packaging_support,
-    )
+    if options.additional_configure_args:
+        msg = (
+            "The standalone Conan recipe no longer accepts ad hoc configure arguments from "
+            "the Python CLI. Express Squid feature changes through recipe options or "
+            "conandata.yml build defaults instead."
+        )
+        raise ValueError(msg)
+
+    recipe_option_arguments = _recipe_option_arguments(context.paths)
     base_environment = _base_conan_environment(context.paths)
 
     commands = [
@@ -662,27 +1444,9 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
             )
         )
 
-        build_environment = {
-            **base_environment,
-            "SQUID4WIN_MAKE_JOBS": str(options.make_jobs),
-        }
-        if options.additional_configure_args:
-            build_environment["SQUID4WIN_CONFIGURE_ARGS_JSON"] = json.dumps(
-                list(options.additional_configure_args)
-            )
-        if options.with_tray:
-            tray_context = _resolve_tray_context(
-                TrayBuildOptions(
-                    repository_root=context.paths.repository_root,
-                    configuration=options.configuration,
-                    build_root=context.build_root,
-                )
-            )
-            build_environment["SQUID4WIN_TRAY_PACKAGE_ROOT"] = str(tray_context.package_root)
-
         commands.append(
             ProcessInvocation(
-                description="Build the staged native Squid bundle with the root Conan recipe.",
+                description="Build the pure native Squid package with the root Conan recipe.",
                 command=(
                     "conan",
                     "build",
@@ -699,10 +1463,14 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
                     f"build_type={options.configuration.value}",
                     "-s:b",
                     f"build_type={options.configuration.value}",
+                    "-c:h",
+                    f"tools.build:jobs={options.make_jobs}",
+                    "-c:b",
+                    f"tools.build:jobs={options.make_jobs}",
                     _BUILD_MISSING_ARGUMENT,
                     *recipe_option_arguments,
                 ),
-                environment=build_environment,
+                environment=base_environment,
             )
         )
 
@@ -748,12 +1516,7 @@ def build_conan_lockfile_update_plan(options: ConanLockfileUpdateOptions) -> Aut
         options.host_profile_path,
         options.lockfile_path,
     )
-    recipe_option_arguments = _recipe_option_arguments(
-        context.paths,
-        with_tray=options.with_tray,
-        with_runtime_dlls=options.with_runtime_dlls,
-        with_packaging_support=options.with_packaging_support,
-    )
+    recipe_option_arguments = _recipe_option_arguments(context.paths)
     base_environment = _base_conan_environment(context.paths)
 
     return AutomationPlan(
@@ -1044,16 +1807,977 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
             context.layout.conan_output_root.mkdir(parents=True, exist_ok=True)
 
         runner.run(plan)
+        if not options.bootstrap_only:
+            _materialize_staged_squid_bundle(context, options, release_metadata)
 
     if not options.bootstrap_only and not context.layout.stage_root.is_dir():
         msg = (
-            "The Conan build finished without materializing the staged bundle at "
+            "The Python staging pass finished without materializing the staged bundle at "
             f"'{context.layout.stage_root}'."
         )
         raise FileNotFoundError(msg)
 
     if not options.bootstrap_only:
         logger.info("Staged native bundle ready at %s.", context.layout.stage_root)
+    return 0
+
+
+def _install_root_from_binary_path(binary_path: Path) -> Path:
+    binary_directory = binary_path.parent
+    if binary_directory.name.lower() not in {"bin", "sbin"}:
+        msg = (
+            f"Unable to infer the staged install root from binary path '{binary_path}'. "
+            "Expected squid.exe under a bin\\ or sbin\\ directory."
+        )
+        raise ValueError(msg)
+
+    return binary_directory.parent
+
+
+def _discover_squid_binary(install_root: Path) -> Path:
+    squid_candidates = (
+        install_root / "sbin" / "squid.exe",
+        install_root / "bin" / "squid.exe",
+    )
+    squid_executable = next(
+        (candidate for candidate in squid_candidates if candidate.is_file()),
+        None,
+    )
+    if squid_executable is not None:
+        return squid_executable
+
+    discovered_binary = next(
+        (
+            candidate
+            for candidate in sorted(install_root.rglob("squid.exe"))
+            if candidate.is_file()
+        ),
+        None,
+    )
+    if discovered_binary is None:
+        msg = f"Unable to find squid.exe under '{install_root}'."
+        raise FileNotFoundError(msg)
+
+    return discovered_binary
+
+
+def _smoke_test_manifest_sections(
+    install_root: Path,
+) -> tuple[list[str], list[dict[str, Any]], list[dict[str, Any]], Path | None]:
+    source_manifest_path = install_root / "licenses" / "source-manifest.json"
+    if not source_manifest_path.is_file():
+        return [], [], [], None
+
+    source_manifest = _load_json_object(source_manifest_path)
+    runtime_dlls: list[str] = []
+    runtime_notice_packages: list[dict[str, Any]] = []
+    tray_notice_packages: list[dict[str, Any]] = []
+
+    windows_runtime = source_manifest.get("windows_runtime")
+    if isinstance(windows_runtime, dict):
+        runtime_dlls = _string_list(windows_runtime.get("dlls", []))
+        runtime_notice_packages = [
+            cast(dict[str, Any], package)
+            for package in cast(list[Any], windows_runtime.get("packages", []))
+            if isinstance(package, dict)
+        ]
+
+    tray_section = source_manifest.get("tray")
+    if isinstance(tray_section, dict):
+        tray_notice_packages = [
+            cast(dict[str, Any], package)
+            for package in cast(list[Any], tray_section.get("third_party_packages", []))
+            if isinstance(package, dict)
+        ]
+
+    return runtime_dlls, runtime_notice_packages, tray_notice_packages, source_manifest_path
+
+
+def _notice_package_label(package: dict[str, Any], default_label: str) -> str:
+    for key in ("id", "name"):
+        value = str(package.get(key, "")).strip()
+        if value:
+            return value
+    return default_label
+
+
+def _assert_notice_files_present(
+    packages: list[dict[str, Any]],
+    *,
+    install_root: Path,
+    label: str,
+) -> None:
+    missing_notice_files: list[str] = []
+    for package in packages:
+        package_name = _notice_package_label(package, label)
+        for notice_file in _string_list(package.get("notice_files", [])):
+            notice_path = install_root / Path(notice_file.replace("/", os.sep))
+            if not notice_path.is_file():
+                missing_notice_files.append(f"{package_name}: {notice_file}")
+
+    if missing_notice_files:
+        msg = f"Missing {label} notice files: {'; '.join(missing_notice_files)}"
+        raise FileNotFoundError(msg)
+
+
+def _run_checked_capture(
+    command: tuple[str, ...],
+    *,
+    description: str,
+) -> str:
+    completed = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    combined_output = "\n".join(
+        part.strip()
+        for part in (completed.stdout, completed.stderr)
+        if part is not None and part.strip()
+    )
+    if completed.returncode != 0:
+        msg = f"{description} failed with exit code {completed.returncode}."
+        if combined_output:
+            msg = f"{msg} Output: {combined_output}"
+        raise RuntimeError(msg)
+
+    return combined_output
+
+
+def _relative_summary_path(path: Path, root: Path) -> str:
+    try:
+        relative_path = path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError:
+        return os.fspath(path)
+
+    relative_text = relative_path.as_posix()
+    return relative_text or "."
+
+
+def _write_smoke_test_summary(
+    result: SmokeTestResult,
+    *,
+    require_notices: bool,
+) -> None:
+    runtime_dll_summary = (
+        ", ".join(result.runtime_dlls)
+        if result.runtime_dlls
+        else "skipped (no source-manifest runtime DLL contract present)"
+    )
+    runtime_notice_summary = (
+        ", ".join(
+            sorted(
+                _notice_package_label(package, "runtime-package")
+                for package in result.runtime_notice_packages
+            )
+        )
+        if result.runtime_notice_packages
+        else ("required" if require_notices else "not required")
+    )
+    tray_notice_summary = (
+        ", ".join(
+            sorted(
+                _notice_package_label(package, "tray-package")
+                for package in result.tray_notice_packages
+            )
+        )
+        if result.tray_notice_packages
+        else ("required" if require_notices else "not required")
+    )
+    executable_directory_summary = ", ".join(
+        _relative_summary_path(path, result.install_root) for path in result.executable_directories
+    )
+
+    summary_lines = [
+        "## Smoke test",
+        "",
+        f"- Binary: `{result.binary_path}`",
+        f"- Install root: `{result.install_root}`",
+        f"- Version: `{result.version}`",
+        f"- Runtime DLLs: `{runtime_dll_summary}`",
+        f"- Runtime notice packages: `{runtime_notice_summary}`",
+        f"- Tray notice packages: `{tray_notice_summary}`",
+        f"- Executable directories: `{executable_directory_summary}`",
+    ]
+    if result.notices_path is not None:
+        summary_lines.append(f"- Notices bundle: `{result.notices_path}`")
+    if result.security_file_certgen_path is not None:
+        summary_lines.append(
+            f"- security_file_certgen: `{result.security_file_certgen_path}`"
+        )
+
+    append_step_summary("\n".join(summary_lines) + "\n")
+
+
+def run_smoke_test(options: SmokeTestOptions, runner: PlanRunner, *, execute: bool) -> int:
+    del runner
+    logger = get_logger("squid4win")
+    paths = RepositoryPaths.discover(options.repository_root)
+    build_root = _resolved_or_default(
+        options.build_root,
+        paths.build_root,
+        base=paths.repository_root,
+    )
+    squid_stage_root = _resolved_or_default(
+        options.squid_stage_root,
+        build_root / "install" / options.configuration.value.lower(),
+        base=paths.repository_root,
+    )
+    metadata_path = _resolved_or_default(
+        options.metadata_path,
+        paths.squid_release_metadata_path,
+        base=paths.repository_root,
+    )
+    resolved_binary_path = resolve_path(options.binary_path, base=paths.repository_root)
+
+    if not execute:
+        logger.info(
+            "The Python automation will validate the staged Squid bundle under '%s'.",
+            squid_stage_root if resolved_binary_path is None else resolved_binary_path,
+        )
+        return _log_dry_run_footer(
+            "Dry-run only. Re-run with --execute to validate the staged Squid bundle."
+        )
+
+    release_metadata = _load_json_object(metadata_path)
+    expected_version = str(release_metadata.get("version", "")).strip()
+    if not expected_version:
+        msg = f"Expected a non-empty Squid version in '{metadata_path}'."
+        raise ValueError(msg)
+
+    install_root = (
+        _install_root_from_binary_path(resolved_binary_path)
+        if resolved_binary_path is not None
+        else squid_stage_root
+    )
+    binary_path = resolved_binary_path or _discover_squid_binary(install_root)
+    if not binary_path.is_file():
+        msg = f"Unable to find squid.exe under '{install_root}'."
+        raise FileNotFoundError(msg)
+
+    runtime_dlls, runtime_notice_packages, tray_notice_packages, source_manifest_path = (
+        _smoke_test_manifest_sections(install_root)
+    )
+    notices_path = install_root / "THIRD-PARTY-NOTICES.txt"
+    if (
+        options.require_notices
+        and source_manifest_path is not None
+        and not notices_path.is_file()
+    ):
+        msg = (
+            f"Expected THIRD-PARTY-NOTICES.txt under '{install_root}' whenever "
+            "source-manifest.json is present."
+        )
+        raise FileNotFoundError(msg)
+
+    executable_directories = tuple(_native_executable_directories(install_root))
+    if runtime_dlls:
+        missing_runtime_dll_entries: list[str] = []
+        for executable_directory in executable_directories:
+            missing_runtime_dlls = [
+                runtime_dll
+                for runtime_dll in runtime_dlls
+                if not (executable_directory / runtime_dll).is_file()
+            ]
+            if not missing_runtime_dlls:
+                continue
+
+            relative_directory = _relative_summary_path(executable_directory, install_root)
+            missing_runtime_dll_entries.append(
+                f"{relative_directory}: {', '.join(missing_runtime_dlls)}"
+            )
+
+        if missing_runtime_dll_entries:
+            msg = f"Missing staged runtime DLLs: {'; '.join(missing_runtime_dll_entries)}"
+            raise FileNotFoundError(msg)
+
+        if options.require_notices and not runtime_notice_packages:
+            msg = (
+                "Expected source-manifest.json to declare packaged notice files for the "
+                "bundled runtime DLLs."
+            )
+            raise ValueError(msg)
+
+        if options.require_notices:
+            runtime_notice_dlls = sorted(
+                {
+                    runtime_dll
+                    for package in runtime_notice_packages
+                    for runtime_dll in _string_list(package.get("dlls", []))
+                }
+            )
+            missing_runtime_notice_dlls = [
+                runtime_dll
+                for runtime_dll in runtime_dlls
+                if runtime_dll not in runtime_notice_dlls
+            ]
+            extra_runtime_notice_dlls = [
+                runtime_dll
+                for runtime_dll in runtime_notice_dlls
+                if runtime_dll not in runtime_dlls
+            ]
+            if missing_runtime_notice_dlls or extra_runtime_notice_dlls:
+                msg = (
+                    "Runtime notice metadata does not match the bundled runtime DLL "
+                    "contract. Missing: "
+                    + ", ".join(missing_runtime_notice_dlls)
+                    + "; Extra: "
+                    + ", ".join(extra_runtime_notice_dlls)
+                )
+                raise ValueError(msg)
+
+    if options.require_notices and runtime_notice_packages:
+        _assert_notice_files_present(
+            runtime_notice_packages,
+            install_root=install_root,
+            label="runtime",
+        )
+    if (
+        options.require_notices
+        and (install_root / "System.ServiceProcess.ServiceController.dll").is_file()
+        and not tray_notice_packages
+    ):
+        msg = (
+            "Expected source-manifest.json to declare tray-package notice metadata for "
+            "the shipped System.ServiceProcess.ServiceController.dll."
+        )
+        raise ValueError(msg)
+    if options.require_notices and tray_notice_packages:
+        _assert_notice_files_present(
+            tray_notice_packages,
+            install_root=install_root,
+            label="tray-package",
+        )
+
+    version_output = _run_checked_capture(
+        (os.fspath(binary_path), "-v"),
+        description="squid.exe -v",
+    )
+    if expected_version not in version_output:
+        msg = (
+            f"Expected squid version {expected_version} but version output was: "
+            f"{version_output}"
+        )
+        raise RuntimeError(msg)
+
+    security_file_certgen_path = install_root / "libexec" / "security_file_certgen.exe"
+    if security_file_certgen_path.is_file():
+        security_file_certgen_output = _run_checked_capture(
+            (os.fspath(security_file_certgen_path), "-h"),
+            description="security_file_certgen.exe -h",
+        )
+        if re.search(r"usage:\s+security_file_certgen", security_file_certgen_output) is None:
+            msg = (
+                "security_file_certgen.exe -h returned unexpected output: "
+                f"{security_file_certgen_output}"
+            )
+            raise RuntimeError(msg)
+
+    result = SmokeTestResult(
+        binary_path=binary_path,
+        install_root=install_root,
+        version=expected_version,
+        executable_directories=executable_directories,
+        runtime_dlls=tuple(runtime_dlls),
+        runtime_notice_packages=tuple(runtime_notice_packages),
+        tray_notice_packages=tuple(tray_notice_packages),
+        notices_path=notices_path if notices_path.is_file() else None,
+        security_file_certgen_path=(
+            security_file_certgen_path if security_file_certgen_path.is_file() else None
+        ),
+    )
+    _write_smoke_test_summary(result, require_notices=options.require_notices)
+    logger.info("Smoke tests passed for %s.", binary_path)
+    return 0
+
+
+def _is_windows_administrator() -> bool:
+    if os.name != "nt":
+        return False
+
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except (AttributeError, OSError):
+        return False
+
+
+def _assert_runner_validation_prerequisites(
+    *,
+    allow_non_runner_execution: bool,
+) -> None:
+    if os.name != "nt":
+        msg = "Service runner validation is only supported on Windows."
+        raise RuntimeError(msg)
+
+    if not allow_non_runner_execution and github_actions_context().enabled is not True:
+        msg = (
+            "Service runner validation performs MSI install and Windows service control. "
+            "Run it on an isolated GitHub Actions runner or pass "
+            "--allow-non-runner-execution only when the environment is explicitly "
+            "dedicated to this validation."
+        )
+        raise RuntimeError(msg)
+
+    if not _is_windows_administrator():
+        msg = (
+            "Service runner validation requires administrator privileges because it "
+            "installs an MSI and controls a Windows service."
+        )
+        raise RuntimeError(msg)
+
+
+def _validation_token() -> str:
+    segments = [
+        value
+        for value in (
+            os.getenv("GITHUB_RUN_ID", "").strip(),
+            os.getenv("GITHUB_RUN_ATTEMPT", "").strip(),
+            os.getenv("GITHUB_JOB", "").strip(),
+            uuid4().hex[:8],
+        )
+        if value
+    ]
+    token = re.sub(r"-{2,}", "-", re.sub(r"[^A-Za-z0-9-]", "-", "-".join(segments))).strip("-")
+    if not token:
+        token = uuid4().hex[:16]
+    if len(token) > 48:
+        token = token[:48].rstrip("-")
+    return token
+
+
+def _generated_service_name(prefix: str, token: str) -> str:
+    normalized_prefix = re.sub(r"[^A-Za-z0-9]", "", prefix)
+    if not normalized_prefix:
+        msg = "The service name prefix must contain at least one letter or number."
+        raise ValueError(msg)
+
+    minimum_token_length = 8
+    max_name_length = 32
+    max_prefix_length = max_name_length - minimum_token_length
+    if len(normalized_prefix) > max_prefix_length:
+        msg = (
+            f"The service name prefix '{prefix}' is too long. Leave at least "
+            f"{minimum_token_length} characters for the unique suffix so the final "
+            "Squid service name stays within Squid's 32-character limit."
+        )
+        raise ValueError(msg)
+
+    normalized_token = re.sub(r"[^A-Za-z0-9]", "", token) or uuid4().hex
+    max_token_length = max_name_length - len(normalized_prefix)
+    if len(normalized_token) > max_token_length:
+        normalized_token = normalized_token[-max_token_length:]
+
+    return validate_service_name(
+        f"{normalized_prefix}{normalized_token}",
+        parameter_name="GeneratedServiceName",
+    )
+
+
+def _combined_process_output(completed: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(
+        part.strip()
+        for part in (completed.stdout, completed.stderr)
+        if part is not None and part.strip()
+    )
+
+
+def _run_msiexec(
+    arguments: tuple[str, ...],
+    *,
+    log_path: Path | None = None,
+    acceptable_exit_codes: tuple[int, ...] = (0,),
+) -> int:
+    effective_arguments = list(arguments)
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        effective_arguments.extend(("/L*V", os.fspath(log_path)))
+
+    completed = subprocess.run(
+        ("msiexec.exe", *effective_arguments),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode not in acceptable_exit_codes:
+        log_hint = f" See {log_path}." if log_path is not None else ""
+        output = _combined_process_output(completed)
+        msg = (
+            f"msiexec.exe {' '.join(effective_arguments)} failed with exit code "
+            f"{completed.returncode}.{log_hint}"
+        )
+        if output:
+            msg = f"{msg} Output: {output}"
+        raise RuntimeError(msg)
+
+    return completed.returncode
+
+
+def _run_sc(
+    arguments: tuple[str, ...],
+    *,
+    acceptable_exit_codes: tuple[int, ...] = (0,),
+) -> str:
+    completed = subprocess.run(
+        (_system_sc_executable(), *arguments),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    output = _combined_process_output(completed)
+    if completed.returncode not in acceptable_exit_codes:
+        msg = (
+            f"sc.exe {' '.join(arguments)} failed with exit code {completed.returncode}."
+        )
+        if output:
+            msg = f"{msg} Output: {output}"
+        raise RuntimeError(msg)
+
+    return output
+
+
+def _system_sc_executable() -> str:
+    system_root = os.getenv("SystemRoot", "").strip()
+    if system_root:
+        candidate = Path(system_root) / "System32" / "sc.exe"
+        if candidate.is_file():
+            return os.fspath(candidate)
+    return "sc.exe"
+
+
+def _query_service(name: str) -> tuple[bool, str | None]:
+    completed = subprocess.run(
+        (_system_sc_executable(), "query", name),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    output = _combined_process_output(completed)
+    if completed.returncode == 1060 or "FAILED 1060" in output.upper():
+        return False, None
+    if completed.returncode != 0:
+        msg = f"sc.exe query {name} failed with exit code {completed.returncode}."
+        if output:
+            msg = f"{msg} Output: {output}"
+        raise RuntimeError(msg)
+
+    match = re.search(r"STATE\s*:\s*\d+\s+([A-Z_]+)", output)
+    if match is None:
+        msg = f"Unable to parse the service state for '{name}' from sc.exe query output."
+        raise RuntimeError(msg)
+
+    return True, match.group(1)
+
+
+def _wait_service_registration_state(
+    name: str,
+    *,
+    present: bool,
+    timeout_seconds: int,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        registered, _ = _query_service(name)
+        if registered is present:
+            return
+        time.sleep(1)
+
+    expected_state = "visible" if present else "absent"
+    msg = (
+        f"The Squid Windows service '{name}' did not become {expected_state} within "
+        f"{timeout_seconds} seconds."
+    )
+    raise RuntimeError(msg)
+
+
+def _wait_service_status(
+    name: str,
+    *,
+    desired_status: str,
+    timeout_seconds: int,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        registered, status = _query_service(name)
+        if not registered:
+            msg = f"The Squid Windows service '{name}' is not registered."
+            raise RuntimeError(msg)
+        if status == desired_status:
+            return
+        time.sleep(1)
+
+    msg = (
+        f"The Squid Windows service '{name}' did not reach status '{desired_status}' "
+        f"within {timeout_seconds} seconds."
+    )
+    raise RuntimeError(msg)
+
+
+def _stop_service_if_present(name: str, *, timeout_seconds: int) -> bool:
+    registered, status = _query_service(name)
+    if not registered:
+        return False
+    if status == "STOPPED":
+        return False
+    if status == "STOP_PENDING":
+        _wait_service_status(name, desired_status="STOPPED", timeout_seconds=timeout_seconds)
+        return True
+
+    _run_sc(("stop", name), acceptable_exit_codes=(0, 1062))
+    _wait_service_status(name, desired_status="STOPPED", timeout_seconds=timeout_seconds)
+    return True
+
+
+def _start_service(name: str, *, timeout_seconds: int) -> None:
+    _run_sc(("start", name), acceptable_exit_codes=(0, 1056))
+    _wait_service_status(name, desired_status="RUNNING", timeout_seconds=timeout_seconds)
+
+
+def _service_command_line(name: str) -> str:
+    output = _run_sc(("qc", name))
+    match = re.search(r"BINARY_PATH_NAME\s*:\s*(.+)", output)
+    if match is None:
+        msg = f"Unable to parse the service command line for '{name}'."
+        raise RuntimeError(msg)
+
+    return match.group(1).strip()
+
+
+def _invoke_service_helper_uninstall(install_root: Path, *, service_name: str) -> bool:
+    service_helper_path = install_root / "installer" / "svc.ps1"
+    if not service_helper_path.is_file():
+        return False
+
+    completed = subprocess.run(
+        (
+            _powershell_executable(),
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            os.fspath(service_helper_path),
+            "-Action",
+            "Uninstall",
+            "-InstallRoot",
+            os.fspath(install_root),
+            "-ServiceName",
+            service_name,
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        output = _combined_process_output(completed)
+        msg = (
+            f"The installed service helper failed while uninstalling '{service_name}' "
+            f"from '{install_root}'."
+        )
+        if output:
+            msg = f"{msg} Output: {output}"
+        raise RuntimeError(msg)
+
+    return True
+
+
+def _best_effort_service_validation_cleanup(
+    *,
+    install_root: Path,
+    service_name: str,
+    msi_path: Path | None,
+    install_attempted: bool,
+    uninstall_completed: bool,
+    timeout_seconds: int,
+) -> CleanupResult:
+    actions: list[str] = []
+    issues: list[str] = []
+
+    if (
+        install_attempted
+        and not uninstall_completed
+        and msi_path is not None
+        and msi_path.is_file()
+    ):
+        try:
+            _run_msiexec(
+                ("/x", os.fspath(msi_path), "/qn", "/norestart"),
+                acceptable_exit_codes=(0, 1605, 1614),
+            )
+            actions.append("Requested MSI uninstall during cleanup.")
+        except Exception as exc:  # noqa: BLE001
+            issues.append(f"MSI cleanup uninstall failed: {exc}")
+
+    try:
+        if _stop_service_if_present(service_name, timeout_seconds=timeout_seconds):
+            actions.append(f"Stopped leftover service '{service_name}'.")
+    except Exception as exc:  # noqa: BLE001
+        issues.append(f"Stopping leftover service '{service_name}' failed: {exc}")
+
+    try:
+        registered, _ = _query_service(service_name)
+        if registered and install_root.is_dir():
+            if _invoke_service_helper_uninstall(install_root, service_name=service_name):
+                _wait_service_registration_state(
+                    service_name,
+                    present=False,
+                    timeout_seconds=timeout_seconds,
+                )
+                actions.append(f"Invoked installer helper cleanup for '{service_name}'.")
+    except Exception as exc:  # noqa: BLE001
+        issues.append(f"Installer helper cleanup for '{service_name}' failed: {exc}")
+
+    try:
+        registered, _ = _query_service(service_name)
+        if registered:
+            _stop_service_if_present(service_name, timeout_seconds=timeout_seconds)
+            _run_sc(("delete", service_name))
+            _wait_service_registration_state(
+                service_name,
+                present=False,
+                timeout_seconds=timeout_seconds,
+            )
+            actions.append(f"Deleted leftover service '{service_name}' with sc.exe.")
+    except Exception as exc:  # noqa: BLE001
+        issues.append(f"Final service deletion for '{service_name}' failed: {exc}")
+
+    try:
+        registered, _ = _query_service(service_name)
+    except Exception as exc:  # noqa: BLE001
+        issues.append(f"Checking leftover service '{service_name}' failed: {exc}")
+        registered = False
+    if registered:
+        issues.append(
+            f"The Squid Windows service '{service_name}' is still registered after cleanup."
+        )
+
+    if install_root.exists():
+        try:
+            _remove_tree(install_root)
+            actions.append(f"Removed isolated install root '{install_root}'.")
+        except Exception as exc:  # noqa: BLE001
+            issues.append(f"Removing isolated install root '{install_root}' failed: {exc}")
+
+    return CleanupResult(actions=tuple(actions), issues=tuple(issues))
+
+
+def _write_service_runner_validation_summary(
+    result: ServiceRunnerValidationResult,
+    *,
+    status: str,
+    failure_message: str | None,
+) -> None:
+    summary_lines = [
+        "## Service runner validation",
+        "",
+        f"- Status: `{status}`",
+        f"- Service name: `{result.service_name}`",
+        f"- Validation root: `{result.validation_root}`",
+        f"- Install root: `{result.install_root}`",
+        f"- MSI: `{result.msi_path}`",
+    ]
+    if result.service_command_line is not None:
+        summary_lines.append(f"- Service command line: `{result.service_command_line}`")
+    if result.cleanup_actions:
+        summary_lines.append(f"- Cleanup actions: `{' ; '.join(result.cleanup_actions)}`")
+    if result.cleanup_issues:
+        summary_lines.append(f"- Cleanup issues: `{' ; '.join(result.cleanup_issues)}`")
+    if failure_message is not None:
+        summary_lines.append(f"- Failure: `{failure_message}`")
+
+    append_step_summary("\n".join(summary_lines) + "\n")
+
+
+def run_service_runner_validation(
+    options: ServiceRunnerValidationOptions,
+    runner: PlanRunner,
+    *,
+    execute: bool,
+) -> int:
+    logger = get_logger("squid4win")
+    paths = RepositoryPaths.discover(options.repository_root)
+    build_root = _resolved_or_default(
+        options.build_root,
+        paths.build_root,
+        base=paths.repository_root,
+    )
+    artifact_base_root = _resolved_or_default(
+        options.artifact_root,
+        paths.artifact_root,
+        base=paths.repository_root,
+    )
+    validation_token = _validation_token()
+    service_name = (
+        options.service_name
+        if options.service_name is not None
+        else _generated_service_name(options.service_name_prefix, validation_token)
+    )
+    validation_root = artifact_base_root / "service-validation" / validation_token
+    install_root = _resolved_or_default(
+        options.install_root,
+        validation_root / "installed",
+        base=paths.repository_root,
+    )
+
+    if not execute:
+        logger.info(
+            "The Python automation will validate the MSI-installed service using '%s' "
+            "and the temporary service name '%s'.",
+            validation_root,
+            service_name,
+        )
+        return _log_dry_run_footer(
+            "Dry-run only. Re-run with --execute to validate the installed service lifecycle."
+        )
+
+    _assert_runner_validation_prerequisites(
+        allow_non_runner_execution=options.allow_non_runner_execution
+    )
+
+    bundle_options = BundlePackageOptions(
+        repository_root=paths.repository_root,
+        configuration=options.configuration,
+        build_root=build_root,
+        artifact_root=validation_root,
+        require_tray=options.require_tray,
+        require_notices=options.require_notices,
+        build_installer=True,
+        service_name=service_name,
+    )
+
+    caught_error: Exception | None = None
+    cleanup_result = CleanupResult(actions=(), issues=())
+    bundle_state: BundlePackageState | None = None
+    msi_path: Path | None = None
+    service_command_line: str | None = None
+    install_attempted = False
+    uninstall_completed = False
+
+    try:
+        validation_root.mkdir(parents=True, exist_ok=True)
+        if install_root.exists():
+            _remove_tree(install_root)
+
+        run_bundle_package(bundle_options, runner, execute=True)
+        bundle_state = BundlePackageState.inspect(
+            paths.repository_root,
+            build_root,
+            options.configuration,
+            squid_stage_root=build_root / "install" / options.configuration.value.lower(),
+            artifact_root=validation_root,
+            installer_project_path=paths.installer_project_path,
+        )
+        staged_payload_root = bundle_state.installer_payload_root
+        expected_staged_paths = (
+            staged_payload_root / "installer" / "svc.ps1",
+            staged_payload_root / "installer" / "Assert-SquidServiceName.ps1",
+            staged_payload_root / "etc" / "squid.conf.template",
+        )
+        for expected_path in expected_staged_paths:
+            if not expected_path.exists():
+                msg = f"The staged payload '{staged_payload_root}' is missing '{expected_path}'."
+                raise FileNotFoundError(msg)
+
+        staged_config_path = staged_payload_root / "etc" / "squid.conf"
+        if staged_config_path.exists():
+            msg = (
+                f"The staged payload already contains '{staged_config_path}'. The installer "
+                "contract requires shipping squid.conf.template and materializing squid.conf "
+                "during install."
+            )
+            raise RuntimeError(msg)
+
+        msi_path = bundle_state.msi_path
+        install_attempted = True
+        logger.info(
+            "Installing %s to %s using temporary service name '%s'.",
+            msi_path,
+            install_root,
+            service_name,
+        )
+        _run_msiexec(
+            (
+                "/i",
+                os.fspath(msi_path),
+                "/qn",
+                "/norestart",
+                f"INSTALLFOLDER={install_root}",
+            ),
+            log_path=validation_root / "msi-install.log",
+        )
+
+        expected_installed_paths = (
+            install_root / "installer" / "svc.ps1",
+            install_root / "installer" / "Assert-SquidServiceName.ps1",
+            install_root / "etc" / "squid.conf",
+            install_root / "var" / "cache",
+            install_root / "var" / "logs",
+            install_root / "var" / "run",
+        )
+        for expected_path in expected_installed_paths:
+            if not expected_path.exists():
+                msg = f"Expected installed path '{expected_path}' was not created by the MSI."
+                raise FileNotFoundError(msg)
+
+        _wait_service_registration_state(
+            service_name,
+            present=True,
+            timeout_seconds=options.service_timeout_seconds,
+        )
+        service_command_line = _service_command_line(service_name)
+        if service_name not in service_command_line:
+            msg = (
+                "The installed service command line did not reference the temporary "
+                f"service name '{service_name}': {service_command_line}"
+            )
+            raise RuntimeError(msg)
+
+        _start_service(service_name, timeout_seconds=options.service_timeout_seconds)
+        _stop_service_if_present(service_name, timeout_seconds=options.service_timeout_seconds)
+        _run_msiexec(
+            ("/x", os.fspath(msi_path), "/qn", "/norestart"),
+            log_path=validation_root / "msi-uninstall.log",
+        )
+        uninstall_completed = True
+        _wait_service_registration_state(
+            service_name,
+            present=False,
+            timeout_seconds=options.service_timeout_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001
+        caught_error = exc
+    finally:
+        cleanup_result = _best_effort_service_validation_cleanup(
+            install_root=install_root,
+            service_name=service_name,
+            msi_path=msi_path,
+            install_attempted=install_attempted,
+            uninstall_completed=uninstall_completed,
+            timeout_seconds=options.service_timeout_seconds,
+        )
+        result = ServiceRunnerValidationResult(
+            validation_root=validation_root,
+            install_root=install_root,
+            msi_path=msi_path,
+            service_name=service_name,
+            service_command_line=service_command_line,
+            cleanup_actions=cleanup_result.actions,
+            cleanup_issues=cleanup_result.issues,
+        )
+        _write_service_runner_validation_summary(
+            result,
+            status="passed" if caught_error is None and cleanup_result.clean else "failed",
+            failure_message=None if caught_error is None else str(caught_error),
+        )
+
+    if caught_error is not None:
+        raise caught_error
+    if not cleanup_result.clean:
+        msg = f"Service runner validation cleanup failed: {'; '.join(cleanup_result.issues)}"
+        raise RuntimeError(msg)
+    if bundle_state is None or msi_path is None:
+        msg = "Service runner validation did not produce the expected MSI artifact."
+        raise RuntimeError(msg)
+
+    logger.info("Service runner validation passed for %s.", msi_path)
     return 0
 
 

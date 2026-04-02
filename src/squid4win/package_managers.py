@@ -29,6 +29,7 @@ from squid4win.models import (
     RepositoryPaths,
 )
 from squid4win.paths import resolve_path
+from squid4win.utils.actions import set_outputs
 
 if TYPE_CHECKING:
     from squid4win.runner import PlanRunner
@@ -248,23 +249,6 @@ def _render_scoop_manifest(
     return json.dumps(manifest, indent=2) + "\n"
 
 
-def _append_github_output(result: PackageManagerExportResult) -> None:
-    output_path = os.getenv("GITHUB_OUTPUT")
-    if not output_path:
-        return
-
-    lines = (
-        f"output_root={result.output_root}",
-        f"msi_sha256={result.msi_sha256}",
-        f"portable_zip_sha256={result.portable_zip_sha256}",
-        f"msi_url={result.msi_url}",
-        f"portable_zip_url={result.portable_zip_url}",
-    )
-    with Path(output_path).open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write("\n".join(lines))
-        handle.write("\n")
-
-
 def _resolve_export_context(options: PackageManagerExportOptions) -> PackageManagerExportContext:
     paths = RepositoryPaths.discover(options.repository_root)
     repository_root = paths.repository_root
@@ -381,7 +365,15 @@ def run_package_manager_export(
         context.scoop_manifest_path,
         _render_scoop_manifest(context, portable_zip_sha256=result.portable_zip_sha256),
     )
-    _append_github_output(result)
+    set_outputs(
+        {
+            "output_root": result.output_root,
+            "msi_sha256": result.msi_sha256,
+            "portable_zip_sha256": result.portable_zip_sha256,
+            "msi_url": result.msi_url,
+            "portable_zip_url": result.portable_zip_url,
+        }
+    )
 
     logger.info("Winget manifest root: %s", result.winget_root)
     logger.info("Chocolatey package root: %s", result.chocolatey_root)
@@ -706,35 +698,6 @@ def _submit_github_pull_request(
             shutil.rmtree(clone_path)
 
 
-def _append_github_publication_output(result: GitHubPublicationResult) -> None:
-    output_path = os.getenv("GITHUB_OUTPUT")
-    if not output_path:
-        return
-
-    lines = (
-        f"changed={str(result.changed).lower()}",
-        f"pull_request_url={result.pull_request_url or ''}",
-    )
-    with Path(output_path).open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write("\n".join(lines))
-        handle.write("\n")
-
-
-def _append_chocolatey_output(result: ChocolateyPublicationResult) -> None:
-    output_path = os.getenv("GITHUB_OUTPUT")
-    if not output_path:
-        return
-
-    package_path = "" if result.package_path is None else str(result.package_path)
-    lines = (
-        f"already_published={str(result.already_published).lower()}",
-        f"package_path={package_path}",
-    )
-    with Path(output_path).open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write("\n".join(lines))
-        handle.write("\n")
-
-
 def _resolve_winget_manifest_root(options: PublishWingetOptions) -> tuple[Path, Path, str]:
     paths = RepositoryPaths.discover(options.repository_root)
     manifest_root = _resolved_or_default(
@@ -921,7 +884,12 @@ def run_publish_winget(
         base_branch=options.base_branch,
         working_root=working_root,
     )
-    _append_github_publication_output(result)
+    set_outputs(
+        {
+            "changed": result.changed,
+            "pull_request_url": result.pull_request_url or "",
+        }
+    )
     logger.info("winget changed: %s", result.changed)
     logger.info("winget pull request: %s", result.pull_request_url or "<none>")
     return 0
@@ -973,7 +941,12 @@ def run_publish_scoop(
         base_branch=options.base_branch,
         working_root=working_root,
     )
-    _append_github_publication_output(result)
+    set_outputs(
+        {
+            "changed": result.changed,
+            "pull_request_url": result.pull_request_url or "",
+        }
+    )
     logger.info("Scoop changed: %s", result.changed)
     logger.info("Scoop pull request: %s", result.pull_request_url or "<none>")
     return 0
@@ -1034,7 +1007,12 @@ def run_publish_chocolatey(
             push_source=options.push_source,
             query_source=options.query_source,
         )
-        _append_chocolatey_output(result)
+        set_outputs(
+            {
+                "already_published": result.already_published,
+                "package_path": "",
+            }
+        )
         logger.info(
             "Chocolatey package %s %s is already published.",
             options.package_id,
@@ -1074,7 +1052,12 @@ def run_publish_chocolatey(
         query_source=options.query_source,
         repository_root=repository_root,
     )
-    _append_chocolatey_output(result)
+    set_outputs(
+        {
+            "already_published": result.already_published,
+            "package_path": "" if result.package_path is None else result.package_path,
+        }
+    )
     logger.info("Chocolatey already published: %s", result.already_published)
     logger.info("Chocolatey package path: %s", result.package_path or "<none>")
     return 0

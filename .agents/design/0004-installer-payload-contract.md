@@ -89,8 +89,9 @@ The first committed installer contract is:
 - That staged bundle should carry `squid.conf.template`,
   `squid.conf.default`, and `squid.conf.documented`, but not a generated
   `etc\squid.conf`.
-- `scripts\Build-Installer.ps1` remains available as an internal validation
-  helper, but it is no longer the preferred contributor-facing entry point.
+- At the time, `scripts\Build-Installer.ps1` remained available as an internal
+  validation helper, but it was not the preferred contributor-facing entry
+  point.
 - `packaging\wix\Squid4Win.Installer.wixproj` harvests the staged payload instead
   of hand-maintaining every Squid file in WiX XML.
 - `uv run squid4win-automation tray-build --execute` now publishes the tray app

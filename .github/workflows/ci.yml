@@ -189,7 +189,7 @@ jobs:
             --execute
 
       - name: Smoke test Squid
-        run: .\scripts\Invoke-SmokeTests.ps1 -Configuration Release -RequireNotices
+        run: uv run squid4win-automation smoke-test --execute --configuration Release --require-notices
 
       - name: Summarize SonarCloud scanner mode
         if: ${{ vars.SONAR_CI_SCAN_ENABLED != 'true' }}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,6 +21,7 @@ from squid4win.logging_utils import get_logger
 from squid4win.models import RepositoryPaths, UpstreamVersionOptions
 from squid4win.paths import resolve_path
 from squid4win.upstream import ResolvedUpstreamRelease
+from squid4win.utils.actions import set_outputs
 
 _DEFAULT_NEWLINE: Final[str] = "\n"
 _DEFAULT_TRACK: Final[str] = "stable"
@@ -76,21 +76,6 @@ def _write_text(path: Path, content: str) -> None:
     temporary_path = path.with_name(f"{path.name}.tmp")
     temporary_path.write_bytes(content.encode("utf-8"))
     temporary_path.replace(path)
-
-
-def _append_github_output(*, changed: bool, version: str, tag: str) -> None:
-    output_path = os.getenv("GITHUB_OUTPUT")
-    if not output_path:
-        return
-
-    lines = (
-        f"changed={str(changed).lower()}",
-        f"version={version}",
-        f"tag={tag}",
-    )
-    with Path(output_path).open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write("\n".join(lines))
-        handle.write("\n")
 
 
 @dataclass(frozen=True)
@@ -338,7 +323,13 @@ class UpstreamVersionManager:
             conan_data_path=self._conan_data_path,
             planned_paths=plan.changed_paths,
         )
-        _append_github_output(changed=result.changed, version=result.version, tag=result.tag)
+        set_outputs(
+            {
+                "changed": result.changed,
+                "version": result.version,
+                "tag": result.tag,
+            }
+        )
         return result
 
     def build_plan(self, release: TargetUpstreamRelease) -> VersionSyncPlan:
