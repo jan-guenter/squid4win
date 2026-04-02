@@ -31,14 +31,14 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - The installed service helper now runs `squid.exe -k parse`, `squid.exe -z`,
   and then `squid.exe -i` for first-install cache initialization and service
   registration.
-- `squid.exe -i -f <config>` follows Squid's native Windows service model: the
-  service keeps Squid-controlled runtime startup parameters, while the selected
-  config association is persisted separately for the named service. The helper
-  explicitly verifies the registry-backed `ConfigFile` and `CommandLine` values
-  so service startup and spawned Squid processes do not fall back to compiled
-  defaults. Because upstream service startup splits the stored `CommandLine` on
-  whitespace without quote support, the install root used for service
-  registration must remain space-free.
+- `squid.exe -i -f <config>` follows Squid's native Windows service model, but
+  Squid only sees the SCM service `BINARY_PATH_NAME` during its initial option
+  parse. The helper therefore normalizes both the Windows service command line
+  to include `-f <config>` and the registry-backed `ConfigFile`/`CommandLine`
+  values so service startup and spawned Squid processes do not fall back to
+  compiled defaults. Because upstream service startup still splits the stored
+  registry `CommandLine` on whitespace without quote support, the install root
+  used for service registration must remain space-free.
 - WiX v4 MSI authoring and payload staging are already committed.
 - The repository's own code and docs are GPL-2.0-or-later.
 - Current cited local validation covers the Python-owned target-state path:

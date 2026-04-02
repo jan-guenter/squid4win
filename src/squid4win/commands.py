@@ -2392,12 +2392,13 @@ def _normalized_windows_path_text(path_text: str) -> str:
     return os.path.normcase(os.path.normpath(path_text))
 
 
-def _service_registry_command_line_config_path(command_line: str) -> str | None:
-    match = re.search(r"(?:^|\s)-f\s+(\S+)", command_line)
+def _command_line_config_path(command_line: str) -> str | None:
+    match = re.search(r'(?:^|\s)-f\s+(?:"([^"]+)"|(\S+))', command_line)
     if match is None:
         return None
 
-    return match.group(1)
+    quoted_path, unquoted_path = match.groups()
+    return quoted_path or unquoted_path
 
 
 def _service_timeout_diagnostics(
@@ -2890,9 +2891,7 @@ def run_service_runner_validation(
                 "a CommandLine value."
             )
             raise RuntimeError(msg)
-        registry_command_line_config_path = _service_registry_command_line_config_path(
-            actual_registry_command_line
-        )
+        registry_command_line_config_path = _command_line_config_path(actual_registry_command_line)
         if registry_command_line_config_path is None:
             msg = (
                 f"The installed service registry key '{registry_path}' stored CommandLine="
@@ -2922,6 +2921,26 @@ def run_service_runner_validation(
                 f"service name '{service_name}': {service_command_line}"
             )
             raise RuntimeError(msg)
+        service_command_line_config_path = _command_line_config_path(service_command_line)
+        if service_command_line_config_path is None:
+            msg = (
+                f"The installed service command line did not contain '-f <config>': "
+                f"{service_command_line}"
+            )
+            raise RuntimeError(msg)
+        if _normalized_windows_path_text(
+            service_command_line_config_path
+        ) != _normalized_windows_path_text(expected_registry_config_path):
+            msg = (
+                f"The installed service command line stored '{service_command_line}', "
+                f"expected it to reference '{expected_registry_config_path}'."
+            )
+            raise RuntimeError(msg)
+        logger.info(
+            "Validated the Squid Windows service startup command line for '%s': %s",
+            service_name,
+            service_command_line,
+        )
 
         _start_service(
             service_name,

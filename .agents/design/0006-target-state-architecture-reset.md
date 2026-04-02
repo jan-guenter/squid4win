@@ -99,14 +99,14 @@ The target architecture is:
 - The installed service helper currently validates generated configs with
   `squid.exe -k parse`, initializes cache directories with `squid.exe -z`, and
   then registers the named Windows service with `squid.exe -i`.
-  `squid.exe -i -f <config>` follows Squid's native Windows service model: the
-  service keeps Squid-controlled runtime startup parameters, while the selected
-  config association is persisted separately for the named service. The helper
-  now verifies the registry-backed `ConfigFile` and `CommandLine` entries so
-  service startup and spawned Squid processes do not fall back to the compiled
-  default config path. Because upstream service startup splits the stored
-  `CommandLine` on whitespace without quote support, the install root used for
-  service registration must remain space-free.
+  `squid.exe -i -f <config>` follows Squid's native Windows service model, but
+  Squid only sees the SCM service `BINARY_PATH_NAME` during its initial option
+  parse. The helper now normalizes both the Windows service command line to
+  include `-f <config>` and the registry-backed `ConfigFile` and `CommandLine`
+  entries so service startup and spawned Squid processes do not fall back to
+  the compiled default config path. Because upstream service startup still
+  splits the stored registry `CommandLine` on whitespace without quote support,
+  the install root used for service registration must remain space-free.
 
 ## Alternatives considered
 
