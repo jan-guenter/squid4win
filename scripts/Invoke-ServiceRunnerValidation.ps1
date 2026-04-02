@@ -442,14 +442,9 @@ try {
         throw "The temporary Squid Windows service '$resolvedServiceName' was not registered by the MSI."
     }
 
-    $configPath = Join-Path $resolvedInstallRoot 'etc\squid.conf'
     $serviceCommandLine = [string]$serviceInstance.PathName
     if ($serviceCommandLine -notmatch [Regex]::Escape($resolvedServiceName)) {
         throw "The installed service command line did not reference the temporary service name '$resolvedServiceName': $serviceCommandLine"
-    }
-
-    if ($serviceCommandLine -notmatch [Regex]::Escape($configPath)) {
-        throw "The installed service command line did not reference the installed squid.conf path '$configPath': $serviceCommandLine"
     }
 
     Start-Service -Name $resolvedServiceName -ErrorAction Stop

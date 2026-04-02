@@ -175,44 +175,6 @@ function Invoke-SquidCommand {
     }
 }
 
-function Set-SquidServiceCommandLine {
-    [CmdletBinding(SupportsShouldProcess)]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-        [Parameter(Mandatory = $true)]
-        [string]$ExecutablePath,
-        [Parameter(Mandatory = $true)]
-        [string]$ConfigPath
-    )
-
-    $serviceInstance = Get-SquidServiceInstance -Name $Name
-    if ($null -eq $serviceInstance) {
-        throw "Unable to update the Squid Windows service '$Name' because it is not registered."
-    }
-
-    $desiredCommandLine = ('"{0}" --ntservice:{1} -f "{2}"' -f $ExecutablePath, $Name, $ConfigPath)
-    if ([string]$serviceInstance.PathName -eq $desiredCommandLine) {
-        return $desiredCommandLine
-    }
-
-    if (-not $PSCmdlet.ShouldProcess($Name, "Set Windows service command line to '$desiredCommandLine'")) {
-        return [string]$serviceInstance.PathName
-    }
-
-    $changeResult = Invoke-CimMethod `
-        -InputObject $serviceInstance `
-        -MethodName Change `
-        -Arguments @{ PathName = $desiredCommandLine } `
-        -ErrorAction Stop
-    $returnValue = [int]$changeResult.ReturnValue
-    if ($returnValue -ne 0) {
-        throw "Updating the Squid Windows service '$Name' command line failed with Win32_Service.Change return code $returnValue."
-    }
-
-    return $desiredCommandLine
-}
-
 $resolvedInstallRoot = Get-NormalizedPath -Path $InstallRoot
 $resolvedServiceName = Assert-SquidServiceName -Name $ServiceName
 $resolvedSquidExecutable = Resolve-SquidExecutable -Root $resolvedInstallRoot
@@ -244,13 +206,7 @@ switch ($Action) {
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $resolvedServiceName, '-f', $configPath)
 
         Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $true
-        $serviceCommandLine = Set-SquidServiceCommandLine `
-            -Name $resolvedServiceName `
-            -ExecutablePath $resolvedSquidExecutable `
-            -ConfigPath $configPath
-
         Write-Host "Installed Squid Windows service '$resolvedServiceName' using $configPath."
-        Write-Host "Normalized the registered service command line to '$serviceCommandLine'."
     }
 
     'Uninstall' {

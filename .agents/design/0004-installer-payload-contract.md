@@ -101,9 +101,10 @@ The first committed installer contract is:
   and performs config materialization, `squid.exe -k parse`, then service
   registration or removal. It intentionally skips `squid.exe -z` because the
   current native Windows build crashes during cache initialization on Windows
-  runners. After `squid.exe -i` registers the service, the helper rewrites the
-  service command line so it keeps `-f <install>\etc\squid.conf`, because
-  Squid's built-in service registration drops that config override.
+  runners. `squid.exe -i -f <config>` follows Squid's native Windows service
+  model: the service keeps Squid-controlled runtime startup parameters, while
+  the selected config association is persisted separately for the named
+  service.
 - `scripts\installer\Manage-SquidService.ps1` stops a running named service
   before removing it so reinstall and runner cleanup stay reliable.
 - `packaging\wix\Product.wxs` must pass the install root to

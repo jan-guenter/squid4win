@@ -32,9 +32,9 @@ Windows layout:
   `squid.exe -k parse`, but it intentionally skips `squid.exe -z` because the
   current native Windows build crashes during cache initialization on Windows
   runners
-- after `squid.exe -i` registers the Windows service, the installed helper
-  rewrites the service command line so it keeps `-f <install>\etc\squid.conf`;
-  Squid's built-in registration path does not retain that override on its own
+- `squid.exe -i -f <config>` follows Squid's native Windows service model: the
+  service keeps Squid-controlled runtime startup parameters, while the selected
+  config association is persisted separately for the named service
 - the WiX service custom actions pass the install root to `installer\svc.ps1`
   as `"[INSTALLFOLDER]."` rather than raw `"[INSTALLFOLDER]"` so the trailing
   directory separator does not escape the closing quote in the underlying

@@ -86,9 +86,9 @@ orchestration model.
 The installed service helper currently validates generated configs with
 `squid.exe -k parse` but intentionally skips `squid.exe -z` because the current
 native Windows build crashes during cache initialization on Windows runners.
-After `squid.exe -i` registers the Windows service, the helper also rewrites
-the service command line so it retains `-f <install>\etc\squid.conf`; Squid's
-built-in registration path does not preserve that override on its own.
+`squid.exe -i -f <config>` follows Squid's native Windows service model: the
+service keeps Squid-controlled runtime startup parameters, while the selected
+config association is persisted separately for the named service.
 
 Likewise, any remaining tray-related Conan packaging or editable flows should
 be treated as migration leftovers or compatibility shims, not as the future
