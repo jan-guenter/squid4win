@@ -1945,6 +1945,17 @@ def _run_checked_capture(
     return combined_output
 
 
+def _tail_text_file(path: Path, *, max_lines: int = 40) -> str | None:
+    if not path.is_file():
+        return None
+
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if not lines:
+        return ""
+
+    return "\n".join(lines[-max_lines:])
+
+
 def _relative_summary_path(path: Path, root: Path) -> str:
     try:
         relative_path = path.resolve(strict=False).relative_to(root.resolve(strict=False))
@@ -2369,6 +2380,55 @@ def _query_service(name: str) -> tuple[bool, str | None]:
     return True, match.group(1)
 
 
+def _service_timeout_diagnostics(
+    name: str,
+    *,
+    last_observed_status: str | None,
+    install_root: Path | None = None,
+) -> str:
+    diagnostics: list[str] = []
+    if last_observed_status is not None:
+        diagnostics.append(f"Last observed service status: {last_observed_status}")
+
+    for arguments, label in (
+        (("queryex", name), "sc.exe queryex"),
+        (("qc", name), "sc.exe qc"),
+    ):
+        try:
+            output = _run_sc(arguments)
+        except Exception as exc:  # noqa: BLE001
+            diagnostics.append(f"{label} failed: {exc}")
+            continue
+
+        normalized_output = " | ".join(
+            line.strip() for line in output.splitlines() if line.strip()
+        )
+        diagnostics.append(f"{label}: {normalized_output}")
+
+    if install_root is not None:
+        runtime_paths = (
+            ("Resolved install root", install_root),
+            ("Materialized config", install_root / "etc" / "squid.conf"),
+            ("PID file", install_root / "var" / "run" / "squid.pid"),
+            ("Cache log", install_root / "var" / "logs" / "cache.log"),
+            ("Access log", install_root / "var" / "logs" / "access.log"),
+        )
+        for label, path in runtime_paths:
+            diagnostics.append(
+                f"{label} exists: {path.exists()} ({path})"
+            )
+
+        for label, path in (
+            ("Cache log tail", install_root / "var" / "logs" / "cache.log"),
+            ("Access log tail", install_root / "var" / "logs" / "access.log"),
+        ):
+            tail = _tail_text_file(path)
+            if tail:
+                diagnostics.append(f"{label}:\n{tail}")
+
+    return "\n".join(diagnostics)
+
+
 def _wait_service_registration_state(
     name: str,
     *,
@@ -2395,21 +2455,39 @@ def _wait_service_status(
     *,
     desired_status: str,
     timeout_seconds: int,
+    install_root: Path | None = None,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
+    last_observed_status: str | None = None
     while time.monotonic() < deadline:
         registered, status = _query_service(name)
         if not registered:
             msg = f"The Squid Windows service '{name}' is not registered."
             raise RuntimeError(msg)
+        last_observed_status = status
         if status == desired_status:
             return
         time.sleep(1)
+
+    diagnostics = _service_timeout_diagnostics(
+        name,
+        last_observed_status=last_observed_status,
+        install_root=install_root,
+    )
+    if diagnostics:
+        get_logger("squid4win").error(
+            "Service status diagnostics for '%s' after waiting for '%s':\n%s",
+            name,
+            desired_status,
+            diagnostics,
+        )
 
     msg = (
         f"The Squid Windows service '{name}' did not reach status '{desired_status}' "
         f"within {timeout_seconds} seconds."
     )
+    if last_observed_status is not None:
+        msg = f"{msg} Last observed status: {last_observed_status}."
     raise RuntimeError(msg)
 
 
@@ -2428,9 +2506,19 @@ def _stop_service_if_present(name: str, *, timeout_seconds: int) -> bool:
     return True
 
 
-def _start_service(name: str, *, timeout_seconds: int) -> None:
+def _start_service(
+    name: str,
+    *,
+    timeout_seconds: int,
+    install_root: Path | None = None,
+) -> None:
     _run_sc(("start", name), acceptable_exit_codes=(0, 1056))
-    _wait_service_status(name, desired_status="RUNNING", timeout_seconds=timeout_seconds)
+    _wait_service_status(
+        name,
+        desired_status="RUNNING",
+        timeout_seconds=timeout_seconds,
+        install_root=install_root,
+    )
 
 
 def _service_command_line(name: str) -> str:
@@ -2559,6 +2647,31 @@ def _best_effort_service_validation_cleanup(
     return CleanupResult(actions=tuple(actions), issues=tuple(issues))
 
 
+def _default_service_validation_install_root(validation_token: str) -> Path:
+    return (
+        Path(os.getenv("ProgramData", r"C:\ProgramData"))
+        / "Squid4Win"
+        / "service-validation"
+        / validation_token
+        / "installed"
+    )
+
+
+def _capture_service_validation_install_root(
+    *,
+    install_root: Path,
+    validation_root: Path,
+) -> Path | None:
+    if not install_root.is_dir():
+        return None
+
+    snapshot_root = validation_root / "installed-root"
+    _remove_tree(snapshot_root)
+    snapshot_root.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(install_root, snapshot_root, dirs_exist_ok=True)
+    return snapshot_root
+
+
 def _write_service_runner_validation_summary(
     result: ServiceRunnerValidationResult,
     *,
@@ -2613,7 +2726,7 @@ def run_service_runner_validation(
     validation_root = artifact_base_root / "service-validation" / validation_token
     install_root = _resolved_or_default(
         options.install_root,
-        validation_root / "installed",
+        _default_service_validation_install_root(validation_token),
         base=paths.repository_root,
     )
 
@@ -2730,7 +2843,11 @@ def run_service_runner_validation(
             )
             raise RuntimeError(msg)
 
-        _start_service(service_name, timeout_seconds=options.service_timeout_seconds)
+        _start_service(
+            service_name,
+            timeout_seconds=options.service_timeout_seconds,
+            install_root=install_root,
+        )
         _stop_service_if_present(service_name, timeout_seconds=options.service_timeout_seconds)
         _run_msiexec(
             ("/x", os.fspath(msi_path), "/qn", "/norestart"),
@@ -2744,6 +2861,22 @@ def run_service_runner_validation(
         )
     except Exception as exc:  # noqa: BLE001
         caught_error = exc
+        try:
+            snapshot_root = _capture_service_validation_install_root(
+                install_root=install_root,
+                validation_root=validation_root,
+            )
+            if snapshot_root is not None:
+                logger.info(
+                    "Captured installed service validation tree at %s before cleanup.",
+                    snapshot_root,
+                )
+        except Exception as snapshot_exc:  # noqa: BLE001
+            logger.warning(
+                "Capturing the installed service validation tree from %s failed: %s",
+                install_root,
+                snapshot_exc,
+            )
     finally:
         cleanup_result = _best_effort_service_validation_cleanup(
             install_root=install_root,
