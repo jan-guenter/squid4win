@@ -67,7 +67,7 @@ def _json_object_from_path(path: Path | None) -> dict[str, Any] | None:
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return None
 
     if isinstance(payload, dict):
@@ -218,10 +218,9 @@ class GitHubActionsContext(BaseModel):
     )
     state_path: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_STATE"))
 
-    @model_validator(mode="after")
-    def populate_event_details(self) -> GitHubActionsContext:
+    def model_post_init(self, __context: Any) -> None:
         if self.event_payload is None:
-            return self
+            return
 
         updates: dict[str, object] = {}
         if self.repository is None:
@@ -275,9 +274,8 @@ class GitHubActionsContext(BaseModel):
                 updates["actor"] = actor
 
         if updates:
-            return self.model_copy(update=updates)
-
-        return self
+            for field_name, field_value in updates.items():
+                object.__setattr__(self, field_name, field_value)
 
 
 class RepositoryPaths(BaseModel):
