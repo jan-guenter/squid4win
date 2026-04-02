@@ -104,8 +104,11 @@ The first committed installer contract is:
   `squid.exe -i -f <config>` follows Squid's native Windows service model: the
   service keeps Squid-controlled runtime startup parameters, while the selected
   config association is persisted separately for the named service. The helper
-  must verify that registry-backed `ConfigFile` entry after registration so the
-  service does not fall back to the compiled default config path.
+  must verify the registry-backed `ConfigFile` and `CommandLine` entries after
+  registration so the service and spawned Squid processes do not fall back to
+  the compiled default config path. Because upstream service startup splits the
+  stored `CommandLine` on whitespace without quote support, the install root
+  used for service registration must remain space-free.
 - `scripts\installer\Manage-SquidService.ps1` stops a running named service
   before removing it so reinstall and runner cleanup stay reliable.
 - `packaging\wix\Product.wxs` must pass the install root to

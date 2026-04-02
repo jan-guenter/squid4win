@@ -102,8 +102,11 @@ The target architecture is:
   `squid.exe -i -f <config>` follows Squid's native Windows service model: the
   service keeps Squid-controlled runtime startup parameters, while the selected
   config association is persisted separately for the named service. The helper
-  now verifies that registry-backed `ConfigFile` entry so service startup does
-  not fall back to the compiled default config path.
+  now verifies the registry-backed `ConfigFile` and `CommandLine` entries so
+  service startup and spawned Squid processes do not fall back to the compiled
+  default config path. Because upstream service startup splits the stored
+  `CommandLine` on whitespace without quote support, the install root used for
+  service registration must remain space-free.
 
 ## Alternatives considered
 

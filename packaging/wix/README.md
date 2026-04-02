@@ -34,8 +34,11 @@ Windows layout:
 - `squid.exe -i -f <config>` follows Squid's native Windows service model: the
   service keeps Squid-controlled runtime startup parameters, while the selected
   config association is persisted separately for the named service; the helper
-  explicitly verifies that registry-backed `ConfigFile` value after
-  registration so runtime startup does not fall back to compiled defaults
+  explicitly verifies the registry-backed `ConfigFile` and `CommandLine` values
+  after registration so runtime startup and spawned Squid processes do not fall
+  back to compiled defaults. Because upstream service startup splits the stored
+  `CommandLine` on whitespace without quote support, the install root used for
+  service registration must remain space-free
 - the WiX service custom actions pass the install root to `installer\svc.ps1`
   as `"[INSTALLFOLDER]."` rather than raw `"[INSTALLFOLDER]"` so the trailing
   directory separator does not escape the closing quote in the underlying

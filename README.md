@@ -92,8 +92,11 @@ then registers the named Windows service with `squid.exe -i`.
 `squid.exe -i -f <config>` follows Squid's native Windows service model: the
 service keeps Squid-controlled runtime startup parameters, while the selected
 config association is persisted separately for the named service. The helper
-now verifies that registry-backed `ConfigFile` association explicitly so
-service startup does not fall back to Squid's compiled default config path.
+now verifies the registry-backed `ConfigFile` and `CommandLine` values
+explicitly so service startup and spawned Squid processes do not fall back to
+Squid's compiled default config path. Because upstream service startup splits
+the stored `CommandLine` on whitespace without quote support, the install root
+used for service registration must remain space-free.
 
 Likewise, any remaining tray-related Conan packaging or editable flows should
 be treated as migration leftovers or compatibility shims, not as the future

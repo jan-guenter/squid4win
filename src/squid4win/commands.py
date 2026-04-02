@@ -153,9 +153,7 @@ def _recipe_option_arguments(
     if isinstance(msys2_settings, dict):
         packages = _string_list(msys2_settings.get("packages", []))
         if packages:
-            arguments.extend(
-                ["-o:b", f"msys2/*:additional_packages={','.join(packages)}"]
-            )
+            arguments.extend(["-o:b", f"msys2/*:additional_packages={','.join(packages)}"])
 
     mingw_settings = build_settings.get("mingw_builds") or {}
     if isinstance(mingw_settings, dict):
@@ -578,9 +576,7 @@ def _validate_runtime_notice_coverage(
     if unused_notice_entries:
         msg = (
             "build.runtime_notice_artifacts declares DLLs that were not bundled into the "
-            "staged payload: "
-            + ", ".join(unused_notice_entries)
-            + "."
+            "staged payload: " + ", ".join(unused_notice_entries) + "."
         )
         raise ValueError(msg)
 
@@ -986,9 +982,7 @@ def _materialize_staged_squid_bundle(
 
     if options.with_packaging_support:
         source_root = (
-            context.paths.repository_root
-            / "sources"
-            / f"squid-{release_metadata['version']}"
+            context.paths.repository_root / "sources" / f"squid-{release_metadata['version']}"
         )
         licenses_root, _, _ = _copy_packaging_support_files(
             context.paths,
@@ -1189,9 +1183,7 @@ def _build_lock(lock_path: Path, work_root: Path) -> Iterator[None]:
     try:
         with os.fdopen(descriptor, "w", encoding="ascii", newline="\n") as handle:
             handle.write(f"pid={os.getpid()}\n")
-            handle.write(
-                f"started_at={datetime.now(UTC).isoformat(timespec='seconds')}\n"
-            )
+            handle.write(f"started_at={datetime.now(UTC).isoformat(timespec='seconds')}\n")
             handle.write(f"work_root={work_root}\n")
         yield
     finally:
@@ -1789,8 +1781,8 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
     release_metadata = _load_json_object(metadata_path)
     with _build_lock(context.layout.build_lock_path, context.layout.conan_output_root):
         if options.clean and not options.bootstrap_only:
-            source_root = context.paths.repository_root / "sources" / (
-                f"squid-{release_metadata['version']}"
+            source_root = (
+                context.paths.repository_root / "sources" / (f"squid-{release_metadata['version']}")
             )
             tray_layout = TrayBuildLayout.create(
                 context.paths.repository_root,
@@ -1848,11 +1840,7 @@ def _discover_squid_binary(install_root: Path) -> Path:
         return squid_executable
 
     discovered_binary = next(
-        (
-            candidate
-            for candidate in sorted(install_root.rglob("squid.exe"))
-            if candidate.is_file()
-        ),
+        (candidate for candidate in sorted(install_root.rglob("squid.exe")) if candidate.is_file()),
         None,
     )
     if discovered_binary is None:
@@ -2019,9 +2007,7 @@ def _write_smoke_test_summary(
     if result.notices_path is not None:
         summary_lines.append(f"- Notices bundle: `{result.notices_path}`")
     if result.security_file_certgen_path is not None:
-        summary_lines.append(
-            f"- security_file_certgen: `{result.security_file_certgen_path}`"
-        )
+        summary_lines.append(f"- security_file_certgen: `{result.security_file_certgen_path}`")
 
     append_step_summary("\n".join(summary_lines) + "\n")
 
@@ -2076,11 +2062,7 @@ def run_smoke_test(options: SmokeTestOptions, runner: PlanRunner, *, execute: bo
         _smoke_test_manifest_sections(install_root)
     )
     notices_path = install_root / "THIRD-PARTY-NOTICES.txt"
-    if (
-        options.require_notices
-        and source_manifest_path is not None
-        and not notices_path.is_file()
-    ):
+    if options.require_notices and source_manifest_path is not None and not notices_path.is_file():
         msg = (
             f"Expected THIRD-PARTY-NOTICES.txt under '{install_root}' whenever "
             "source-manifest.json is present."
@@ -2171,10 +2153,7 @@ def run_smoke_test(options: SmokeTestOptions, runner: PlanRunner, *, execute: bo
         description="squid.exe -v",
     )
     if expected_version not in version_output:
-        msg = (
-            f"Expected squid version {expected_version} but version output was: "
-            f"{version_output}"
-        )
+        msg = f"Expected squid version {expected_version} but version output was: {version_output}"
         raise RuntimeError(msg)
 
     security_file_certgen_path = install_root / "libexec" / "security_file_certgen.exe"
@@ -2214,7 +2193,7 @@ def _is_windows_administrator() -> bool:
 
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except (AttributeError, OSError):
+    except AttributeError, OSError:
         return False
 
 
@@ -2342,9 +2321,7 @@ def _run_sc(
     )
     output = _combined_process_output(completed)
     if completed.returncode not in acceptable_exit_codes:
-        msg = (
-            f"sc.exe {' '.join(arguments)} failed with exit code {completed.returncode}."
-        )
+        msg = f"sc.exe {' '.join(arguments)} failed with exit code {completed.returncode}."
         if output:
             msg = f"{msg} Output: {output}"
         raise RuntimeError(msg)
@@ -2385,6 +2362,44 @@ def _query_service(name: str) -> tuple[bool, str | None]:
     return True, match.group(1)
 
 
+def _service_registry_path(name: str) -> str:
+    return rf"SOFTWARE\squid-cache.org\Squid\{name}"
+
+
+def _service_registry_values(name: str) -> dict[str, str]:
+    if os.name != "nt":
+        return {}
+
+    import winreg
+
+    values: dict[str, str] = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _service_registry_path(name)) as handle:
+            for value_name in ("ConfigFile", "CommandLine"):
+                try:
+                    value, _ = winreg.QueryValueEx(handle, value_name)
+                except FileNotFoundError:
+                    continue
+                if isinstance(value, str) and value:
+                    values[value_name] = value
+    except FileNotFoundError:
+        return {}
+
+    return values
+
+
+def _normalized_windows_path_text(path_text: str) -> str:
+    return os.path.normcase(os.path.normpath(path_text))
+
+
+def _service_registry_command_line_config_path(command_line: str) -> str | None:
+    match = re.search(r"(?:^|\s)-f\s+(\S+)", command_line)
+    if match is None:
+        return None
+
+    return match.group(1)
+
+
 def _service_timeout_diagnostics(
     name: str,
     *,
@@ -2405,10 +2420,20 @@ def _service_timeout_diagnostics(
             diagnostics.append(f"{label} failed: {exc}")
             continue
 
-        normalized_output = " | ".join(
-            line.strip() for line in output.splitlines() if line.strip()
-        )
+        normalized_output = " | ".join(line.strip() for line in output.splitlines() if line.strip())
         diagnostics.append(f"{label}: {normalized_output}")
+
+    registry_path = rf"HKLM\{_service_registry_path(name)}"
+    registry_values = _service_registry_values(name)
+    if registry_values:
+        normalized_registry_values = " | ".join(
+            f"{key}={value}" for key, value in registry_values.items()
+        )
+        diagnostics.append(
+            f"Squid service registry values ({registry_path}): {normalized_registry_values}"
+        )
+    else:
+        diagnostics.append(f"Squid service registry values are unavailable at {registry_path}")
 
     if install_root is not None:
         runtime_paths = (
@@ -2417,15 +2442,15 @@ def _service_timeout_diagnostics(
             ("PID file", install_root / "var" / "run" / "squid.pid"),
             ("Cache log", install_root / "var" / "logs" / "cache.log"),
             ("Access log", install_root / "var" / "logs" / "access.log"),
+            ("Squid stderr log", install_root / "sbin" / "squid.exe.log"),
         )
         for label, path in runtime_paths:
-            diagnostics.append(
-                f"{label} exists: {path.exists()} ({path})"
-            )
+            diagnostics.append(f"{label} exists: {path.exists()} ({path})")
 
         for label, path in (
             ("Cache log tail", install_root / "var" / "logs" / "cache.log"),
             ("Access log tail", install_root / "var" / "logs" / "access.log"),
+            ("Squid stderr log tail", install_root / "sbin" / "squid.exe.log"),
         ):
             tail = _tail_text_file(path)
             if tail:
@@ -2839,6 +2864,56 @@ def run_service_runner_validation(
             service_name,
             present=True,
             timeout_seconds=options.service_timeout_seconds,
+        )
+        registry_path = rf"HKLM\{_service_registry_path(service_name)}"
+        expected_registry_config_path = os.fspath(install_root / "etc" / "squid.conf")
+        registry_values = _service_registry_values(service_name)
+        actual_registry_config_path = registry_values.get("ConfigFile")
+        if actual_registry_config_path is None:
+            msg = (
+                f"The installed service registry key '{registry_path}' did not contain "
+                "a ConfigFile value."
+            )
+            raise RuntimeError(msg)
+        if _normalized_windows_path_text(
+            actual_registry_config_path
+        ) != _normalized_windows_path_text(expected_registry_config_path):
+            msg = (
+                f"The installed service registry key '{registry_path}' stored ConfigFile="
+                f"'{actual_registry_config_path}', expected '{expected_registry_config_path}'."
+            )
+            raise RuntimeError(msg)
+        actual_registry_command_line = registry_values.get("CommandLine")
+        if actual_registry_command_line is None:
+            msg = (
+                f"The installed service registry key '{registry_path}' did not contain "
+                "a CommandLine value."
+            )
+            raise RuntimeError(msg)
+        registry_command_line_config_path = _service_registry_command_line_config_path(
+            actual_registry_command_line
+        )
+        if registry_command_line_config_path is None:
+            msg = (
+                f"The installed service registry key '{registry_path}' stored CommandLine="
+                f"'{actual_registry_command_line}', which did not contain '-f <config>'."
+            )
+            raise RuntimeError(msg)
+        if _normalized_windows_path_text(
+            registry_command_line_config_path
+        ) != _normalized_windows_path_text(expected_registry_config_path):
+            msg = (
+                f"The installed service registry key '{registry_path}' stored CommandLine="
+                f"'{actual_registry_command_line}', expected it to reference "
+                f"'{expected_registry_config_path}'."
+            )
+            raise RuntimeError(msg)
+        logger.info(
+            "Validated Squid service registry values for '%s' at %s: ConfigFile=%s; CommandLine=%s",
+            service_name,
+            registry_path,
+            actual_registry_config_path,
+            actual_registry_command_line,
         )
         service_command_line = _service_command_line(service_name)
         if service_name not in service_command_line:
