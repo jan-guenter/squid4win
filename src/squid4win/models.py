@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
@@ -67,7 +68,7 @@ def _json_object_from_path(path: Path | None) -> dict[str, Any] | None:
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return None
 
     if isinstance(payload, dict):
@@ -128,6 +129,45 @@ def _pull_request_number_from_event(payload: dict[str, Any] | None) -> int | Non
 
 def _event_payload_from_env() -> dict[str, Any] | None:
     return _json_object_from_path(_path_from_env("GITHUB_EVENT_PATH"))
+
+
+_GITHUB_ACTIONS_EVENT_EXTRACTORS: tuple[
+    tuple[str, Callable[[dict[str, Any]], object | None]],
+    ...,
+] = (
+    ("repository", lambda payload: _string_at_path(payload, "repository", "full_name")),
+    ("event_action", lambda payload: _string_at_path(payload, "action")),
+    ("pull_request_number", _pull_request_number_from_event),
+    ("base_ref", lambda payload: _string_at_path(payload, "pull_request", "base", "ref")),
+    ("head_ref", lambda payload: _string_at_path(payload, "pull_request", "head", "ref")),
+    ("base_sha", lambda payload: _string_at_path(payload, "pull_request", "base", "sha")),
+    ("head_sha", lambda payload: _string_at_path(payload, "pull_request", "head", "sha")),
+    (
+        "sha",
+        lambda payload: (
+            _string_at_path(payload, "after")
+            or _string_at_path(payload, "pull_request", "head", "sha")
+        ),
+    ),
+    ("actor", lambda payload: _string_at_path(payload, "sender", "login")),
+)
+
+
+def _github_actions_event_updates(context: GitHubActionsContext) -> dict[str, object]:
+    payload = context.event_payload
+    if payload is None:
+        return {}
+
+    updates: dict[str, object] = {}
+    for field_name, extractor in _GITHUB_ACTIONS_EVENT_EXTRACTORS:
+        if getattr(context, field_name) is not None:
+            continue
+
+        value = extractor(payload)
+        if value is not None:
+            updates[field_name] = value
+
+    return updates
 
 
 def _expected_squid_tag(version: str) -> str:
@@ -218,66 +258,9 @@ class GitHubActionsContext(BaseModel):
     )
     state_path: Path | None = Field(default_factory=lambda: _path_from_env("GITHUB_STATE"))
 
-    @model_validator(mode="after")
-    def populate_event_details(self) -> GitHubActionsContext:
-        if self.event_payload is None:
-            return self
-
-        updates: dict[str, object] = {}
-        if self.repository is None:
-            repository = _string_at_path(self.event_payload, "repository", "full_name")
-            if repository is not None:
-                updates["repository"] = repository
-
-        if self.event_action is None:
-            event_action = _string_at_path(self.event_payload, "action")
-            if event_action is not None:
-                updates["event_action"] = event_action
-
-        if self.pull_request_number is None:
-            pull_request_number = _pull_request_number_from_event(self.event_payload)
-            if pull_request_number is not None:
-                updates["pull_request_number"] = pull_request_number
-
-        if self.base_ref is None:
-            base_ref = _string_at_path(self.event_payload, "pull_request", "base", "ref")
-            if base_ref is not None:
-                updates["base_ref"] = base_ref
-
-        if self.head_ref is None:
-            head_ref = _string_at_path(self.event_payload, "pull_request", "head", "ref")
-            if head_ref is not None:
-                updates["head_ref"] = head_ref
-
-        if self.base_sha is None:
-            base_sha = _string_at_path(self.event_payload, "pull_request", "base", "sha")
-            if base_sha is not None:
-                updates["base_sha"] = base_sha
-
-        if self.head_sha is None:
-            head_sha = _string_at_path(self.event_payload, "pull_request", "head", "sha")
-            if head_sha is not None:
-                updates["head_sha"] = head_sha
-
-        if self.sha is None:
-            sha = _string_at_path(self.event_payload, "after") or _string_at_path(
-                self.event_payload,
-                "pull_request",
-                "head",
-                "sha",
-            )
-            if sha is not None:
-                updates["sha"] = sha
-
-        if self.actor is None:
-            actor = _string_at_path(self.event_payload, "sender", "login")
-            if actor is not None:
-                updates["actor"] = actor
-
-        if updates:
-            return self.model_copy(update=updates)
-
-        return self
+    def model_post_init(self, __context: Any) -> None:
+        for field_name, field_value in _github_actions_event_updates(self).items():
+            object.__setattr__(self, field_name, field_value)
 
 
 class RepositoryPaths(BaseModel):
