@@ -21,11 +21,11 @@ Repo-specific directives:
   not route it back through Conan packaging, lockfiles, or editables.
 - Keep PowerShell only where Windows installer integration genuinely requires
   it, such as MSI custom actions or shipped install-time helper scripts.
-- Keep the installed service helper on the current `squid.exe -k parse` plus
-  `-i`/`-r` flow; do not reintroduce `squid.exe -z` without fresh runner
-  validation because the current native Windows build crashes during cache
-  initialization. Keep the helper's post-`-i` service command-line rewrite so
-  the registered Windows service retains the installed `squid.conf` path.
+- Keep the installed service helper on the current `squid.exe -k parse`,
+  `squid.exe -z`, then `-i`/`-r` flow. `squid.exe -i -f <config>` follows
+  Squid's native Windows service model: the service keeps Squid-controlled
+  runtime startup parameters, while the selected config association is
+  persisted separately for the named service.
 - Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conandata.yml` aligned when the Squid pin changes. Prefer
@@ -42,7 +42,11 @@ Repo-specific directives:
   repo-owned skills under `skills\`; `skills\gfm\SKILL.md` is repo-owned
   guidance, not vendored content.
 - Keep markdown policy centralized in `skills\gfm\SKILL.md`, markdown audits,
-  and markdownlint; do not create competing local markdown rules.
+  `.mega-linter.yml`, and markdownlint; do not create competing local markdown
+  rules.
+- Keep MegaLinter rule files under `.github\linters\` and preserve `ty` as the
+  companion Python type-check step until the repo intentionally adopts a
+  MegaLinter-native replacement.
 - The last cited end-to-end validation still comes from the legacy PowerShell +
   tray-Conan flow that predated the current Python-owned entry points.
 - Treat that legacy validation as historical proof only. Do not claim

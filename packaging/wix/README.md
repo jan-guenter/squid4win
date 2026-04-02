@@ -29,9 +29,8 @@ Windows layout:
   `-n` contract requires that override to stay alphanumeric and no longer than
   32 characters
 - the installed service helper validates generated configs with
-  `squid.exe -k parse`, but it intentionally skips `squid.exe -z` because the
-  current native Windows build crashes during cache initialization on Windows
-  runners
+  `squid.exe -k parse`, initializes cache directories with `squid.exe -z`, and
+  then registers the named service
 - `squid.exe -i -f <config>` follows Squid's native Windows service model: the
   service keeps Squid-controlled runtime startup parameters, while the selected
   config association is persisted separately for the named service

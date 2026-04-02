@@ -1,127 +1,118 @@
 ---
 name: conan2-package-creation
-description: Conan 2 package-authoring skill for creating recipes, modeling binary compatibility, testing packages, using editables, and publishing packages safely.
+description: Guide Conan 2 package authoring for recipes, metadata, binary compatibility, test_package flows, editables, and publication.
+skill_api_version: 1
 ---
 
 # Conan 2 package creation
 
-Guide agents through authoring Conan 2 packages: bootstrapping with `conan new`,
-writing robust recipes, handling sources, shaping package IDs, testing with
-`test_package`, iterating locally, and publishing to remotes.
+Use this skill when the task is about **authoring or refactoring** a Conan 2
+package recipe.
 
-## When to use
+## Use this skill for
 
-- "Create a Conan 2 package for this library or tool"
-- "Write or refactor a `conanfile.py`"
-- "Add `test_package` coverage"
-- "Model options, settings, and package IDs correctly"
-- "Package headers, libraries, tools, or prebuilt artifacts"
-- "Use editable packages while developing producer and consumer together"
-- "Upload or promote internally published Conan packages"
+- creating a new `conanfile.py` recipe
+- refactoring an existing Conan 2 recipe
+- modeling settings, options, and package IDs correctly
+- packaging libraries, tools, headers, or prebuilt artifacts
+- adding or improving `test_package`
+- using editables while developing producer and consumer together
+- validating and publishing packages to remotes
 
-## Instructions
+## Do not use this skill for
 
-1. Bootstrap from a Conan 2 template when possible.
-   - Start with `conan new` instead of writing a recipe from scratch unless the
-     project already has a partial recipe.
-   - For CMake libraries, `conan new cmake_lib -d name=<name> -d version=<ver>`
-     is the standard tutorial starting point.
-   - Preserve plain build-system files; do not inject Conan-specific logic into
-     `CMakeLists.txt` unless the project genuinely needs it.
+- simple dependency consumption in an existing project; use `conan2-usage`
+- general build-system integration work that is not primarily recipe authoring
 
-2. Fill in recipe metadata and package identity deliberately.
+## Working method
+
+1. Bootstrap from Conan 2 templates when practical.
+   - Start with `conan new` instead of hand-writing a recipe from scratch unless
+     the project already has a partial recipe worth preserving.
+   - Preserve the project's normal build-system files; do not inject Conan logic
+     into them unless the project genuinely needs it.
+
+2. Fill in recipe metadata deliberately.
    - Set `name`, `version`, license, description, URL, and topics.
    - Keep package names lowercase and Conan-friendly.
-   - If the package does not expose a `shared` option, define an explicit
-     `package_type` when helpful so consumers understand the artifact kind.
+   - Use `package_type` when it helps communicate whether the recipe produces a
+     library, application, header-only package, or tool.
 
 3. Model settings and options before writing build logic.
-   - Use `settings` for platform/compiler/build configuration inputs.
-   - Use `options` for package-level toggles like `shared`, `fPIC`, or feature
-     flags.
-   - Use `config_options()` to delete options that are invalid before they take
-     a value, for example `fPIC` on Windows.
-   - Use `configure()` to remove irrelevant options or settings from the final
-     binary model, such as `fPIC` when `shared=True`.
-   - For C libraries, remove `compiler.cppstd` and `compiler.libcxx` if they do
-     not affect the binary, or use `languages = "C"` where appropriate.
+   - Use `settings` for platform, compiler, architecture, and build type.
+   - Use `options` for package-specific toggles such as `shared`, `fPIC`, or
+     feature flags.
+   - Use `config_options()` to remove invalid options before they take values.
+   - Use `configure()` to remove irrelevant values from the final binary model.
    - For header-only libraries, use `package_id()` with `self.info.clear()`.
 
 4. Define `layout()` early and keep it accurate.
    - Prefer `cmake_layout(self)` for conventional CMake projects.
-   - If editables or a nonstandard tree matter, define `self.folders.source`,
-     `self.folders.build`, and `self.folders.generators` explicitly.
-   - For editable packages, also define `self.cpp.source` and `self.cpp.build`
-     so consumers can find headers and binaries in the working tree.
+   - For nonstandard trees or editable flows, define source, build, and
+     generators folders explicitly.
+   - When editables matter, also define the `self.cpp.source` and
+     `self.cpp.build` locations consumers should use.
 
 5. Treat sources as immutable.
-   - Use `exports_sources` only when the source files live beside the recipe.
-   - In `source()`, pin immutable tags or commits and use checksums for
-     downloaded archives.
+   - Use `exports_sources` only when the relevant source files live beside the
+     recipe.
+   - In `source()`, pin immutable tags or commits and verify downloads with
+     checksums.
+   - Prefer `conandata.yml` for version-specific URLs, hashes, and patch data.
    - Do not use moving branches, mutable archives, or HEAD in production
      recipes.
-   - Prefer `conandata.yml` to store version-specific URLs and hashes.
 
 6. Add dependencies with the correct trait.
-   - Use `self.requires()` for normal libraries.
-   - Use `self.tool_requires()` for executable tools.
-   - Use `self.test_requires()` for test frameworks and package-only test
+   - Use `self.requires()` for libraries.
+   - Use `self.tool_requires()` for executable build tools.
+   - Use `self.test_requires()` for test frameworks or package-focused test
      helpers.
-   - Use `validate()` to reject unsupported compiler versions, standards,
-     architectures, or dependency combinations.
-   - Use `transitive_headers=True` only when your public headers actually expose
-     another dependency's headers.
+   - Use `validate()` to reject unsupported compiler versions, architectures,
+     standards, or dependency combinations.
 
 7. Keep `generate()`, `build()`, and `package()` separated by responsibility.
-   - `generate()` prepares the build: toolchains, presets, copied resources,
-     configuration values, and environment files.
-   - `build()` should stay small and mostly call the build helper plus any
-     package-level tests.
-   - Patch in `build()` only when the patch is configuration-specific and cannot
-     live in `source()`.
-   - `package()` should prefer `cmake.install()` if the project already installs
-     correctly; otherwise use targeted `copy()` calls.
+   - `generate()` prepares toolchains, presets, copied resources, and other
+     generated build inputs.
+   - `build()` should stay small and mostly delegate to the build helper.
+   - `package()` should prefer the project's normal install flow when it exists,
+     otherwise use targeted `copy()` calls.
    - Always package the license file.
-   - Normalize or clean symlinks when the package contents require it.
 
 8. Export accurate consumer metadata in `package_info()`.
-   - Set `self.cpp_info.libs` for libraries consumers must link.
-   - Use `set_property()` for generator-specific names like
+   - Set `self.cpp_info.libs` for libraries that consumers must link.
+   - Use `set_property()` for generator-specific names such as
      `cmake_target_name`.
-   - Use `buildenv_info`, `runenv_info`, and `conf_info` only when consumers
-     genuinely need those values.
-   - Use components when a single package provides multiple libraries.
+   - Use components when one package provides multiple libraries.
+   - Only expose build or run environment values when consumers genuinely need
+     them.
 
-9. Keep `test_package` minimal and package-focused.
-   - `test_package` proves the package can be consumed, not that the library is
-     functionally correct in depth.
-   - Use `self.tested_reference_str` in the test package recipe.
-   - Build a tiny example consumer, then run it from `test()` with `can_run()`
-     and `env="conanrun"`.
-   - Put real unit and functional tests in the packaged project's normal test
-     flow, usually inside `build()`.
+9. Keep `test_package` small and package-focused.
+   - `test_package` proves the package can be consumed; it is not the place for
+     deep functional testing.
+   - Use `self.tested_reference_str` in the test recipe.
+   - Build a tiny example consumer and run it with `can_run()` plus
+     `env="conanrun"`.
 
-10. Use the local development flow when iterating on recipes.
-    - Start with `conan source`, then `conan install`, then `conan build`.
+10. Use local development flows intentionally.
+    - Use `conan source`, `conan install`, and `conan build` while iterating on a
+      recipe.
     - Use `conan export-pkg` when you want to package locally built artifacts
-      into the cache without a full `conan create`.
+      into the cache.
     - Use `conan editable add` when producer and consumer must evolve together.
-    - If multiple editables are involved, `conan build <consumer> --build=editable`
-      can build them in order.
-    - Do not upload packages built against editable upstreams without recreating
-      them against released or in-cache dependencies.
+    - Do not publish artifacts built against editable upstreams without
+      recreating them against released or cached dependencies.
 
 11. Publish through controlled remotes and promotions.
     - Validate locally with `conan create` before upload.
-    - Use `conan upload <ref> -r=<remote>` for the target remote.
+    - Use `conan upload <ref> -r=<remote>` for the destination remote.
     - Protected remotes should generally be writable only from CI.
-    - Promote immutable packages between repositories to represent stages such as
-      testing and release; do not use `user/channel` for that purpose.
+    - Represent maturity through repository promotion, not through
+      `user/channel`.
 
-12. Avoid forbidden and brittle patterns.
-    - Never call Conan from inside a recipe, hook, or build script that Conan is
-      already executing.
-    - Never mutate settings or conf values inside recipes.
+12. Avoid brittle patterns.
+    - Never call Conan from inside a recipe or from build logic Conan is already
+      executing.
+    - Never mutate settings or configuration values inside recipes.
     - Never modify Conan cache contents manually.
     - Never mutate packaged artifacts from `package_info()` or `package_id()`.
 
@@ -187,6 +178,7 @@ sources:
 from conan.tools.files import get
 
 
+
 def source(self):
     get(self, **self.conan_data["sources"][self.version])
 ```
@@ -222,24 +214,15 @@ class HelloTestConan(ConanFile):
             self.run(cmd, env="conanrun")
 ```
 
-For more snippets and local-dev commands, see
-[`references/recipe-patterns.md`](references/recipe-patterns.md).
-
-## Conan 2 package-authoring best practices
+## Best practices
 
 - Prefer `conan new` templates over hand-written boilerplate.
 - Prepare the build in `generate()` and keep `build()` small.
 - Keep sources immutable and versioned.
 - Package licenses consistently.
 - Keep `test_package` tiny and package-focused.
-- Use editables for local producer/consumer iteration, not as a publishing
+- Use editables for local producer-consumer iteration, not as a publishing
   shortcut.
 - Publish through CI-controlled remotes and repository promotion.
 - Never modify the Conan cache manually or invoke Conan recursively from a
   recipe.
-
-## Related skills
-
-- Use `conan2-usage` when the main task is consuming existing Conan packages,
-  managing remotes, or improving reproducibility in a consumer project.
-- Use `conan-vcpkg` when the user is still choosing between package managers.

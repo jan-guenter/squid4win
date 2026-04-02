@@ -202,7 +202,8 @@ switch ($Action) {
         }
 
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-k', 'parse', '-f', $configPath)
-        Write-Host "Skipping squid.exe -z during service installation because the current native Windows build crashes during cache initialization."
+        Write-Host "Initializing Squid cache directories with squid.exe -z before service registration."
+        Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-z', '-f', $configPath)
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $resolvedServiceName, '-f', $configPath)
 
         Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $true

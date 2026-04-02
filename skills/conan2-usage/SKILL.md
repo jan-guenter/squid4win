@@ -1,108 +1,97 @@
 ---
 name: conan2-usage
-description: Conan 2 consumer workflows for installing dependencies, managing profiles, integrating with CMake, using remotes, and keeping builds reproducible.
+description: Guide Conan 2 consumer workflows for dependency installation, profiles, generators, remotes, lockfiles, and reproducible builds.
+skill_api_version: 1
 ---
 
 # Conan 2 usage
 
-Guide agents through day-to-day Conan 2 usage: consuming packages, choosing
-`conanfile.txt` vs `conanfile.py`, configuring profiles, integrating with
-CMake, using remotes, and keeping dependency graphs reproducible.
+Use this skill when the task is about **consuming** packages with Conan 2 rather
+than authoring a package recipe from scratch.
 
-## When to use
+## Use this skill for
 
-- "Add a dependency with Conan 2"
-- "Set up Conan 2 for this CMake project"
-- "Use tool packages like CMake or Ninja with Conan"
-- "Cross-compile with Conan host/build profiles"
-- "Lock dependencies for CI or releases"
-- "Upload or consume packages from a remote"
-- "Resolve Conan version conflicts or missing binaries"
+- adding dependencies to an existing project with Conan 2
+- choosing between `conanfile.txt` and `conanfile.py` for a consumer
+- configuring host and build profiles
+- integrating Conan with CMake or another build system
+- managing remotes, lockfiles, and reproducible installs
+- troubleshooting missing binaries, graph drift, or cross-build confusion
 
-## Instructions
+## Do not use this skill for
 
-1. Inspect the existing Conan and build-system state first.
-   - Read `conanfile.py`, `conanfile.txt`, profiles, lockfiles, build scripts,
-     and CI before changing anything.
-   - Identify whether the project already uses Conan 2 conventions and whether
-     it builds with CMake, Meson, Autotools, Visual Studio, or another system.
+- creating or publishing a new Conan package recipe from scratch; use
+  `conan2-package-creation` instead
+- deciding between Conan and a different package manager; use a comparison skill
+  if one is available
+
+## Working method
+
+1. Inspect the current consumer state first.
+   - Read the existing Conan manifest, profiles, lockfiles, build scripts, and
+     CI before changing anything.
+   - Determine whether the project already follows Conan 2 conventions.
    - Do not mix Conan 1 idioms into a Conan 2 project.
 
 2. Choose the right manifest shape.
-   - Use `conanfile.txt` only for simple consumers with fixed requirements and
-     generators.
+   - Use `conanfile.txt` for simple consumers with fixed requirements,
+     generators, and no custom logic.
    - Use `conanfile.py` when you need conditional requirements, custom layout,
-     validation, custom `generate()` logic, resource copying, or a recipe-local
-     `build()` method.
+     validation, custom `generate()` logic, or build-system orchestration.
 
 3. Treat profiles as the source of truth for real builds.
    - `conan profile detect --force` is acceptable for first-run local bootstrap.
-   - In CI, production, and team workflows, prefer explicit profiles or
-     `conan config install`.
+   - For CI, release, and team workflows, prefer explicit checked-in profiles or
+     configuration installed through `conan config install`.
    - For cross-building, always reason in terms of `--profile:build` and
      `--profile:host`.
-   - If concurrent jobs run on the same machine, isolate `CONAN_HOME` per job.
+   - If concurrent jobs share a machine, isolate `CONAN_HOME` per job.
 
-4. Prefer the explicit Conan + build-system flow.
-   - For CMake, run `conan install ...` first, then `cmake --preset ...` or
-     `cmake -DCMAKE_TOOLCHAIN_FILE=...`.
-   - Prefer `CMakeToolchain` plus `CMakeDeps` for the standard tutorial flow.
-   - `CMakeConfigDeps` is a newer alternative when the project can adopt it.
-   - Avoid implicit `cmake-conan` flows unless the project explicitly needs
-     that IDE integration.
+4. Prefer the explicit Conan-plus-build-system flow.
+   - Run `conan install ...` before the native build tool.
+   - For CMake, prefer `CMakeToolchain` plus `CMakeDeps` unless the project has
+     a deliberate reason to use another integration.
+   - Avoid implicit `cmake-conan` flows unless the project explicitly needs that
+     IDE-driven behavior.
 
-5. Use `tool_requires` only for executable build tools.
-   - Good fits: `cmake`, `ninja`, code generators, cross toolchains.
-   - Do not use `tool_requires` for normal libraries.
-   - If the tool package must be used directly, activate the generated build
-     environment (`conanbuild.*`) before invoking it.
-   - For PowerShell-heavy projects, configure
-     `tools.env.virtualenv:powershell=<powershell.exe|pwsh>` in the profile or
-     pass it on the command line so Conan emits `.ps1` activation scripts.
+5. Use dependency traits correctly.
+   - Use normal requirements for libraries the consumer links against.
+   - Use `tool_requires` only for executable build tools such as `cmake`,
+     `ninja`, code generators, or cross toolchains.
+   - Use generated build and run environments when tools or shared libraries need
+     activation.
 
-6. Model settings, options, and runtime environment correctly.
-   - Settings are platform/compiler/build configuration inputs.
-   - Options are package-specific toggles such as `shared=True`.
-   - These values influence the package ID and therefore binary resolution.
-   - When consuming shared libraries, use the generated run environment
-     (`conanrun.*`) so executables can resolve DLLs and shared objects.
+6. Model settings, options, and environments deliberately.
+   - Settings describe platform, compiler, architecture, and build type.
+   - Options describe package-specific toggles such as `shared=True`.
+   - These values affect package IDs and binary resolution.
+   - When consuming shared libraries, activate the generated run environment so
+     executables can resolve dynamic libraries at runtime.
 
-7. Use version ranges intentionally, not casually.
-   - Prefer fixed versions when the project wants predictable upgrades.
-   - Use version ranges only when the consumer explicitly wants newer matching
-     versions without editing the manifest.
-   - If ranges are in use and the project should prefer newer remote versions
-     over cache results, use `--update`.
-   - Pre-releases should stay opt-in.
+7. Use version ranges intentionally.
+   - Prefer fixed versions when the project wants controlled upgrades.
+   - Use version ranges only when the consumer intentionally wants newer
+     compatible versions without editing the manifest.
+   - If ranges are in use and newer remote versions should be preferred over the
+     cache, use `--update`.
 
 8. Use lockfiles for reproducibility.
-   - Capture lockfiles for CI, releases, and team-wide consistency.
-   - Be explicit with `--lockfile=...` in automation, even if Conan can pick up
-     a nearby `conan.lock` automatically.
-   - Use `--lockfile-partial` only when intentionally extending a partially
-     covered graph.
-   - If lockfiles evolve, do it in a controlled way and keep changes reviewable.
+   - Capture lockfiles for CI, release, or team-wide consistency.
+   - Be explicit with `--lockfile=...` in automation.
+   - Use `--lockfile-partial` only when intentionally extending an incomplete
+     lock.
 
-9. Manage remotes and promotions conservatively.
-   - Inspect `conan remote list` before adding or changing remotes.
-   - For production usage, prefer organization-controlled remotes instead of
-     unconstrained direct dependence on ConanCenter.
-   - Protected repositories should be uploadable by CI, not by individual
-     developer workstations.
-   - Model maturity with repository promotion, not with `user/channel`.
+9. Manage remotes conservatively.
+   - Inspect the current remote configuration before adding or changing remotes.
+   - Prefer organization-controlled remotes for production workflows.
+   - Protected repositories should generally be writable by CI rather than by
+     individual developer workstations.
 
-10. Resolve conflicts with the least risky mechanism.
-    - Prefer aligning upstream requirements first.
-    - Treat `override=True` and `force=True` as temporary conflict workarounds,
-      not as the long-term versioning model.
-    - Remember: `force=True` creates a direct dependency, while
-      `override=True` only rewrites an already-transitive one.
-
-11. Troubleshoot by following Conan's binary model.
-    - Missing binary: inspect settings, options, profiles, and package ID
-      inputs before reaching for `--build=missing`.
-    - Wrong runtime search path: activate `conanrun.*`.
-    - Cross-build confusion: verify host/build profiles and `[buildenv]`.
+10. Troubleshoot through Conan's binary model.
+    - Missing binary: inspect settings, options, profiles, and package ID inputs
+      before reaching for `--build=missing`.
+    - Wrong runtime search path: activate the generated run environment.
+    - Cross-build confusion: verify build and host profiles.
     - Graph drift: inspect version ranges, revisions, remotes, `--update`, and
       lockfile usage.
 
@@ -168,24 +157,15 @@ conan upload hello -r=my_remote
 conan install --requires=hello/1.0 -r=my_remote
 ```
 
-For more command patterns, see
-[`references/common-workflows.md`](references/common-workflows.md).
+## Best practices
 
-## Conan 2 best practices
-
-- Keep `build()` simple; prepare the build in `generate()`.
-- Use explicit, checked-in profiles for CI and production.
+- Keep consumer logic as small and explicit as possible.
+- Use checked-in profiles and lockfiles for repeatable automation.
 - Isolate `CONAN_HOME` for parallel jobs because the Conan cache is not
   concurrency-safe.
-- Do not abuse `tool_requires`.
-- Avoid using `force` and `override` as a general versioning strategy.
-- Avoid using `user/channel` to represent maturity or environments.
-- Never call Conan from inside recipes or build scripts already being driven by
-  Conan.
-- Never edit cache contents manually.
-- Use immutable sources and reproducible lockfiles when builds matter.
-
-## Related skills
-
-- Use `conan-vcpkg` when the user is deciding between Conan and vcpkg or when a
-  project mixes both ecosystems.
+- Do not abuse `tool_requires` for normal libraries.
+- Treat `override=True` and `force=True` as deliberate conflict workarounds, not
+  as the default versioning model.
+- Never invoke Conan recursively from a recipe or build script that Conan is
+  already driving.
+- Never edit Conan cache contents manually.

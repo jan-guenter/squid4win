@@ -92,12 +92,11 @@ The target architecture is:
   assembly, portable zip creation, and MSI build. Clean-host and end-to-end
   target-state validation are still pending.
 - The installed service helper currently validates generated configs with
-  `squid.exe -k parse` but intentionally skips `squid.exe -z` because the
-  current native Windows build crashes during cache initialization on Windows
-  runners. `squid.exe -i -f <config>` follows Squid's native Windows service
-  model: the service keeps Squid-controlled runtime startup parameters, while
-  the selected config association is persisted separately for the named
-  service.
+  `squid.exe -k parse`, initializes cache directories with `squid.exe -z`, and
+  then registers the named Windows service with `squid.exe -i`.
+  `squid.exe -i -f <config>` follows Squid's native Windows service model: the
+  service keeps Squid-controlled runtime startup parameters, while the selected
+  config association is persisted separately for the named service.
 
 ## Alternatives considered
 

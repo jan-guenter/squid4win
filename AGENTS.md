@@ -22,14 +22,17 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - The target architecture is one self-contained native Squid Conan recipe plus a
   direct `.NET 10` tray build outside Conan.
 - Repo-level automation is moving to Python 3.14 + `uv`.
+- Repository linting is centered on `.mega-linter.yml` plus
+  `.github\linters\`; `ty` remains a companion Python type-check step outside
+  MegaLinter.
 - PowerShell remains allowed for MSI custom actions and install-time helper
   logic, not as the long-term repo orchestration layer.
-- The installed service helper intentionally skips `squid.exe -z` because the
-  current native Windows build crashes during cache initialization on Windows
-  runners.
-- The installed service helper must rewrite the registered Windows service
-  command line after `squid.exe -i` so the installed service keeps the
-  materialized `etc\squid.conf` path instead of Squid's build-time default.
+- The installed service helper now runs `squid.exe -k parse`, `squid.exe -z`,
+  and then `squid.exe -i` for first-install cache initialization and service
+  registration.
+- `squid.exe -i -f <config>` follows Squid's native Windows service model: the
+  service keeps Squid-controlled runtime startup parameters, while the selected
+  config association is persisted separately for the named service.
 - WiX v4 MSI authoring and payload staging are already committed.
 - The repository's own code and docs are GPL-2.0-or-later.
 - The last cited validation still comes from the legacy PowerShell +
@@ -80,8 +83,10 @@ here.
 - Keep docs truthful about committed implementation, cited validation, and
   migration plans.
 - Keep markdown guidance centralized. Use markdownlint,
-  `skills\gfm\SKILL.md`, and the repo-owned markdown audit direction instead of
-  scattered local rules.
+  `skills\gfm\SKILL.md`, `.mega-linter.yml`, and the repo-owned markdown audit
+  direction instead of scattered local rules.
+- Keep MegaLinter rule files under `.github\linters\` when new first-party lint
+  configuration is required.
 - Treat `skills\` as the canonical home for repo-owned custom skills.
 - Treat `.agents\skills\` as externally synced skills plus symlinks back to
   `skills\`. Do not disturb unrelated skill-vendoring changes.

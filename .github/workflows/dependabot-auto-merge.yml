@@ -23,6 +23,8 @@ jobs:
           script: |
             const allowed = [
               '.github/workflows/',
+              '.github/linters/',
+              '.mega-linter.yml',
               '.github/dependabot.yml',
               '.markdownlint-cli2.jsonc',
               'config/squid-version.json',

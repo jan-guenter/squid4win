@@ -1,0 +1,21 @@
+diff --git a/pristine/squid-7.5/src/ipc_win32.cc b/patched/squid-7.5/src/ipc_win32.cc
+--- a/pristine/squid-7.5/src/ipc_win32.cc
++++ b/patched/squid-7.5/src/ipc_win32.cc
+@@ -35,7 +35,7 @@
+     int crfd;
+     int cwfd;
+     Ip::Address local_addr;
+-    struct addrinfo PS;
++    Ip::Address PS;
+     const char *prog;
+     char **args;
+ };
+@@ -265,7 +265,7 @@
+ 
+     params.cwfd = cwfd;
+ 
+-    params.PS = *aiPS;
++    params.PS = tmp_addr;
+ 
+     params.local_addr = local_addr;
+ 

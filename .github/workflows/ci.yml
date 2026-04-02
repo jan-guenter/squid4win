@@ -28,6 +28,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Run MegaLinter
+        id: megalinter
+        continue-on-error: true
+        uses: oxsecurity/megalinter@8fbdead70d1409964ab3d5afa885e18ee85388bb # v9.4.0
+        env:
+          VALIDATE_ALL_CODEBASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Upload MegaLinter reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: megalinter-reports
+          include-hidden-files: true
+          path: |
+            megalinter-reports
+            mega-linter.log
+
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
@@ -49,48 +66,22 @@ jobs:
       - name: Sync automation environment
         run: uv sync --locked
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
-        with:
-          dotnet-version: 10.0.x
+      - name: Run ty
+        id: ty
+        continue-on-error: true
+        run: uv run ty check src
 
-      - name: Setup Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
-        with:
-          node-version: 20
-
-      - name: Install markdownlint-cli2
-        run: npm install --global --ignore-scripts markdownlint-cli2
-
-      - name: Lint Markdown
-        run: markdownlint-cli2
-
-      - name: Lint Python
+      - name: Fail on lint findings
+        if: ${{ steps.megalinter.outcome != 'success' || steps.ty.outcome != 'success' }}
+        shell: bash
         run: |
-          uv run ruff check src
-          uv run ty check src
-
-      - name: Lint GitHub Actions workflows
-        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2
-
-      - name: Lint PowerShell
-        shell: pwsh
-        run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
-          Invoke-ScriptAnalyzer -Path .\scripts -Recurse -Settings .\scripts\PSScriptAnalyzerSettings.psd1 -EnableExit
-
-      - name: Lint C#
-        shell: pwsh
-        run: |
-          $csharpFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Include *.cs,*.csproj,*.sln,*.slnx -File |
-            Where-Object { $_.FullName -notmatch '[/\\](bin|obj)[/\\]' }
-          if ($csharpFiles.Count -eq 0) {
-            Write-Host 'No C# files detected; skipping dotnet format.'
-            exit 0
-          }
-          $solutionPath = Join-Path $env:GITHUB_WORKSPACE 'Squid4Win.slnx'
-          dotnet format whitespace $solutionPath --verify-no-changes --verbosity minimal
+          if [[ "${{ steps.megalinter.outcome }}" != "success" ]]; then
+            echo "::error::MegaLinter reported blocking findings. See the megalinter-reports artifact for details."
+          fi
+          if [[ "${{ steps.ty.outcome }}" != "success" ]]; then
+            echo "::error::ty reported blocking findings."
+          fi
+          exit 1
 
   build-tray:
     name: Build tray app

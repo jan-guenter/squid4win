@@ -107,8 +107,18 @@ the same pull request. Typical pairings are:
 
 Run the existing validation that matches your change.
 
-For Markdown-only or community-file changes, run markdown lint on each changed
-Markdown file with the repo's existing tool:
+The main repository lint job now runs MegaLinter plus `ty`.
+
+If Docker is available locally, the closest match to CI is:
+
+```powershell
+npx --yes mega-linter-runner --release v9.4.0
+uv sync --locked
+uv run ty check src
+```
+
+For Markdown-only or community-file changes, the lightweight repo-local spot
+check is still:
 
 ```powershell
 npx --yes markdownlint-cli2 --no-globs CONTRIBUTING.md CODE_OF_CONDUCT.md SUPPORT.md .github\README.md .github\SECURITY.md .github\PULL_REQUEST_TEMPLATE.md

@@ -83,9 +83,13 @@ signing, smoke tests, dedicated installed-service validation, and historical
 fallbacks. Keep them narrow and do not extend them as the long-term
 orchestration model.
 
-The installed service helper currently validates generated configs with
-`squid.exe -k parse` but intentionally skips `squid.exe -z` because the current
-native Windows build crashes during cache initialization on Windows runners.
+CI linting is now centered on MegaLinter via `.mega-linter.yml` and
+`.github\linters\`, with `ty` kept as a companion Python type-check step
+because MegaLinter does not currently expose a `ty` descriptor.
+
+The installed service helper validates generated configs with
+`squid.exe -k parse`, initializes the cache hierarchy with `squid.exe -z`, and
+then registers the named Windows service with `squid.exe -i`.
 `squid.exe -i -f <config>` follows Squid's native Windows service model: the
 service keeps Squid-controlled runtime startup parameters, while the selected
 config association is persisted separately for the named service.

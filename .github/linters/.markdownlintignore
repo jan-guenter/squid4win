@@ -1,0 +1,7 @@
+.venv/**
+.conan2/**
+artifacts/**
+build/**
+sources/**
+.agents/skills/**
+LICENSE
