@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import time
 import zipfile
+from collections import deque
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1949,11 +1950,15 @@ def _tail_text_file(path: Path, *, max_lines: int = 40) -> str | None:
     if not path.is_file():
         return None
 
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = deque[str](maxlen=max_lines)
+    with path.open(encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            lines.append(line.rstrip("\r\n"))
+
     if not lines:
         return ""
 
-    return "\n".join(lines[-max_lines:])
+    return "\n".join(lines)
 
 
 def _relative_summary_path(path: Path, root: Path) -> str:
