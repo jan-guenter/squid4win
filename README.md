@@ -91,7 +91,9 @@ The installed service helper validates generated configs with
 then registers the named Windows service with `squid.exe -i`.
 `squid.exe -i -f <config>` follows Squid's native Windows service model: the
 service keeps Squid-controlled runtime startup parameters, while the selected
-config association is persisted separately for the named service.
+config association is persisted separately for the named service. The helper
+now verifies that registry-backed `ConfigFile` association explicitly so
+service startup does not fall back to Squid's compiled default config path.
 
 Likewise, any remaining tray-related Conan packaging or editable flows should
 be treated as migration leftovers or compatibility shims, not as the future

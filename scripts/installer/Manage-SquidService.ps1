@@ -19,6 +19,15 @@ if (-not $serviceNameHelperPath) {
 }
 . $serviceNameHelperPath
 
+function Get-SquidServiceRegistryPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    return (Join-Path 'HKLM:\SOFTWARE\squid-cache.org\Squid' $Name)
+}
+
 function Get-NormalizedPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -161,6 +170,49 @@ function Initialize-SquidConfiguration {
     return $configPath
 }
 
+function Set-SquidServiceRegistryConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigPath
+    )
+
+    $normalizedConfigPath = Get-NormalizedPath -Path $ConfigPath
+    $vendorRegistryPath = 'HKLM:\SOFTWARE\squid-cache.org'
+    $productRegistryPath = Join-Path $vendorRegistryPath 'Squid'
+    $registryPath = Get-SquidServiceRegistryPath -Name $Name
+    foreach ($path in @($vendorRegistryPath, $productRegistryPath, $registryPath)) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            $null = New-Item -Path $path -Force
+        }
+    }
+    New-ItemProperty -Path $registryPath -Name 'ConfigFile' -PropertyType String -Value $normalizedConfigPath -Force | Out-Null
+
+    $registeredConfigPath = (Get-ItemProperty -Path $registryPath -Name 'ConfigFile').ConfigFile
+    if ($registeredConfigPath -ne $normalizedConfigPath) {
+        throw "The Squid service registry entry '$registryPath' did not retain the expected ConfigFile value '$normalizedConfigPath'."
+    }
+
+    Write-Host "Stored Squid ConfigFile registry association for '$Name' at $registryPath."
+}
+
+function Remove-SquidServiceRegistryConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $registryPath = Get-SquidServiceRegistryPath -Name $Name
+    if (-not (Test-Path -LiteralPath $registryPath)) {
+        return $false
+    }
+
+    Remove-Item -LiteralPath $registryPath -Recurse -Force
+    Write-Host "Removed Squid service registry association at $registryPath."
+    return $true
+}
+
 function Invoke-SquidCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -199,19 +251,42 @@ switch ($Action) {
             }
             Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $resolvedServiceName)
             Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $false
+            # Squid does not remove the named service registry subtree on uninstall.
+            $null = Remove-SquidServiceRegistryConfiguration -Name $resolvedServiceName
         }
 
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-k', 'parse', '-f', $configPath)
         Write-Host "Initializing Squid cache directories with squid.exe -z before service registration."
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-z', '-f', $configPath)
-        Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $resolvedServiceName, '-f', $configPath)
+        try {
+            Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $resolvedServiceName, '-f', $configPath)
+            Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $true
+            Set-SquidServiceRegistryConfiguration -Name $resolvedServiceName -ConfigPath $configPath
+        }
+        catch {
+            $originalErrorMessage = $_.Exception.Message
+            try {
+                if (Test-SquidServiceRegistration -Name $resolvedServiceName) {
+                    if (Stop-SquidServiceIfRunning -Name $resolvedServiceName) {
+                        Write-Host "Stopped partially installed Squid Windows service '$resolvedServiceName' during rollback."
+                    }
+                    Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $resolvedServiceName)
+                    Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $false
+                }
+                $null = Remove-SquidServiceRegistryConfiguration -Name $resolvedServiceName
+            }
+            catch {
+                throw "Failed to install Squid Windows service '$resolvedServiceName' cleanly. Original error: $originalErrorMessage Cleanup error: $($_.Exception.Message)"
+            }
 
-        Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $true
+            throw
+        }
         Write-Host "Installed Squid Windows service '$resolvedServiceName' using $configPath."
     }
 
     'Uninstall' {
         if (-not (Test-SquidServiceRegistration -Name $resolvedServiceName)) {
+            $null = Remove-SquidServiceRegistryConfiguration -Name $resolvedServiceName
             Write-Host "Squid Windows service '$resolvedServiceName' is already absent."
             return
         }
@@ -221,6 +296,7 @@ switch ($Action) {
         }
         Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-r', '-n', $resolvedServiceName)
         Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $false
+        $null = Remove-SquidServiceRegistryConfiguration -Name $resolvedServiceName
         Write-Host "Removed Squid Windows service '$resolvedServiceName'."
     }
 }

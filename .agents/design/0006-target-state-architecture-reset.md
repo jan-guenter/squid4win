@@ -101,7 +101,9 @@ The target architecture is:
   then registers the named Windows service with `squid.exe -i`.
   `squid.exe -i -f <config>` follows Squid's native Windows service model: the
   service keeps Squid-controlled runtime startup parameters, while the selected
-  config association is persisted separately for the named service.
+  config association is persisted separately for the named service. The helper
+  now verifies that registry-backed `ConfigFile` entry so service startup does
+  not fall back to the compiled default config path.
 
 ## Alternatives considered
 

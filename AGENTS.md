@@ -33,7 +33,9 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   registration.
 - `squid.exe -i -f <config>` follows Squid's native Windows service model: the
   service keeps Squid-controlled runtime startup parameters, while the selected
-  config association is persisted separately for the named service.
+  config association is persisted separately for the named service. The helper
+  explicitly verifies that registry-backed `ConfigFile` association so service
+  startup does not fall back to compiled defaults.
 - WiX v4 MSI authoring and payload staging are already committed.
 - The repository's own code and docs are GPL-2.0-or-later.
 - Current cited local validation covers the Python-owned target-state path:

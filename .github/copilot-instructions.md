@@ -27,7 +27,9 @@ Repo-specific directives:
   `squid.exe -z`, then `-i`/`-r` flow. `squid.exe -i -f <config>` follows
   Squid's native Windows service model: the service keeps Squid-controlled
   runtime startup parameters, while the selected config association is
-  persisted separately for the named service.
+  persisted separately for the named service. The helper must explicitly verify
+  that registry-backed `ConfigFile` association so service startup does not
+  fall back to compiled defaults.
 - Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conandata.yml` aligned when the Squid pin changes. Prefer
