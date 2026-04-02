@@ -31,14 +31,14 @@ Windows layout:
 - the installed service helper validates generated configs with
   `squid.exe -k parse`, initializes cache directories with `squid.exe -z`, and
   then registers the named service
-- `squid.exe -i -f <config>` follows Squid's native Windows service model, but
-  Squid only sees the SCM service `BINARY_PATH_NAME` during its initial option
-  parse. The helper therefore normalizes both the Windows service command line
-  to include `-f <config>` and the registry-backed `ConfigFile`/`CommandLine`
-  values after registration so runtime startup and spawned Squid processes do
-  not fall back to compiled defaults. Because upstream service startup still
-  splits the stored registry `CommandLine` on whitespace without quote support,
-  the install root used for service registration must remain space-free
+- `squid.exe -i -f <config>` follows Squid's native Windows service model: the
+  service keeps Squid-controlled runtime startup parameters, while the selected
+  config association is persisted separately for the named service; the helper
+  explicitly verifies the registry-backed `ConfigFile` and `CommandLine` values
+  after registration so runtime startup and spawned Squid processes do not fall
+  back to compiled defaults. Because upstream service startup splits the stored
+  `CommandLine` on whitespace without quote support, the install root used for
+  service registration must remain space-free
 - the WiX service custom actions pass the install root to `installer\svc.ps1`
   as `"[INSTALLFOLDER]."` rather than raw `"[INSTALLFOLDER]"` so the trailing
   directory separator does not escape the closing quote in the underlying

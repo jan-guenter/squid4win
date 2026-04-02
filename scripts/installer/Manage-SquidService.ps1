@@ -18,6 +18,9 @@ if (-not $serviceNameHelperPath) {
     throw "Unable to locate Assert-SquidServiceName.ps1 next to $PSCommandPath or in its parent directory."
 }
 . $serviceNameHelperPath
+# Squid's native Windows service code keys ConfigFile/CommandLine beneath
+# PACKAGE_NAME, which is currently "Squid Web Proxy".
+$script:SquidServiceRegistryProductName = 'Squid Web Proxy'
 
 function Get-SquidServiceRegistryPath {
     param(
@@ -25,7 +28,7 @@ function Get-SquidServiceRegistryPath {
         [string]$Name
     )
 
-    return (Join-Path 'HKLM:\SOFTWARE\squid-cache.org\Squid' $Name)
+    return (Join-Path (Join-Path 'HKLM:\SOFTWARE\squid-cache.org' $script:SquidServiceRegistryProductName) $Name)
 }
 
 function Get-SquidServiceCommandLine {
@@ -69,21 +72,6 @@ function Resolve-SquidExecutable {
     throw "Unable to find squid.exe under $Root."
 }
 
-function Get-SquidServiceStartupCommandLine {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-        [Parameter(Mandatory = $true)]
-        [string]$ExecutablePath,
-        [Parameter(Mandatory = $true)]
-        [string]$ConfigPath
-    )
-
-    $normalizedExecutablePath = Get-NormalizedPath -Path $ExecutablePath
-    $normalizedConfigPath = Get-NormalizedPath -Path $ConfigPath
-    return ('"{0}" --ntservice:{1} -f "{2}"' -f $normalizedExecutablePath, $Name, $normalizedConfigPath)
-}
-
 function Test-SquidServiceRegistration {
     param(
         [Parameter(Mandatory = $true)]
@@ -110,95 +98,6 @@ function Get-SquidServiceInstance {
 
     $escapedName = $Name.Replace("'", "''")
     return Get-CimInstance -ClassName Win32_Service -Filter "Name = '$escapedName'" -ErrorAction SilentlyContinue
-}
-
-function Get-SquidCommandLineConfigPath {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$CommandLine
-    )
-
-    $match = [regex]::Match($CommandLine, '(?i)(?:^|\s)-f\s+(?:"([^"]+)"|(\S+))')
-    if (-not $match.Success) {
-        return $null
-    }
-
-    $configPath = if ($match.Groups[1].Success) {
-        $match.Groups[1].Value
-    }
-    else {
-        $match.Groups[2].Value
-    }
-    return Get-NormalizedPath -Path $configPath
-}
-
-function Set-SquidServiceStartupCommandLine {
-    [CmdletBinding(SupportsShouldProcess)]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-        [Parameter(Mandatory = $true)]
-        [string]$ExecutablePath,
-        [Parameter(Mandatory = $true)]
-        [string]$ConfigPath
-    )
-
-    $serviceInstance = Get-SquidServiceInstance -Name $Name
-    if ($null -eq $serviceInstance) {
-        throw "Unable to update the Squid Windows service '$Name' because it is not registered."
-    }
-
-    $normalizedConfigPath = Get-NormalizedPath -Path $ConfigPath
-    $desiredCommandLine = Get-SquidServiceStartupCommandLine `
-        -Name $Name `
-        -ExecutablePath $ExecutablePath `
-        -ConfigPath $normalizedConfigPath
-    try {
-        $currentCommandLine = [string]$serviceInstance.PathName
-        if ($currentCommandLine -eq $desiredCommandLine) {
-            return $desiredCommandLine
-        }
-
-        if (-not $PSCmdlet.ShouldProcess($Name, "Set Windows service command line to '$desiredCommandLine'")) {
-            return $currentCommandLine
-        }
-
-        $changeResult = Invoke-CimMethod `
-            -InputObject $serviceInstance `
-            -MethodName Change `
-            -Arguments @{ PathName = $desiredCommandLine } `
-            -ErrorAction Stop
-        $returnValue = [int]$changeResult.ReturnValue
-        if ($returnValue -ne 0) {
-            throw "Updating the Squid Windows service '$Name' command line failed with Win32_Service.Change return code $returnValue."
-        }
-
-        $updatedServiceInstance = Get-SquidServiceInstance -Name $Name
-        if ($null -eq $updatedServiceInstance) {
-            throw "Unable to re-read the Squid Windows service '$Name' after updating its startup command line."
-        }
-
-        try {
-            $registeredCommandLine = [string]$updatedServiceInstance.PathName
-            $registeredConfigPath = Get-SquidCommandLineConfigPath -CommandLine $registeredCommandLine
-            if (($registeredCommandLine -notlike "*--ntservice:$Name*") -or $registeredConfigPath -ne $normalizedConfigPath) {
-                throw "The Squid Windows service '$Name' did not retain the expected startup command line. Registered value: '$registeredCommandLine'."
-            }
-        }
-        finally {
-            if ($updatedServiceInstance -is [System.IDisposable]) {
-                $updatedServiceInstance.Dispose()
-            }
-        }
-    }
-    finally {
-        if ($serviceInstance -is [System.IDisposable]) {
-            $serviceInstance.Dispose()
-        }
-    }
-
-    Write-Host "Stored Squid Windows service startup command line for '$Name'."
-    return $desiredCommandLine
 }
 
 function Wait-SquidServiceRegistrationState {
@@ -300,7 +199,7 @@ function Set-SquidServiceRegistryConfiguration {
     $normalizedConfigPath = Get-NormalizedPath -Path $ConfigPath
     $normalizedCommandLine = Get-SquidServiceCommandLine -ConfigPath $normalizedConfigPath
     $vendorRegistryPath = 'HKLM:\SOFTWARE\squid-cache.org'
-    $productRegistryPath = Join-Path $vendorRegistryPath 'Squid'
+    $productRegistryPath = Join-Path $vendorRegistryPath $script:SquidServiceRegistryProductName
     $registryPath = Get-SquidServiceRegistryPath -Name $Name
     if (-not $PSCmdlet.ShouldProcess($registryPath, "Store Squid service registry values for '$Name'")) {
         return
@@ -394,10 +293,6 @@ switch ($Action) {
         try {
             Invoke-SquidCommand -ExecutablePath $resolvedSquidExecutable -Arguments @('-i', '-n', $resolvedServiceName, '-f', $configPath)
             Wait-SquidServiceRegistrationState -Name $resolvedServiceName -Present $true
-            $serviceCommandLine = Set-SquidServiceStartupCommandLine `
-                -Name $resolvedServiceName `
-                -ExecutablePath $resolvedSquidExecutable `
-                -ConfigPath $configPath
             Set-SquidServiceRegistryConfiguration -Name $resolvedServiceName -ConfigPath $configPath
         }
         catch {
@@ -419,7 +314,6 @@ switch ($Action) {
             throw
         }
         Write-Host "Installed Squid Windows service '$resolvedServiceName' using $configPath."
-        Write-Host "Normalized the registered service command line to '$serviceCommandLine'."
     }
 
     'Uninstall' {

@@ -2362,8 +2362,13 @@ def _query_service(name: str) -> tuple[bool, str | None]:
     return True, match.group(1)
 
 
+# Squid's native Windows service code keys ConfigFile/CommandLine beneath
+# PACKAGE_NAME, which is currently "Squid Web Proxy".
+_SQUID_SERVICE_REGISTRY_PRODUCT_NAME = "Squid Web Proxy"
+
+
 def _service_registry_path(name: str) -> str:
-    return rf"SOFTWARE\squid-cache.org\Squid\{name}"
+    return rf"SOFTWARE\squid-cache.org\{_SQUID_SERVICE_REGISTRY_PRODUCT_NAME}\{name}"
 
 
 def _service_registry_values(name: str) -> dict[str, str]:
@@ -2921,26 +2926,6 @@ def run_service_runner_validation(
                 f"service name '{service_name}': {service_command_line}"
             )
             raise RuntimeError(msg)
-        service_command_line_config_path = _command_line_config_path(service_command_line)
-        if service_command_line_config_path is None:
-            msg = (
-                f"The installed service command line did not contain '-f <config>': "
-                f"{service_command_line}"
-            )
-            raise RuntimeError(msg)
-        if _normalized_windows_path_text(
-            service_command_line_config_path
-        ) != _normalized_windows_path_text(expected_registry_config_path):
-            msg = (
-                f"The installed service command line stored '{service_command_line}', "
-                f"expected it to reference '{expected_registry_config_path}'."
-            )
-            raise RuntimeError(msg)
-        logger.info(
-            "Validated the Squid Windows service startup command line for '%s': %s",
-            service_name,
-            service_command_line,
-        )
 
         _start_service(
             service_name,

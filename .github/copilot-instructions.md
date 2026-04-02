@@ -25,14 +25,14 @@ Repo-specific directives:
   it, such as MSI custom actions or shipped install-time helper scripts.
 - Keep the installed service helper on the current `squid.exe -k parse`,
   `squid.exe -z`, then `-i`/`-r` flow. `squid.exe -i -f <config>` follows
-  Squid's native Windows service model, but Squid only sees the SCM service
-  `BINARY_PATH_NAME` during its initial option parse. The helper must
-  therefore normalize both the Windows service command line to include
-  `-f <config>` and the registry-backed `ConfigFile` and `CommandLine` values
-  so service startup and spawned Squid processes do not fall back to compiled
-  defaults. Because upstream service startup still splits the stored registry
-  `CommandLine` on whitespace without quote support, the install root used for
-  service registration must remain space-free.
+  Squid's native Windows service model: the service keeps Squid-controlled
+  runtime startup parameters, while the selected config association is
+  persisted separately for the named service. The helper must explicitly verify
+  the registry-backed `ConfigFile` and `CommandLine` values so service startup
+  and spawned Squid processes do not fall back to compiled defaults. Because
+  upstream service startup splits the stored `CommandLine` on whitespace
+  without quote support, the install root used for service registration must
+  remain space-free.
 - Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conandata.yml` aligned when the Squid pin changes. Prefer
