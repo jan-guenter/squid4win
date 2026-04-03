@@ -145,6 +145,18 @@ class SquidConan(ConanFile):
         self.folders.build = os.path.join("build", configuration_label)
         self.folders.generators = os.path.join("build", configuration_label, "conan")
 
+    def configure(self) -> None:
+        if not self._dependency_uses_conan("libxml2"):
+            return
+
+        if not self._dependency_uses_conan("zlib"):
+            self.options["libxml2"].zlib = False
+
+        if self._is_windows():
+            # Conan's current libiconv/1.17 recipe fails under MinGW/UCRT, so keep the
+            # Windows Conan-managed libxml2 path on its built-in iconv-free configuration.
+            self.options["libxml2"].iconv = False
+
     def validate(self) -> None:
         self._validate_supported_configuration()
         for option_name in (

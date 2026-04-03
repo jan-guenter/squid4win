@@ -93,6 +93,10 @@ Windows runners:
   `pcre2`, and `zlib`)
 - `conan-static` (Conan dependencies with static linkage for the same library set)
 
+On Windows, the Conan-managed `libxml2` path currently forces `libxml2`'s
+optional `iconv` feature off because the current Conan Center `libiconv/1.17`
+recipe does not build reliably under MinGW/UCRT.
+
 When any of those switches select `conan` and no explicit `--lockfile-path` is
 provided, the Python automation uses a build-local lockfile under `build\`
 instead of rewriting the committed default lockfile.
