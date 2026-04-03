@@ -1,0 +1,36 @@
+diff --git a/pristine/squid-7.5/compat/os/mingw.h b/patched/squid-7.5/compat/os/mingw.h
+--- a/pristine/squid-7.5/compat/os/mingw.h
++++ b/patched/squid-7.5/compat/os/mingw.h
+@@ -45,6 +45,32 @@
+ #include <stdio.h> /* squid4win-mingw-syslog-compat */
+ #endif
+ 
++#if HAVE_SIGNAL_H
++#include <signal.h> /* squid4win-mingw-signal-compat */
++#endif
++
++#ifndef SIGHUP
++#define SIGHUP 1 /* squid4win-mingw-signal-compat */
++#endif
++#ifndef SIGKILL
++#define SIGKILL 9 /* squid4win-mingw-signal-compat */
++#endif
++#ifndef SIGBUS
++#define SIGBUS 10 /* squid4win-mingw-signal-compat */
++#endif
++#ifndef SIGPIPE
++#define SIGPIPE 13 /* squid4win-mingw-signal-compat */
++#endif
++#ifndef SIGCHLD
++#define SIGCHLD 20 /* squid4win-mingw-signal-compat */
++#endif
++#ifndef SIGUSR1
++#define SIGUSR1 30 /* squid4win-mingw-signal-compat */
++#endif
++#ifndef SIGUSR2
++#define SIGUSR2 31 /* squid4win-mingw-signal-compat */
++#endif
++
+ #ifndef LOG_PID
+ #define LOG_PID     0x01 /* squid4win-mingw-syslog-compat */
+ #endif

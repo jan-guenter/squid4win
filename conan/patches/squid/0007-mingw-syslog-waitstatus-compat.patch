@@ -1,0 +1,154 @@
+diff --git a/pristine/squid-7.5/compat/os/mingw.h b/patched/squid-7.5/compat/os/mingw.h
+--- a/pristine/squid-7.5/compat/os/mingw.h
++++ b/patched/squid-7.5/compat/os/mingw.h
+@@ -37,6 +37,105 @@
+ #include <io.h>
+ #endif
+ 
++#if HAVE_STDARG_H
++#include <stdarg.h> /* squid4win-mingw-syslog-compat */
++#endif
++
++#if HAVE_STDIO_H
++#include <stdio.h> /* squid4win-mingw-syslog-compat */
++#endif
++
++#ifndef LOG_PID
++#define LOG_PID     0x01 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_CONS
++#define LOG_CONS    0x02 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_NDELAY
++#define LOG_NDELAY  0x08 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_EMERG
++#define LOG_EMERG   0 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_ALERT
++#define LOG_ALERT   1 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_CRIT
++#define LOG_CRIT    2 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_ERR
++#define LOG_ERR     3 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_WARNING
++#define LOG_WARNING 4 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_NOTICE
++#define LOG_NOTICE  5 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_INFO
++#define LOG_INFO    6 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_DEBUG
++#define LOG_DEBUG   7 /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_KERN
++#define LOG_KERN    (0<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_USER
++#define LOG_USER    (1<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_MAIL
++#define LOG_MAIL    (2<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_DAEMON
++#define LOG_DAEMON  (3<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_AUTH
++#define LOG_AUTH    (4<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_SYSLOG
++#define LOG_SYSLOG  (5<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LPR
++#define LOG_LPR     (6<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_NEWS
++#define LOG_NEWS    (7<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_UUCP
++#define LOG_UUCP    (8<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_CRON
++#define LOG_CRON    (9<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_AUTHPRIV
++#define LOG_AUTHPRIV (10<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LOCAL0
++#define LOG_LOCAL0  (16<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LOCAL1
++#define LOG_LOCAL1  (17<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LOCAL2
++#define LOG_LOCAL2  (18<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LOCAL3
++#define LOG_LOCAL3  (19<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LOCAL4
++#define LOG_LOCAL4  (20<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LOCAL5
++#define LOG_LOCAL5  (21<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LOCAL6
++#define LOG_LOCAL6  (22<<3) /* squid4win-mingw-syslog-compat */
++#endif
++#ifndef LOG_LOCAL7
++#define LOG_LOCAL7  (23<<3) /* squid4win-mingw-syslog-compat */
++#endif
++
+ #if !HAVE_FSYNC
+ // _commit(fd) is API-compatible with fsync(fd) and has equivalent behaviour
+ inline int
+@@ -58,6 +157,44 @@
+     return 0;
+ }
+ 
++static inline void
++openlog(const char *ident, int logopt, int facility) /* squid4win-mingw-syslog-compat */
++{
++    (void)ident;
++    (void)logopt;
++    (void)facility;
++}
++
++static inline void
++closelog(void) /* squid4win-mingw-syslog-compat */
++{
++}
++
++static inline void
++syslog(int priority, const char *fmt, ...) /* squid4win-mingw-syslog-compat */
++{
++    va_list args;
++    (void)priority;
++    va_start(args, fmt);
++    vfprintf(stderr, fmt, args);
++    fputc('\n', stderr);
++    fflush(stderr);
++    va_end(args);
++}
++
++#ifndef WIFEXITED
++#define WIFEXITED(status) ((status) >= 0) /* squid4win-mingw-wait-status */
++#endif
++#ifndef WEXITSTATUS
++#define WEXITSTATUS(status) (status) /* squid4win-mingw-wait-status */
++#endif
++#ifndef WIFSIGNALED
++#define WIFSIGNALED(status) (0) /* squid4win-mingw-wait-status */
++#endif
++#ifndef WTERMSIG
++#define WTERMSIG(status) (0) /* squid4win-mingw-wait-status */
++#endif
++
+ #define mkdir(p,F) mkdir((p))
+ 
+ #endif /* _SQUID_MINGW_*/

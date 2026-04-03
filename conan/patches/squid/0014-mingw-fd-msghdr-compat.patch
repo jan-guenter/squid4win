@@ -1,0 +1,125 @@
+diff --git a/pristine/squid-7.5/src/fd.cc b/patched/squid-7.5/src/fd.cc
+--- a/pristine/squid-7.5/src/fd.cc
++++ b/patched/squid-7.5/src/fd.cc
+@@ -16,12 +16,121 @@
+ #include "fd.h"
+ #include "fde.h"
+ #include "globals.h"
++#include "compat/cmsg.h" /* squid4win-mingw-fd-msghdr */
++#include "win32.h"
++#include <vector>
+ 
+ // Solaris and possibly others lack MSG_NOSIGNAL optimization
+ // TODO: move this into compat/? Use a dedicated compat file to avoid dragging
+ // sys/socket.h into the rest of Squid??
+ #ifndef MSG_NOSIGNAL
+ #define MSG_NOSIGNAL 0
++#endif
++#ifndef MSG_DONTWAIT
++#define MSG_DONTWAIT 0 /* squid4win-mingw-fd-msghdr */
++#endif
++
++#if _SQUID_MINGW_
++#if !defined(WSAID_WSASENDMSG)
++typedef INT (WSAAPI *LPFN_WSASENDMSG)(SOCKET s, LPWSAMSG lpMsg, DWORD dwFlags,
++                                      LPDWORD lpNumberOfBytesSent,
++                                      LPWSAOVERLAPPED lpOverlapped,
++                                      LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
++#define WSAID_WSASENDMSG {0xa441e712,0x754f,0x43ca,{0x84,0xa7,0x0d,0xee,0x44,0xcf,0x60,0x6d}}
++#endif
++
++namespace {
++template <class Extension>
++static Extension
++fdLoadWinsockExtension(const SOCKET fd, const GUID &guid) /* squid4win-mingw-fd-msghdr */
++{
++    Extension extension = nullptr;
++    DWORD bytes = 0;
++    if (WSAIoctl(fd, SIO_GET_EXTENSION_FUNCTION_POINTER,
++                 const_cast<GUID *>(&guid), sizeof(guid),
++                 &extension, sizeof(extension), &bytes,
++                 nullptr, nullptr) == SOCKET_ERROR) {
++        WIN32_maperror(WSAGetLastError());
++        return nullptr;
++    }
++    return extension;
++}
++
++static void
++fdCopyMsgHdrToWsaMsg(const msghdr &msg, WSAMSG &wsaMsg, std::vector<WSABUF> &buffers) /* squid4win-mingw-fd-msghdr */
++{
++    buffers.clear();
++    buffers.reserve(msg.msg_iovlen);
++    for (size_t i = 0; i < msg.msg_iovlen; ++i) {
++        WSABUF buffer;
++        buffer.buf = static_cast<char *>(msg.msg_iov[i].iov_base);
++        buffer.len = static_cast<ULONG>(msg.msg_iov[i].iov_len);
++        buffers.push_back(buffer);
++    }
++
++    wsaMsg.name = static_cast<LPSOCKADDR>(msg.msg_name);
++    wsaMsg.namelen = static_cast<INT>(msg.msg_namelen);
++    wsaMsg.lpBuffers = buffers.empty() ? nullptr : buffers.data();
++    wsaMsg.dwBufferCount = static_cast<DWORD>(buffers.size());
++    wsaMsg.Control.buf = static_cast<char *>(msg.msg_control);
++    wsaMsg.Control.len = static_cast<ULONG>(msg.msg_controllen);
++    wsaMsg.dwFlags = static_cast<DWORD>(msg.msg_flags);
++}
++} // namespace
++
++static int
++recvmsg(int fd, msghdr *msg, int flags) /* squid4win-mingw-fd-msghdr */
++{
++    static LPFN_WSARECVMSG receiveMessage = nullptr;
++    if (!receiveMessage) {
++        const GUID receiveMessageGuid = WSAID_WSARECVMSG;
++        receiveMessage = fdLoadWinsockExtension<LPFN_WSARECVMSG>(fd, receiveMessageGuid);
++        if (!receiveMessage)
++            return -1;
++    }
++
++    std::vector<WSABUF> buffers;
++    WSAMSG wsaMsg;
++    memset(&wsaMsg, 0, sizeof(wsaMsg));
++    fdCopyMsgHdrToWsaMsg(*msg, wsaMsg, buffers);
++    wsaMsg.dwFlags = static_cast<DWORD>(flags);
++
++    DWORD bytesReceived = 0;
++    if (receiveMessage(fd, &wsaMsg, &bytesReceived, nullptr, nullptr) == SOCKET_ERROR) {
++        WIN32_maperror(WSAGetLastError());
++        return -1;
++    }
++
++    msg->msg_namelen = static_cast<socklen_t>(wsaMsg.namelen);
++    msg->msg_controllen = static_cast<size_t>(wsaMsg.Control.len);
++    msg->msg_flags = static_cast<int>(wsaMsg.dwFlags);
++    return static_cast<int>(bytesReceived);
++}
++
++static int
++sendmsg(int fd, const msghdr *msg, int flags) /* squid4win-mingw-fd-msghdr */
++{
++    static LPFN_WSASENDMSG sendMessage = nullptr;
++    if (!sendMessage) {
++        const GUID sendMessageGuid = WSAID_WSASENDMSG;
++        sendMessage = fdLoadWinsockExtension<LPFN_WSASENDMSG>(fd, sendMessageGuid);
++        if (!sendMessage)
++            return -1;
++    }
++
++    std::vector<WSABUF> buffers;
++    WSAMSG wsaMsg;
++    memset(&wsaMsg, 0, sizeof(wsaMsg));
++    fdCopyMsgHdrToWsaMsg(*msg, wsaMsg, buffers);
++
++    DWORD bytesSent = 0;
++    if (sendMessage(fd, &wsaMsg, static_cast<DWORD>(flags), &bytesSent, nullptr, nullptr) == SOCKET_ERROR) {
++        WIN32_maperror(WSAGetLastError());
++        return -1;
++    }
++
++    return static_cast<int>(bytesSent);
++}
+ #endif
+ 
+ int default_read_method(int, char *, int);

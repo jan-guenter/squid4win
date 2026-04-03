@@ -1,6 +1,16 @@
 {
   "version": 1,
   "skills": {
+    "binutils": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "0e1d7a4c18ec80c60fc740b058923b77df9114268f6533078092dee57aea35f6"
+    },
+    "clang": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "7a585a4af02b439314efb24dae5e44efee7e09a8c9872b8fa1df129c12632251"
+    },
     "code-review": {
       "source": "maragudk/skills",
       "sourceType": "github",
@@ -10,6 +20,11 @@
       "source": "mohitmishra786/low-level-dev-skills",
       "sourceType": "github",
       "computedHash": "82ceb4cd35d4d08b06cb585f8fa4491e52023ed7718256c84ac4d2db727864e3"
+    },
+    "core-dumps": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "b613ff60d4cb4f5452c6f4d8ca57582b47d87454c06d90c10a6762320aaf9e14"
     },
     "create-architectural-decision-record": {
       "source": "github/awesome-copilot",
@@ -26,6 +41,11 @@
       "sourceType": "github",
       "computedHash": "89c4bd1c2cae3b05100f45bc074a06933287b83a21bd2cadd928a8b768896c55"
     },
+    "debug-optimized-builds": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "b34822fbb5abc4bd282a988410566727145983ced510e0006af21cf0929a63ab"
+    },
     "design-documentation": {
       "source": "jasonkneen/kiro",
       "sourceType": "github",
@@ -41,10 +61,25 @@
       "sourceType": "github",
       "computedHash": "9ef94db7f06c167d544369817e5a4415eeb7886dcff0d47026837a1aada260e3"
     },
+    "dynamic-linking": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "b1ef5abe3d568aa458ffd87d6130f0d08e7cf06e6d4d3ac127ac28bc491272c9"
+    },
     "find-skills": {
       "source": "vercel-labs/skills",
       "sourceType": "github",
       "computedHash": "d31e234f0c90694a670222cdd1dafa853e051d7066beda389f1097c22dadd461"
+    },
+    "gcc": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "8ec4b941ab86510681e77b21fee4b1abde2ef742235a950ec6a07a728852672e"
+    },
+    "gdb": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "2a05cf6a724c6d4cc6b1390d7472dd26c25ff1bb12340c0ea30f50a5f355ef82"
     },
     "gh-cli": {
       "source": "github/awesome-copilot",
@@ -56,15 +91,40 @@
       "sourceType": "github",
       "computedHash": "2607fc60629b82b257136dd2a7a373f0a4466c0b49df7746d845d59313c99b21"
     },
+    "github-actions-docs": {
+      "source": "xixu-me/skills",
+      "sourceType": "github",
+      "computedHash": "e7babb077d50cd88fb8c0e168373c8a560d056b540f364cb4892191bf524f5ee"
+    },
     "github-workflow-automation": {
       "source": "proffesor-for-testing/agentic-qe",
       "sourceType": "github",
       "computedHash": "0a0d113ee1d059ff87beeb166faeebd946b5296a0bdd8168f40ca3c274641471"
     },
+    "linkers-lto": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "41472296e41a935faad553e6921833fd9a0409e16bcfc28df398b2de9b2b4cd4"
+    },
+    "llvm": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "5e0abcd00e0dd5b20ca652374c16d15594078417dc85b9617caa05300b65de11"
+    },
+    "make": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "3d636ca3eed2802a3ab4afbcd2f5cbaacc0b5c460cf5ceac2b69e1802b24a908"
+    },
     "microsoft-docs": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
       "computedHash": "e49127ff2162330ac79bfde9e7ed1297df15be9ade09164fdebfe697153fcc36"
+    },
+    "msvc-cl": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "fe9b83e2dae2b6fbfdc6106e0c1eebfdb7ab3f91edd35de0b9808d64575b9dba"
     },
     "powershell-master": {
       "source": "josiahsiegel/claude-plugin-marketplace",
@@ -95,6 +155,11 @@
       "source": "claude-dev-suite/claude-dev-suite",
       "sourceType": "github",
       "computedHash": "fe94a55de3eb0c16127718fa917b7b4fe0c1c555581991377c4eb70badec9ef5"
+    },
+    "static-analysis": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "computedHash": "5e37d6ae89ce6c66b0010d14f303a88c4df2a1e1f9a603dfbf6442dbf0e100b8"
     },
     "systematic-debugging": {
       "source": "obra/superpowers",

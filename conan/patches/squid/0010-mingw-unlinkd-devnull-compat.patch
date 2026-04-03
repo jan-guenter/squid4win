@@ -1,0 +1,13 @@
+diff --git a/pristine/squid-7.5/src/unlinkd_daemon.cc b/patched/squid-7.5/src/unlinkd_daemon.cc
+--- a/pristine/squid-7.5/src/unlinkd_daemon.cc
++++ b/patched/squid-7.5/src/unlinkd_daemon.cc
+@@ -16,6 +16,9 @@
+ #include <cstdio>
+ #if HAVE_PATHS_H
+ #include <paths.h>
++#endif
++#if _SQUID_MINGW_ && !defined(_PATH_DEVNULL)
++#define _PATH_DEVNULL "NUL" /* squid4win-mingw-devnull */
+ #endif
+ 
+ /**

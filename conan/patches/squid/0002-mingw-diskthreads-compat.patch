@@ -1,0 +1,126 @@
+diff --git a/pristine/squid-7.5/src/DiskIO/DiskThreads/CommIO.cc b/patched/squid-7.5/src/DiskIO/DiskThreads/CommIO.cc
+index ad0ecbb..1096c03 100644
+--- a/pristine/squid-7.5/src/DiskIO/DiskThreads/CommIO.cc
++++ b/patched/squid-7.5/src/DiskIO/DiskThreads/CommIO.cc
+@@ -18,10 +18,14 @@
+ void
+ CommIO::Initialize()
+ {
+     if (CommIO::Initialized)
+         return;
+ 
+     /* Initialize done pipe signal */
+     int DonePipe[2];
++#if _SQUID_MINGW_
++    if (_pipe(DonePipe, 4096, _O_BINARY)) {}
++#else
+     if (pipe(DonePipe)) {}
++#endif
+     DoneFD = DonePipe[1];
+     DoneReadFD = DonePipe[0];
+     fd_open(DoneReadFD, FD_PIPE, "async-io completion event: main");
+diff --git a/pristine/squid-7.5/src/DiskIO/DiskThreads/aiops_win32.cc b/patched/squid-7.5/src/DiskIO/DiskThreads/aiops_win32.cc
+index 2ee8f73..52c6fd0 100644
+--- a/pristine/squid-7.5/src/DiskIO/DiskThreads/aiops_win32.cc
++++ b/patched/squid-7.5/src/DiskIO/DiskThreads/aiops_win32.cc
+@@ -12,6 +12,7 @@
+ #include "DiskIO/DiskThreads/CommIO.h"
+ #include "DiskThreads.h"
+ #include "fd.h"
++#include "mem/Allocator.h"
+ #include "mem/Pool.h"
+ #include "SquidConfig.h"
+ #include "Store.h"
+@@ -134,6 +135,74 @@
+ 
+ static HANDLE main_thread;
+ 
++static void
++squidaio_maperror(unsigned long win32Error)
++{
++    static const struct {
++        unsigned long win32Code;
++        int posixErrno;
++    } errorTable[] = {
++        {ERROR_INVALID_FUNCTION, EINVAL},
++        {ERROR_FILE_NOT_FOUND, ENOENT},
++        {ERROR_PATH_NOT_FOUND, ENOENT},
++        {ERROR_TOO_MANY_OPEN_FILES, EMFILE},
++        {ERROR_ACCESS_DENIED, EACCES},
++        {ERROR_INVALID_HANDLE, EBADF},
++        {ERROR_ARENA_TRASHED, ENOMEM},
++        {ERROR_NOT_ENOUGH_MEMORY, ENOMEM},
++        {ERROR_INVALID_BLOCK, ENOMEM},
++        {ERROR_BAD_ENVIRONMENT, E2BIG},
++        {ERROR_BAD_FORMAT, ENOEXEC},
++        {ERROR_INVALID_ACCESS, EINVAL},
++        {ERROR_INVALID_DATA, EINVAL},
++        {ERROR_INVALID_DRIVE, ENOENT},
++        {ERROR_CURRENT_DIRECTORY, EACCES},
++        {ERROR_NOT_SAME_DEVICE, EXDEV},
++        {ERROR_NO_MORE_FILES, ENOENT},
++        {ERROR_LOCK_VIOLATION, EACCES},
++        {ERROR_BAD_NETPATH, ENOENT},
++        {ERROR_NETWORK_ACCESS_DENIED, EACCES},
++        {ERROR_BAD_NET_NAME, ENOENT},
++        {ERROR_FILE_EXISTS, EEXIST},
++        {ERROR_CANNOT_MAKE, EACCES},
++        {ERROR_FAIL_I24, EACCES},
++        {ERROR_INVALID_PARAMETER, EINVAL},
++        {ERROR_NO_PROC_SLOTS, EAGAIN},
++        {ERROR_DRIVE_LOCKED, EACCES},
++        {ERROR_BROKEN_PIPE, EPIPE},
++        {ERROR_DISK_FULL, ENOSPC},
++        {ERROR_INVALID_TARGET_HANDLE, EBADF},
++        {ERROR_WAIT_NO_CHILDREN, ECHILD},
++        {ERROR_CHILD_NOT_COMPLETE, ECHILD},
++        {ERROR_DIRECT_ACCESS_HANDLE, EBADF},
++        {ERROR_NEGATIVE_SEEK, EINVAL},
++        {ERROR_SEEK_ON_DEVICE, EACCES},
++        {ERROR_DIR_NOT_EMPTY, ENOTEMPTY},
++        {ERROR_NOT_LOCKED, EACCES},
++        {ERROR_BAD_PATHNAME, ENOENT},
++        {ERROR_MAX_THRDS_REACHED, EAGAIN},
++        {ERROR_LOCK_FAILED, EACCES},
++        {ERROR_ALREADY_EXISTS, EEXIST},
++        {ERROR_FILENAME_EXCED_RANGE, ENOENT},
++        {ERROR_NESTING_NOT_ALLOWED, EAGAIN},
++        {ERROR_NOT_ENOUGH_QUOTA, ENOMEM}
++    };
++
++    for (const auto &entry : errorTable) {
++        if (win32Error == entry.win32Code) {
++            errno = entry.posixErrno;
++            return;
++        }
++    }
++
++    if (win32Error >= ERROR_WRITE_PROTECT && win32Error <= ERROR_SHARING_BUFFER_EXCEEDED)
++        errno = EACCES;
++    else if (win32Error >= ERROR_INVALID_STARTING_CODESEG && win32Error <= ERROR_INFLOOP_IN_RELOC_CHAIN)
++        errno = ENOEXEC;
++    else
++        errno = EINVAL;
++}
++
+ static Mem::Allocator *
+ squidaio_get_pool(int size)
+ {
+@@ -779,7 +848,7 @@
+ 
+     if (!ReadFile((HANDLE)_get_osfhandle(requestp->fd), requestp->bufferp,
+                   requestp->buflen, (LPDWORD)&requestp->ret, nullptr)) {
+-        WIN32_maperror(GetLastError());
++        squidaio_maperror(GetLastError());
+         requestp->ret = -1;
+     }
+ 
+@@ -821,7 +890,7 @@
+ {
+     if (!WriteFile((HANDLE)_get_osfhandle(requestp->fd), requestp->bufferp,
+                    requestp->buflen, (LPDWORD)&requestp->ret, nullptr)) {
+-        WIN32_maperror(GetLastError());
++        squidaio_maperror(GetLastError());
+         requestp->ret = -1;
+     }
+ 

@@ -1,0 +1,138 @@
+diff --git a/pristine/squid-7.5/src/main.cc b/patched/squid-7.5/src/main.cc
+--- a/pristine/squid-7.5/src/main.cc
++++ b/patched/squid-7.5/src/main.cc
+@@ -42,6 +42,7 @@
+ #include "fs_io.h"
+ #include "FwdState.h"
+ #include "globals.h"
++#include "win32.h" /* squid4win-mingw-main-win32 */
+ #include "htcp.h"
+ #include "http/Stream.h"
+ #include "HttpHeader.h"
+@@ -170,7 +171,7 @@
+ static void SquidShutdown(void);
+ static void mainSetCwd(void);
+ 
+-#if !_SQUID_WINDOWS_
++#if !(_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+ static const char *squid_start_script = "squid_start";
+ #endif
+ 
+@@ -299,7 +300,7 @@
+     // does not depend on Squid state. It does not need debugging because it
+     // handles an "internal" signal, not an external/admin command.
+     do_handle_stopped_child = 0;
+-#if !_SQUID_WINDOWS_
++#if !(_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+     PidStatus status;
+     pid_t pid;
+ 
+@@ -699,7 +700,7 @@
+ {
+     do_rotate = 1;
+     RotateSignal = sig;
+-#if !_SQUID_WINDOWS_
++#if !(_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+ #if !HAVE_SIGACTION
+ 
+     signal(sig, rotate_logs);
+@@ -713,7 +714,7 @@
+ {
+     do_reconfigure = 1;
+     ReconfigureSignal = sig;
+-#if !_SQUID_WINDOWS_
++#if !(_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+ #if !HAVE_SIGACTION
+ 
+     signal(sig, reconfigure);
+@@ -727,7 +728,7 @@
+     ReviveKidsSignal = sig;
+     do_revive_kids = true;
+ 
+-#if !_SQUID_WINDOWS_
++#if !(_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+ #if !HAVE_SIGACTION
+     signal(sig, master_revive_kids);
+ #endif
+@@ -741,7 +742,7 @@
+     do_shutdown = 1;
+     ShutdownSignal = sig;
+ 
+-#if !_SQUID_WINDOWS_
++#if !(_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+ #if !HAVE_SIGACTION
+     signal(sig, master_shutdown);
+ #endif
+@@ -759,7 +760,7 @@
+         shutdown_status = EXIT_FAILURE;
+ #endif
+ 
+-#if !defined(_SQUID_WINDOWS_) && !defined(HAVE_SIGACTION)
++#if !defined(_SQUID_WINDOWS_) && !defined(_SQUID_MINGW_) && !defined(HAVE_SIGACTION) /* squid4win-mingw-main-guards */
+     signal(sig, shut_down);
+ #endif
+ }
+@@ -769,7 +770,7 @@
+ {
+     do_handle_stopped_child = 1;
+ 
+-#if !defined(_SQUID_WINDOWS_) && !defined(HAVE_SIGACTION)
++#if !defined(_SQUID_WINDOWS_) && !defined(_SQUID_MINGW_) && !defined(HAVE_SIGACTION) /* squid4win-mingw-main-guards */
+     signal(sig, sig_child);
+ #else
+     (void)sig;
+@@ -1066,7 +1067,9 @@
+ {
+     if (Config.chroot_dir && !Chrooted) {
+         Chrooted = true;
+-
++#if _SQUID_MINGW_
++        fatalf("chroot_dir is not supported on native MinGW builds");
++#else
+         if (chroot(Config.chroot_dir) != 0) {
+             int xerrno = errno;
+             fatalf("chroot to %s failed: %s", Config.chroot_dir, xstrerr(xerrno));
+@@ -1074,6 +1077,7 @@
+ 
+         if (!mainChangeDir("/"))
+             fatalf("chdir to / after chroot to %s failed", Config.chroot_dir);
++#endif
+     }
+ 
+     if (Config.coredump_dir && strcmp("none", Config.coredump_dir) != 0) {
+@@ -1113,7 +1117,7 @@
+     debugs(1, DBG_CRITICAL, "Starting Squid Cache version " << version_string << " for " << CONFIG_HOST_TYPE << "...");
+     debugs(1, Critical(5), "Service Name: " << service_name);
+ 
+-#if _SQUID_WINDOWS_
++#if (_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+     if (WIN32_run_mode == _WIN_SQUID_RUN_MODE_SERVICE) {
+         debugs(1, DBG_CRITICAL, "Service command line is: " << WIN32_Service_Command_Line);
+     } else
+@@ -1127,7 +1131,7 @@
+     setSystemLimits();
+     debugs(1, Important(8), "With " << Squid_MaxFD << " file descriptors available");
+ 
+-#if _SQUID_WINDOWS_
++#if (_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+ 
+     debugs(1, DBG_IMPORTANT, "With " << _getmaxstdio() << " CRT stdio descriptors available");
+ 
+@@ -1738,7 +1742,7 @@
+     /* signal successfully sent */
+ }
+ 
+-#if !_SQUID_WINDOWS_
++#if !(_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+ /*
+  * This function is run when Squid is in daemon mode, just
+  * before the parent forks and starts up the child process.
+@@ -1895,7 +1899,7 @@
+ static void
+ watch_child(const CommandLine &masterCommand)
+ {
+-#if !_SQUID_WINDOWS_
++#if !(_SQUID_WINDOWS_ || _SQUID_MINGW_) /* squid4win-mingw-main-guards */
+     pid_t pid;
+ #ifdef TIOCNOTTY
+ 

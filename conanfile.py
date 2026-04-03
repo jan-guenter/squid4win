@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 
 from conan import ConanFile
@@ -100,10 +102,20 @@ class Squid4WinConan(ConanFile):
         strip_root = bool(source_data.pop("strip_root", True))
         source_root = Path(self.source_folder)
         source_ready_marker = source_root / ".source-ready"
+        source_fingerprint = self._source_tree_fingerprint(
+            source_data=source_data,
+            strip_root=strip_root,
+        )
 
         if source_ready_marker.is_file():
-            self.output.info(f"Reusing existing source tree at {source_root}.")
-            return
+            recorded_fingerprint = source_ready_marker.read_text(encoding="ascii").strip()
+            if recorded_fingerprint == source_fingerprint:
+                self.output.info(f"Reusing existing source tree at {source_root}.")
+                return
+            self.output.info(
+                "Refreshing the Squid source tree because the source metadata or "
+                "patch set changed."
+            )
 
         mkdir(self, self.source_folder)
         for child in source_root.iterdir():
@@ -113,7 +125,7 @@ class Squid4WinConan(ConanFile):
                 child.unlink()
         get(self, destination=self.source_folder, strip_root=strip_root, **source_data)
         apply_conandata_patches(self)
-        source_ready_marker.write_text("patched\n", encoding="ascii")
+        source_ready_marker.write_text(f"{source_fingerprint}\n", encoding="ascii")
 
     def build(self) -> None:
         build_settings = self._build_settings()
@@ -318,6 +330,34 @@ class Squid4WinConan(ConanFile):
             )
 
         return source_versions[0]
+
+    def _source_tree_fingerprint(
+        self,
+        *,
+        source_data: dict[str, object],
+        strip_root: bool,
+    ) -> str:
+        hasher = hashlib.sha256()
+        hasher.update(
+            json.dumps(
+                {
+                    "version": str(self.version),
+                    "strip_root": strip_root,
+                    "source": source_data,
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        )
+        for patch_entry in self.conan_data.get("patches", {}).get(str(self.version), []):
+            normalized_patch_entry = dict(patch_entry)
+            patch_path = Path(self.recipe_folder) / str(
+                normalized_patch_entry["patch_file"]
+            )
+            hasher.update(
+                json.dumps(normalized_patch_entry, sort_keys=True).encode("utf-8")
+            )
+            hasher.update(patch_path.read_bytes())
+        return hasher.hexdigest()
 
     def _build_settings(self) -> dict[str, object]:
         build_settings = self.conan_data.get("build")

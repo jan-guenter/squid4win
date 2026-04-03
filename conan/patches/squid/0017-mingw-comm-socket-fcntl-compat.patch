@@ -1,0 +1,186 @@
+diff --git a/pristine/squid-7.5/compat/os/mingw.h b/patched/squid-7.5/compat/os/mingw.h
+--- a/pristine/squid-7.5/compat/os/mingw.h
++++ b/patched/squid-7.5/compat/os/mingw.h
+@@ -177,6 +177,64 @@
+     GetSystemInfo(&systemInfo);
+     return systemInfo.dwPageSize;
+ }
++#ifndef O_NONBLOCK
++#define O_NONBLOCK 0x0004 /* squid4win-mingw-fcntl */
++#endif
++#ifndef O_NDELAY
++#define O_NDELAY O_NONBLOCK /* squid4win-mingw-fcntl */
++#endif
++#ifndef FD_CLOEXEC
++#define FD_CLOEXEC 0x0001 /* squid4win-mingw-fcntl */
++#endif
++#ifndef F_GETFD
++#define F_GETFD 1 /* squid4win-mingw-fcntl */
++#endif
++#ifndef F_SETFD
++#define F_SETFD 2 /* squid4win-mingw-fcntl */
++#endif
++#ifndef F_GETFL
++#define F_GETFL 3 /* squid4win-mingw-fcntl */
++#endif
++#ifndef F_SETFL
++#define F_SETFL 4 /* squid4win-mingw-fcntl */
++#endif
++
++static inline int
++fcntl(int fd, int cmd, ...) /* squid4win-mingw-fcntl */
++{
++    va_list args;
++    int flags = 0;
++
++    va_start(args, cmd);
++    if (cmd == F_SETFL || cmd == F_SETFD)
++        flags = va_arg(args, int);
++    else if (cmd != F_GETFL && cmd != F_GETFD)
++        (void)va_arg(args, void *);
++    va_end(args);
++
++    switch (cmd) {
++    case F_GETFD:
++    case F_GETFL:
++        return 0;
++
++    case F_SETFD:
++        return 0;
++
++    case F_SETFL: {
++        u_long nonblocking = (flags & (O_NONBLOCK | O_NDELAY)) ? 1UL : 0UL;
++        if (ioctlsocket(fd, FIONBIO, &nonblocking) == 0)
++            return 0;
++        if (WSAGetLastError() == WSAENOTSOCK)
++            return 0;
++        errno = EINVAL;
++        return -1;
++    }
++
++    default:
++        errno = EINVAL;
++        return -1;
++    }
++}
+ 
+ #ifndef LOG_PID
+ #define LOG_PID     0x01 /* squid4win-mingw-syslog-compat */
+diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
+--- a/pristine/squid-7.5/src/comm.cc
++++ b/patched/squid-7.5/src/comm.cc
+@@ -63,6 +63,62 @@
+ static void comm_init_opened(const Comm::ConnectionPointer &conn, const char *note, struct addrinfo *AI);
+ static int comm_apply_flags(int new_socket, Ip::Address &addr, int flags, struct addrinfo *AI);
+ 
++static int
++commSockRecvFrom(int fd, void *buf, size_t len, int flags, struct sockaddr *from, size_t *fromLen) /* squid4win-mingw-comm */
++{
++#if _SQUID_MINGW_
++    int winsockFromLen = static_cast<int>(*fromLen);
++    const int result = recvfrom(fd, static_cast<char *>(buf), static_cast<int>(len), flags, from, &winsockFromLen);
++    *fromLen = static_cast<size_t>(winsockFromLen);
++    return result;
++#else
++    return recvfrom(fd, buf, len, flags, from, fromLen);
++#endif
++}
++
++static ssize_t
++commSockSend(int fd, const void *buf, size_t len, int flags) /* squid4win-mingw-comm */
++{
++#if _SQUID_MINGW_
++    return send(fd, static_cast<const char *>(buf), static_cast<int>(len), flags);
++#else
++    return send(fd, buf, len, flags);
++#endif
++}
++
++static int
++commSockGetSockName(int fd, struct sockaddr *name, size_t *nameLen) /* squid4win-mingw-comm */
++{
++#if _SQUID_MINGW_
++    int winsockNameLen = static_cast<int>(*nameLen);
++    const int result = getsockname(fd, name, &winsockNameLen);
++    *nameLen = static_cast<size_t>(winsockNameLen);
++    return result;
++#else
++    return getsockname(fd, name, nameLen);
++#endif
++}
++
++static int
++commSockGetSockOptInt(int fd, int level, int optname, int *value, int *valueLen) /* squid4win-mingw-comm */
++{
++#if _SQUID_MINGW_
++    return getsockopt(fd, level, optname, reinterpret_cast<char *>(value), valueLen);
++#else
++    return getsockopt(fd, level, optname, value, valueLen);
++#endif
++}
++
++static int
++commSockSendTo(int fd, const void *buf, int len, int flags, const struct sockaddr *to, size_t toLen) /* squid4win-mingw-comm */
++{
++#if _SQUID_MINGW_
++    return sendto(fd, static_cast<const char *>(buf), len, flags, to, static_cast<int>(toLen));
++#else
++    return sendto(fd, buf, len, flags, to, toLen);
++#endif
++}
++
+ #if USE_DELAY_POOLS
+ CBDATA_CLASS_INIT(CommQuotaQueue);
+ 
+@@ -129,7 +185,7 @@
+     debugs(5,8, "comm_udp_recvfrom: FD " << fd << " from " << from);
+     struct addrinfo *AI = nullptr;
+     Ip::Address::InitAddr(AI);
+-    int x = recvfrom(fd, buf, len, flags, AI->ai_addr, &AI->ai_addrlen);
++    int x = commSockRecvFrom(fd, buf, len, flags, AI->ai_addr, &AI->ai_addrlen);
+     from = *AI;
+     Ip::Address::FreeAddr(AI);
+     return x;
+@@ -145,7 +201,7 @@
+ ssize_t
+ comm_udp_send(int s, const void *buf, size_t len, int flags)
+ {
+-    return send(s, buf, len, flags);
++    return commSockSend(s, buf, len, flags);
+ }
+ 
+ bool
+@@ -183,7 +239,7 @@
+ 
+     Ip::Address::InitAddr(addr);
+ 
+-    if (getsockname(fd, addr->ai_addr, &(addr->ai_addrlen)) ) {
++    if (commSockGetSockName(fd, addr->ai_addr, &(addr->ai_addrlen)) ) {
+         int xerrno = errno;
+         debugs(50, DBG_IMPORTANT, "ERROR: " << MYNAME << "Failed to retrieve TCP/UDP port number for socket: FD " << fd << ": " << xstrerr(xerrno));
+         Ip::Address::FreeAddr(addr);
+@@ -699,13 +755,13 @@
+ 
+         if (xerrno == EINVAL) {
+             errlen = sizeof(err);
+-            x = getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &errlen);
++            x = commSockGetSockOptInt(sock, SOL_SOCKET, SO_ERROR, &err, &errlen);
+             if (x >= 0)
+                 xerrno = x;
+         }
+ #else
+         errlen = sizeof(err);
+-        x = getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &errlen);
++        x = commSockGetSockOptInt(sock, SOL_SOCKET, SO_ERROR, &err, &errlen);
+         if (x == 0)
+             xerrno = err;
+ 
+@@ -930,7 +986,7 @@
+ 
+     struct addrinfo *AI = nullptr;
+     to_addr.getAddrInfo(AI, fd_table[fd].sock_family);
+-    int x = sendto(fd, buf, len, 0, AI->ai_addr, AI->ai_addrlen);
++    int x = commSockSendTo(fd, buf, len, 0, AI->ai_addr, AI->ai_addrlen);
+     int xerrno = errno;
+     Ip::Address::FreeAddr(AI);
+ 

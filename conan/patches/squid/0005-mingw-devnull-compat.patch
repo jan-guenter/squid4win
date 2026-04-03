@@ -1,0 +1,14 @@
+diff --git a/pristine/squid-7.5/src/log/file/log_file_daemon.cc b/patched/squid-7.5/src/log/file/log_file_daemon.cc
+index 91f62dc..7589372 100644
+--- a/pristine/squid-7.5/src/log/file/log_file_daemon.cc
++++ b/patched/squid-7.5/src/log/file/log_file_daemon.cc
+@@ -27,6 +27,9 @@
+ #if HAVE_PATHS_H
+ #include <paths.h>
+ #endif
++#if _SQUID_MINGW_ && !defined(_PATH_DEVNULL)
++#define _PATH_DEVNULL "NUL" /* squid4win-mingw-devnull */
++#endif
+ 
+ #include "helper/protocol_defines.h"
+ 

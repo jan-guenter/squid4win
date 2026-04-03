@@ -1,0 +1,22 @@
+diff --git a/pristine/squid-7.5/src/ip/QosConfig.cc b/patched/squid-7.5/src/ip/QosConfig.cc
+index 691560d..b2ece3a 100644
+--- a/pristine/squid-7.5/src/ip/QosConfig.cc
++++ b/patched/squid-7.5/src/ip/QosConfig.cc
+@@ -526,7 +526,7 @@ Ip::Qos::setSockTos(const int fd, tos_t tos, int type)
+ 
+     if (type == AF_INET) {
+ #if defined(IP_TOS)
+-        const int x = setsockopt(fd, IPPROTO_IP, IP_TOS, &bTos, sizeof(bTos));
++        const int x = setsockopt(fd, IPPROTO_IP, IP_TOS, reinterpret_cast<const char *>(&bTos), sizeof(bTos));
+         if (x < 0) {
+             int xerrno = errno;
+             debugs(50, 2, "setsockopt(IP_TOS) on " << fd << ": " << xstrerr(xerrno));
+@@ -538,7 +538,7 @@ Ip::Qos::setSockTos(const int fd, tos_t tos, int type)
+ #endif
+     } else { // type == AF_INET6
+ #if defined(IPV6_TCLASS)
+-        const int x = setsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &bTos, sizeof(bTos));
++        const int x = setsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, reinterpret_cast<const char *>(&bTos), sizeof(bTos));
+         if (x < 0) {
+             int xerrno = errno;
+             debugs(50, 2, "setsockopt(IPV6_TCLASS) on " << fd << ": " << xstrerr(xerrno));

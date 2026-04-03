@@ -1,0 +1,109 @@
+diff --git a/pristine/squid-7.5/compat/os/mingw.h b/patched/squid-7.5/compat/os/mingw.h
+--- a/pristine/squid-7.5/compat/os/mingw.h
++++ b/patched/squid-7.5/compat/os/mingw.h
+@@ -71,6 +71,105 @@
+ #define SIGUSR2 31 /* squid4win-mingw-signal-compat */
+ #endif
+ 
++#include "compat/initgroups.h" /* squid4win-mingw-initgroups-decl */
++
++#if !HAVE_PWD_H
++struct passwd {
++    char *pw_name;
++    char *pw_passwd;
++    uid_t pw_uid;
++    gid_t pw_gid;
++    char *pw_gecos;
++    char *pw_dir;
++    char *pw_shell;
++};
++#endif
++
++#if !HAVE_GRP_H
++struct group {
++    char *gr_name;
++    char *gr_passwd;
++    gid_t gr_gid;
++    char **gr_mem;
++};
++#endif
++
++#if !HAVE_PWD_H
++static inline struct passwd *
++getpwnam(const char *unused) /* squid4win-mingw-user-compat */
++{
++    static struct passwd pwd = {0, 0, 100, 100, 0, 0, 0};
++    (void)unused;
++    return &pwd;
++}
++#endif
++
++#if !HAVE_GRP_H
++static inline struct group *
++getgrnam(const char *unused) /* squid4win-mingw-user-compat */
++{
++    static struct group grp = {0, 0, 100, 0};
++    (void)unused;
++    return &grp;
++}
++#endif
++
++#if !HAVE_SETEUID
++static inline uid_t
++geteuid(void) /* squid4win-mingw-user-compat */
++{
++    return 100;
++}
++static inline int
++seteuid(uid_t euid) /* squid4win-mingw-user-compat */
++{
++    (void)euid;
++    return 0;
++}
++#endif
++
++#if !HAVE_SETUID
++static inline uid_t
++getuid(void) /* squid4win-mingw-user-compat */
++{
++    return 100;
++}
++static inline int
++setuid(uid_t uid) /* squid4win-mingw-user-compat */
++{
++    (void)uid;
++    return 0;
++}
++#endif
++
++#if !HAVE_SETEGID
++static inline gid_t
++getegid(void) /* squid4win-mingw-user-compat */
++{
++    return 100;
++}
++static inline int
++setegid(gid_t egid) /* squid4win-mingw-user-compat */
++{
++    (void)egid;
++    return 0;
++}
++#endif
++
++#if !HAVE_SETGID
++static inline gid_t
++getgid(void) /* squid4win-mingw-user-compat */
++{
++    return 100;
++}
++static inline int
++setgid(gid_t gid) /* squid4win-mingw-user-compat */
++{
++    (void)gid;
++    return 0;
++}
++#endif
++
+ #ifndef LOG_PID
+ #define LOG_PID     0x01 /* squid4win-mingw-syslog-compat */
+ #endif
