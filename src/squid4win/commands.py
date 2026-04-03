@@ -307,6 +307,26 @@ def _recipe_host_option_arguments(
     return arguments
 
 
+def _windows_recipe_conf_arguments(
+    selected_dependency_sources: dict[str, str],
+) -> list[str]:
+    arguments: list[str] = []
+
+    if selected_dependency_sources.get("openssl") == "conan":
+        # Current Conan Center OpenSSL 3.6.x MinGW builds fail in apps/lib/win32_init.c
+        # unless wchar.h provides wcslen() and _alloca resolves to GCC's builtin.
+        arguments.extend(
+            [
+                "-c:h",
+                'openssl/*:tools.build:cflags=["-include","wchar.h"]',
+                "-c:h",
+                'openssl/*:tools.build:defines=["_alloca=__builtin_alloca"]',
+            ]
+        )
+
+    return arguments
+
+
 def _uses_default_dependency_sources(
     dependency_sources: NativeDependencySourceOptions,
 ) -> bool:
@@ -443,6 +463,7 @@ def _recipe_option_arguments(
             openssl_linkage=openssl_linkage,
         )
     )
+    arguments.extend(_windows_recipe_conf_arguments(selected_dependency_sources))
     return arguments
 
 
