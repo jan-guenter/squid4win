@@ -227,21 +227,45 @@ def _selected_dependency_sources(
     option_values = dependency_sources.as_option_values()
     selected_sources: dict[str, str] = {}
     for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
-        option_name = str(dependency_settings.get("source_option", "")).strip()
-        if not option_name:
-            msg = f"Windows dependency metadata for '{dependency_name}' must declare source_option."
-            raise ValueError(msg)
-
-        source_value = str(option_values.get(option_name, "")).strip().lower()
-        if source_value not in {"system", "conan"}:
-            msg = (
-                f"Unsupported source '{source_value}' for dependency '{dependency_name}'. "
-                "Expected 'system' or 'conan'."
-            )
-            raise ValueError(msg)
-        selected_sources[dependency_name] = source_value
+        option_name = _dependency_source_option_name(
+            dependency_name,
+            dependency_settings,
+        )
+        selected_sources[dependency_name] = _validated_dependency_source_value(
+            dependency_name,
+            option_name,
+            option_values,
+        )
 
     return selected_sources
+
+
+def _dependency_source_option_name(
+    dependency_name: str,
+    dependency_settings: dict[str, Any],
+) -> str:
+    option_name = str(dependency_settings.get("source_option", "")).strip()
+    if option_name:
+        return option_name
+
+    msg = f"Windows dependency metadata for '{dependency_name}' must declare source_option."
+    raise ValueError(msg)
+
+
+def _validated_dependency_source_value(
+    dependency_name: str,
+    option_name: str,
+    option_values: dict[str, str],
+) -> str:
+    source_value = str(option_values.get(option_name, "")).strip().lower()
+    if source_value in {"system", "conan"}:
+        return source_value
+
+    msg = (
+        f"Unsupported source '{source_value}' for dependency '{dependency_name}'. "
+        "Expected 'system' or 'conan'."
+    )
+    raise ValueError(msg)
 
 
 def _uses_default_dependency_sources(
@@ -747,20 +771,19 @@ def _bundle_native_runtime_dlls(
     copied_runtime_dlls: list[str] = []
     missing_runtime_dlls: list[str] = []
     for runtime_dll in runtime_dlls:
-        runtime_dll_source_path = next(
-            (
-                source_directory / runtime_dll
-                for source_directory in runtime_dll_sources
-                if (source_directory / runtime_dll).is_file()
-            ),
-            None,
+        runtime_dll_source_path = _runtime_dll_source_path(
+            runtime_dll,
+            runtime_dll_sources,
         )
         if runtime_dll_source_path is None:
             missing_runtime_dlls.append(runtime_dll)
             continue
 
-        for executable_directory in executable_directories:
-            shutil.copy2(runtime_dll_source_path, executable_directory / runtime_dll)
+        _copy_runtime_dll_to_executables(
+            runtime_dll_source_path,
+            runtime_dll,
+            executable_directories,
+        )
         copied_runtime_dlls.append(runtime_dll)
 
     if missing_runtime_dlls:
@@ -772,6 +795,26 @@ def _bundle_native_runtime_dlls(
         raise FileNotFoundError(msg)
 
     return copied_runtime_dlls
+
+
+def _runtime_dll_source_path(runtime_dll: str, runtime_dll_sources: list[Path]) -> Path | None:
+    return next(
+        (
+            source_directory / runtime_dll
+            for source_directory in runtime_dll_sources
+            if (source_directory / runtime_dll).is_file()
+        ),
+        None,
+    )
+
+
+def _copy_runtime_dll_to_executables(
+    runtime_dll_source_path: Path,
+    runtime_dll: str,
+    executable_directories: list[Path],
+) -> None:
+    for executable_directory in executable_directories:
+        shutil.copy2(runtime_dll_source_path, executable_directory / runtime_dll)
 
 
 def _copy_runtime_notice_files(
