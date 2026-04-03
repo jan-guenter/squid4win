@@ -1,0 +1,23 @@
+diff --git a/pristine/squid-7.5/compat/os/mingw.h b/patched/squid-7.5/compat/os/mingw.h
+index b7fda9e..a4d9308 100644
+--- a/pristine/squid-7.5/compat/os/mingw.h
++++ b/patched/squid-7.5/compat/os/mingw.h
+@@ -46,6 +46,18 @@ fsync(int fd)
+ }
+ #endif
+ 
++static inline int
++kill(pid_t pid, int sig) /* squid4win-mingw-kill-compat */
++{
++    if (sig == 0) {
++        HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
++        if (!hProcess)
++            return -1;
++        CloseHandle(hProcess);
++    }
++    return 0;
++}
++
+ #define mkdir(p,F) mkdir((p))
+ 
+ #endif /* _SQUID_MINGW_*/

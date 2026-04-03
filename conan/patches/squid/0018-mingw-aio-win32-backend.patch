@@ -1,0 +1,53 @@
+diff --git a/pristine/squid-7.5/src/DiskIO/AIO/AIODiskFile.cc b/patched/squid-7.5/src/DiskIO/AIO/AIODiskFile.cc
+--- a/pristine/squid-7.5/src/DiskIO/AIO/AIODiskFile.cc
++++ b/patched/squid-7.5/src/DiskIO/AIO/AIODiskFile.cc
+@@ -55,7 +55,7 @@
+ AIODiskFile::open(int flags, mode_t, RefCount<IORequestor> callback)
+ {
+     /* Simulate async calls */
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-aio-disk-file */
+     fd = aio_open(path.termedBuf(), flags);
+ #else
+     fd = file_open(path.termedBuf(), flags);
+@@ -203,7 +203,7 @@
+ AIODiskFile::close ()
+ {
+     assert (!closed);
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-aio-disk-file */
+     aio_close(fd);
+ #else
+     file_close(fd);
+diff --git a/pristine/squid-7.5/src/DiskIO/AIO/aio_win32.cc b/patched/squid-7.5/src/DiskIO/AIO/aio_win32.cc
+--- a/pristine/squid-7.5/src/DiskIO/AIO/aio_win32.cc
++++ b/patched/squid-7.5/src/DiskIO/AIO/aio_win32.cc
+@@ -16,8 +16,9 @@
+ #include "win32.h"
+ 
+ #include <cerrno>
+-
+-#if _SQUID_WINDOWS_
++#include <cstdint> /* squid4win-mingw-aio-intptr */
++
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-aio-win32 */
+ VOID CALLBACK IoCompletionRoutine(DWORD dwErrorCode,
+                                   DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped)
+ {
+@@ -293,7 +294,7 @@
+                            NULL                     /* handle to template file */
+                           )) != INVALID_HANDLE_VALUE) {
+         ++ statCounter.syscalls.disk.opens;
+-        fd = _open_osfhandle((long) hndl, 0);
++        fd = _open_osfhandle(reinterpret_cast<intptr_t>(hndl), 0);
+         commSetCloseOnExec(fd);
+         fd_open(fd, FD_FILE, path);
+     } else {
+@@ -321,5 +322,5 @@
+ {
+     return aiocbp->aio_sigevent.sigev_signo;
+ }
+-#endif /* _SQUID_WINDOWS_ */
+-
++#endif /* _SQUID_WINDOWS_ || _SQUID_MINGW_ */
++

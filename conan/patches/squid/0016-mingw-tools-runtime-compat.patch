@@ -1,0 +1,39 @@
+diff --git a/pristine/squid-7.5/compat/os/mingw.h b/patched/squid-7.5/compat/os/mingw.h
+--- a/pristine/squid-7.5/compat/os/mingw.h
++++ b/patched/squid-7.5/compat/os/mingw.h
+@@ -170,6 +170,14 @@
+ }
+ #endif
+ 
++static inline size_t
++getpagesize(void) /* squid4win-mingw-getpagesize */
++{
++    SYSTEM_INFO systemInfo;
++    GetSystemInfo(&systemInfo);
++    return systemInfo.dwPageSize;
++}
++
+ #ifndef LOG_PID
+ #define LOG_PID     0x01 /* squid4win-mingw-syslog-compat */
+ #endif
+diff --git a/pristine/squid-7.5/src/tools.cc b/patched/squid-7.5/src/tools.cc
+--- a/pristine/squid-7.5/src/tools.cc
++++ b/patched/squid-7.5/src/tools.cc
+@@ -1179,7 +1179,7 @@
+ pid_t
+ WaitForOnePid(pid_t pid, PidStatus &status, int flags)
+ {
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-tools */
+     return 0; // function not used on Windows
+ #else
+     return waitpid(pid, &status, flags);
+@@ -1198,7 +1198,7 @@
+                             nullptr,
+                             errorId,
+                             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+-                            static_cast<LPTSTR>(&rawMessage),
++                            reinterpret_cast<LPTSTR>(&rawMessage) /* squid4win-mingw-tools */,
+                             0,
+                             nullptr);
+     if (!length) {

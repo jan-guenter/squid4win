@@ -1,0 +1,101 @@
+diff --git a/pristine/squid-7.5/src/security/cert_generators/file/certificate_db.cc b/patched/squid-7.5/src/security/cert_generators/file/certificate_db.cc
+index 4b729b3..6eb0e46 100644
+--- a/pristine/squid-7.5/src/security/cert_generators/file/certificate_db.cc
++++ b/patched/squid-7.5/src/security/cert_generators/file/certificate_db.cc
+@@ -28,7 +28,7 @@
+ 
+ Ssl::Lock::Lock(std::string const &aFilename) :
+     filename(aFilename),
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-certificate-db-locking */
+     hFile(INVALID_HANDLE_VALUE)
+ #else
+     fd(-1)
+@@ -38,7 +38,7 @@ Ssl::Lock::Lock(std::string const &aFilename) :
+ 
+ bool Ssl::Lock::locked() const
+ {
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-certificate-db-locking */
+     return hFile != INVALID_HANDLE_VALUE;
+ #else
+     return fd != -1;
+@@ -48,7 +48,7 @@ bool Ssl::Lock::locked() const
+ void Ssl::Lock::lock()
+ {
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-certificate-db-locking */
+     hFile = CreateFile(TEXT(filename.c_str()), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+     if (hFile == INVALID_HANDLE_VALUE)
+ #else
+@@ -57,7 +57,7 @@ void Ssl::Lock::lock()
+ #endif
+         throw TextException(ToSBuf("Failed to open file ", filename), Here());
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-certificate-db-locking */
+     if (!LockFile(hFile, 0, 0, 1, 0))
+ #elif _SQUID_SOLARIS_
+     if (lockf(fd, F_LOCK, 0) != 0)
+@@ -69,7 +69,7 @@ void Ssl::Lock::lock()
+ 
+ void Ssl::Lock::unlock()
+ {
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-certificate-db-locking */
+     if (hFile != INVALID_HANDLE_VALUE) {
+         UnlockFile(hFile, 0, 0, 1, 0);
+         CloseHandle(hFile);
+diff --git a/pristine/squid-7.5/src/security/cert_generators/file/certificate_db.h b/patched/squid-7.5/src/security/cert_generators/file/certificate_db.h
+index ce126f6..5f2011f 100644
+--- a/pristine/squid-7.5/src/security/cert_generators/file/certificate_db.h
++++ b/patched/squid-7.5/src/security/cert_generators/file/certificate_db.h
+@@ -28,7 +28,7 @@ public:
+     const char *name() const { return filename.c_str(); }
+ private:
+     std::string filename;
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ /* squid4win-mingw-certificate-db-handle */
+     HANDLE hFile; ///< Windows file handle.
+ #else
+     int fd; ///< Linux file descriptor.
+diff --git a/pristine/squid-7.5/src/security/cert_generators/file/security_file_certgen.cc b/patched/squid-7.5/src/security/cert_generators/file/security_file_certgen.cc
+index 5ba58e4..008c73e 100644
+--- a/pristine/squid-7.5/src/security/cert_generators/file/security_file_certgen.cc
++++ b/patched/squid-7.5/src/security/cert_generators/file/security_file_certgen.cc
+@@ -20,6 +20,20 @@
+ #include <sstream>
+ #include <stdexcept>
+ #include <string>
++#include <cstdarg>
++#include <cstdio>
++#include <cstdlib>
++
++void
++fatalf(const char *fmt, ...) /* squid4win-mingw-security-file-certgen-fatal */
++{
++    va_list args;
++    va_start(args, fmt);
++    vfprintf(stderr, fmt, args);
++    fputc('\n', stderr);
++    va_end(args);
++    exit(EXIT_FAILURE);
++}
+ #if HAVE_GETOPT_H
+ #include <getopt.h>
+ #endif
+diff --git a/pristine/squid-7.5/src/ssl/crtd_message.h b/patched/squid-7.5/src/ssl/crtd_message.h
+index 192f660..cf99e0e 100644
+--- a/pristine/squid-7.5/src/ssl/crtd_message.h
++++ b/patched/squid-7.5/src/ssl/crtd_message.h
+@@ -26,6 +26,9 @@ class CrtdMessage
+ public:
+     typedef std::map<std::string, std::string> BodyParams;
+     /// Parse result codes.
++#if defined(_SQUID_MINGW_) && defined(ERROR)
++#undef ERROR
++#endif
+     enum ParseResult {
+         OK,
+         INCOMPLETE,

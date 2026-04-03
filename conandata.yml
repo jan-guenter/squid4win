@@ -88,59 +88,75 @@ build:
 
 patches:
   "7.5":
-    - patch_file: "conan/patches/squid/0001-mingw-compat-core-shims.patch"
-      patch_description: "Provide foundational MinGW POSIX compatibility shims."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0002-mingw-build-system-flags.patch"
-      patch_description: "Adjust Squid build-system flags and MinGW link libraries."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0003-mingw-disk-io-compat.patch"
-      patch_description: "Teach Squid DiskIO backends to build and run under MinGW."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0004-mingw-socket-and-ipc-compat.patch"
-      patch_description: "Add MinGW-safe Winsock and IPC wrappers."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0005-mingw-win32-runtime-support.patch"
-      patch_description: "Expose the Win32 runtime helpers needed by the MinGW port."
-      base_path: "."
-      strip: 2
-    - patch_file: "conan/patches/squid/0006-mingw-cert-generator-compat.patch"
+    - patch_file: "conan/patches/squid/0001-mingw-cert-generator-compat.patch"
       patch_description: "Fix MinGW certificate helper and certificate DB support."
       base_path: "."
       strip: 2
-    - patch_file: "conan/patches/squid/0007-mingw-main-and-service-integration.patch"
-      patch_description: "Wire MinGW into Squid runtime startup and Windows service paths."
+    - patch_file: "conan/patches/squid/0002-mingw-diskthreads-compat.patch"
+      patch_description: "Fix MinGW DiskThreads pipe setup, allocator visibility, and Win32 error mapping."
       base_path: "."
       strip: 2
-    - patch_file: "conan/patches/squid/0008-mingw-lockfileex-overlapped.patch"
-      patch_description: "Pass a valid OVERLAPPED structure to LockFileEx for Windows instance locking."
+    - patch_file: "conan/patches/squid/0003-mingw-winsock-link-flags.patch"
+      patch_description: "Link MinGW helper binaries against Winsock where upstream omits it."
       base_path: "."
       strip: 2
-    - patch_file: "conan/patches/squid/0009-mingw-setfilepointerex-truncate.patch"
-      patch_description: "Use SetFilePointerEx when truncating Windows-managed pid files."
+    - patch_file: "conan/patches/squid/0004-mingw-setsockopt-signatures.patch"
+      patch_description: "Fix MinGW setsockopt argument casts in QosConfig."
       base_path: "."
       strip: 2
-    - patch_file: "conan/patches/squid/0010-mingw-unlinkd-windows-ipc.patch"
-      patch_description: "Treat MinGW like Windows when choosing unlinkd IPC transports."
+    - patch_file: "conan/patches/squid/0005-mingw-devnull-compat.patch"
+      patch_description: "Define _PATH_DEVNULL for MinGW log helper builds."
       base_path: "."
       strip: 2
-    - patch_file: "conan/patches/squid/0011-mingw-ipc-params-address-lifetime.patch"
-      patch_description: "Store Windows IPC peer addresses with stable Ip::Address lifetime semantics."
+    - patch_file: "conan/patches/squid/0006-mingw-kill-compat.patch"
+      patch_description: "Provide a MinGW kill() shim for Windows-style process probes."
       base_path: "."
       strip: 2
-    - patch_file: "conan/patches/squid/0012-mingw-filerename-overwrite.patch"
-      patch_description: "Use the Windows overwrite-before-rename workaround for MinGW builds too."
+    - patch_file: "conan/patches/squid/0007-mingw-syslog-waitstatus-compat.patch"
+      patch_description: "Provide MinGW syslog and wait-status compatibility shims."
       base_path: "."
       strip: 2
-    - patch_file: "conan/patches/squid/0013-mingw-helper-windows-guards.patch"
-      patch_description: "Treat MinGW helper socket shutdown and process waits like Windows."
+    - patch_file: "conan/patches/squid/0008-mingw-signal-constants.patch"
+      patch_description: "Provide missing Windows signal constants for MinGW builds."
       base_path: "."
       strip: 2
-    - patch_file: "conan/patches/squid/0014-mingw-windows-dns-registry.patch"
-      patch_description: "Treat MinGW like Windows for DNS registry discovery and messaging."
+    - patch_file: "conan/patches/squid/0009-mingw-ipc-winsock-signatures.patch"
+      patch_description: "Fix MinGW Winsock buffer and addrlen signatures in ipc_win32."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0010-mingw-unlinkd-devnull-compat.patch"
+      patch_description: "Provide _PATH_DEVNULL for the MinGW unlink daemon."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0011-mingw-win32-service-runtime-compat.patch"
+      patch_description: "Expose Windows service and win32 runtime support to MinGW builds."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0012-mingw-cbdata-cookie-width.patch"
+      patch_description: "Use pointer-width cbdata cookies on MinGW builds."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0013-mingw-user-group-compat.patch"
+      patch_description: "Provide passwd, group, and uid/gid compatibility shims for MinGW."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0014-mingw-fd-msghdr-compat.patch"
+      patch_description: "Provide MinGW sendmsg/recvmsg compatibility for fd.cc."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0015-mingw-main-daemon-guards.patch"
+      patch_description: "Exclude MinGW from Unix-only main.cc daemon management paths."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0016-mingw-tools-runtime-compat.patch"
+      patch_description: "Provide MinGW tools.cc runtime shims and getpagesize compatibility."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0017-mingw-comm-socket-fcntl-compat.patch"
+      patch_description: "Provide MinGW comm.cc socket adapters and fcntl compatibility shims."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0018-mingw-aio-win32-backend.patch"
+      patch_description: "Enable the Win32 AIO backend for MinGW DiskIO AIO builds."
       base_path: "."
       strip: 2

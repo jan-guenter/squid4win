@@ -1,0 +1,191 @@
+diff --git a/pristine/squid-7.5/src/ipc_win32.cc b/patched/squid-7.5/src/ipc_win32.cc
+--- a/pristine/squid-7.5/src/ipc_win32.cc
++++ b/patched/squid-7.5/src/ipc_win32.cc
+@@ -58,6 +58,41 @@
+ static const char *hello_string = "hi there\n";
+ #define HELLO_BUF_SZ 32
+ static char hello_buf[HELLO_BUF_SZ];
++
++template <typename AddrLen>
++static int
++ipcWinSockGetSockName(SOCKET fd, struct sockaddr *addr, AddrLen *addrLen) /* squid4win-mingw-ipc-winsock */
++{
++#if _SQUID_MINGW_
++    int winsockAddrLen = static_cast<int>(*addrLen);
++    const int result = getsockname(fd, addr, &winsockAddrLen);
++    *addrLen = static_cast<AddrLen>(winsockAddrLen);
++    return result;
++#else
++    return getsockname(fd, addr, addrLen);
++#endif
++}
++
++static int
++ipcWinSockRecv(SOCKET fd, void *buf, int len) /* squid4win-mingw-ipc-winsock */
++{
++#if _SQUID_MINGW_
++    return recv(fd, static_cast<char *>(buf), len, 0);
++#else
++    return recv(fd, buf, len, 0);
++#endif
++}
++
++static int
++ipcWinSockSend(SOCKET fd, const void *buf, int len) /* squid4win-mingw-ipc-winsock */
++{
++#if _SQUID_MINGW_
++    return send(fd, static_cast<const char *>(buf), len, 0);
++#else
++    return send(fd, buf, len, 0);
++#endif
++}
++
+ 
+ static int
+ ipcCloseAllFD(int prfd, int pwfd, int crfd, int cwfd)
+@@ -184,7 +219,7 @@
+ 
+         Ip::Address::InitAddr(aiPS);
+ 
+-        if (getsockname(pwfd, aiPS->ai_addr, &(aiPS->ai_addrlen) ) < 0) {
++        if (ipcWinSockGetSockName(pwfd, aiPS->ai_addr, &(aiPS->ai_addrlen) ) < 0) {
+             int xerrno = errno;
+             debugs(54, DBG_CRITICAL, "ipcCreate: getsockname: " << xstrerr(xerrno));
+             Ip::Address::FreeAddr(aiPS);
+@@ -198,7 +233,7 @@
+ 
+         Ip::Address::InitAddr(aiCS);
+ 
+-        if (getsockname(crfd, aiCS->ai_addr, &(aiCS->ai_addrlen) ) < 0) {
++        if (ipcWinSockGetSockName(crfd, aiCS->ai_addr, &(aiCS->ai_addrlen) ) < 0) {
+             int xerrno = errno;
+             debugs(54, DBG_CRITICAL, "ipcCreate: getsockname: " << xstrerr(xerrno));
+             Ip::Address::FreeAddr(aiCS);
+@@ -254,7 +289,7 @@
+     }
+ 
+     memset(hello_buf, '\0', HELLO_BUF_SZ);
+-    x = recv(prfd, (void *)hello_buf, HELLO_BUF_SZ - 1, 0);
++    x = ipcWinSockRecv(prfd, hello_buf, HELLO_BUF_SZ - 1);
+ 
+     if (x < 0) {
+         int xerrno = errno;
+@@ -270,7 +305,7 @@
+         return ipcCloseAllFD(prfd, pwfd, -1, -1);
+     }
+ 
+-    x = send(pwfd, (const void *)ok_string, strlen(ok_string), 0);
++    x = ipcWinSockSend(pwfd, ok_string, strlen(ok_string));
+ 
+     if (x < 0) {
+         int xerrno = errno;
+@@ -281,7 +316,7 @@
+     }
+ 
+     memset(hello_buf, '\0', HELLO_BUF_SZ);
+-    x = recv(prfd, (void *)hello_buf, HELLO_BUF_SZ - 1, 0);
++    x = ipcWinSockRecv(prfd, hello_buf, HELLO_BUF_SZ - 1);
+ 
+     if (x < 0) {
+         int xerrno = errno;
+@@ -333,7 +368,7 @@
+ static int
+ ipcSend(int cwfd, const char *buf, int len)
+ {
+-    int x = send(cwfd, (const void *)buf, len, 0);
++    int x = ipcWinSockSend(cwfd, buf, len);
+ 
+     if (x < 0) {
+         int xerrno = errno;
+@@ -410,7 +445,7 @@
+             goto cleanup;
+     }
+ 
+-    x = send(cwfd, (const void *)hello_string, strlen(hello_string) + 1, 0);
++    x = ipcWinSockSend(cwfd, hello_string, strlen(hello_string) + 1);
+ 
+     if (x < 0) {
+         int xerrno = errno;
+@@ -421,7 +456,7 @@
+ 
+     PutEnvironment();
+     memset(buf1, '\0', bufSz);
+-    x = recv(crfd, (void *)buf1, bufSz-1, 0);
++    x = ipcWinSockRecv(crfd, buf1, bufSz-1);
+ 
+     if (x < 0) {
+         int xerrno = errno;
+@@ -471,7 +506,7 @@
+ 
+         Ip::Address::InitAddr(aiPS_ipc);
+ 
+-        if (getsockname(pwfd_ipc, aiPS_ipc->ai_addr, &(aiPS_ipc->ai_addrlen)) < 0) {
++        if (ipcWinSockGetSockName(pwfd_ipc, aiPS_ipc->ai_addr, &(aiPS_ipc->ai_addrlen)) < 0) {
+             int xerrno = errno;
+             debugs(54, DBG_CRITICAL, "ipcCreate: getsockname: " << xstrerr(xerrno));
+             ipcSend(cwfd, err_string, strlen(err_string));
+@@ -486,7 +521,7 @@
+ 
+         Ip::Address::InitAddr(aiCS_ipc);
+ 
+-        if (getsockname(crfd_ipc, aiCS_ipc->ai_addr, &(aiCS_ipc->ai_addrlen)) < 0) {
++        if (ipcWinSockGetSockName(crfd_ipc, aiCS_ipc->ai_addr, &(aiCS_ipc->ai_addrlen)) < 0) {
+             int xerrno = errno;
+             debugs(54, DBG_CRITICAL, "ipcCreate: getsockname: " << xstrerr(xerrno));
+             ipcSend(cwfd, err_string, strlen(err_string));
+@@ -656,8 +691,8 @@
+             goto cleanup;
+         }
+ 
+-        x = send(pwfd_ipc, (const void *)ok_string, strlen(ok_string), 0);
+-        x = recv(prfd_ipc, (void *)(buf1 + 200), bufSz -1 - 200, 0);
++        x = ipcWinSockSend(pwfd_ipc, ok_string, strlen(ok_string));
++        x = ipcWinSockRecv(prfd_ipc, buf1 + 200, bufSz -1 - 200);
+         assert((size_t) x == strlen(ok_string)
+                && !strncmp(ok_string, buf1 + 200, strlen(ok_string)));
+     }               /* IPC_UDP_SOCKET */
+@@ -705,7 +740,7 @@
+ 
+     /* cycle */
+     for (;;) {
+-        x = recv(crfd, (void *)buf1, bufSz-1, 0);
++        x = ipcWinSockRecv(crfd, buf1, bufSz-1);
+ 
+         if (x <= 0) {
+             debugs(54, 3, "ipc(" << prog << "," << pid << "): " << x << " bytes received from parent. Exiting...");
+@@ -726,7 +761,7 @@
+         if (type == IPC_TCP_SOCKET)
+             x = write(c2p[1], buf1, x);
+         else
+-            x = send(pwfd_ipc, (const void *)buf1, x, 0);
++            x = ipcWinSockSend(pwfd_ipc, buf1, x);
+ 
+         if (x <= 0) {
+             debugs(54, 3, "ipc(" << prog << "," << pid << "): " << x << " bytes written to " << prog << ". Exiting...");
+@@ -746,7 +781,7 @@
+         ipcCloseAllFD(-1, -1, crfd, cwfd);
+ 
+     if (prfd_ipc != -1) {
+-        send(crfd_ipc, (const void *)shutdown_string, strlen(shutdown_string), 0);
++        ipcWinSockSend(crfd_ipc, shutdown_string, strlen(shutdown_string));
+         shutdown(crfd_ipc, SD_BOTH);
+         shutdown(prfd_ipc, SD_BOTH);
+     }
+@@ -806,7 +841,7 @@
+         if (type == IPC_TCP_SOCKET)
+             x = read(rfd, buf2, bufSz-1);
+         else
+-            x = recv(rfd, (void *)buf2, bufSz-1, 0);
++            x = ipcWinSockRecv(rfd, buf2, bufSz-1);
+ 
+         if ((x <= 0 && type == IPC_TCP_SOCKET) ||
+                 (x < 0 && type == IPC_UDP_SOCKET)) {
+@@ -832,7 +867,7 @@
+ 
+         debugs(54, 5, "ipc(" << prog << "," << pid << "): received from child : " << rfc1738_escape_unescaped(buf2));
+ 
+-        x = send(send_fd, (const void *)buf2, x, 0);
++        x = ipcWinSockSend(send_fd, buf2, x);
+ 
+         if ((x <= 0 && type == IPC_TCP_SOCKET) ||
+                 (x < 0 && type == IPC_UDP_SOCKET)) {
