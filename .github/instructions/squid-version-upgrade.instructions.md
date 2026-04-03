@@ -11,10 +11,11 @@ the automation around that update flow.
   hand-editing version files. Keep `scripts\Update-SquidVersion.ps1` only as a
   transitional fallback when the Python automation environment is unavailable.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
-  `conandata.yml` synchronized.
-- Re-check the ordered patch series under `conan\patches\squid\*.patch` and the
-  matching `conandata.yml` patch entries against the new upstream release, and
-  remove or adjust patches only with evidence.
+  `conan\recipes\squid\all\conandata.yml` synchronized.
+- Re-check the ordered patch series under
+  `conan\recipes\squid\all\patches\*.patch` and the
+  matching `conan\recipes\squid\all\conandata.yml` patch entries against the new
+  upstream release, and remove or adjust patches only with evidence.
 - Re-run the native build path and smoke tests after the version bump.
 - Update any release, package-manager, or documentation text that mentions the
   pinned Squid version.

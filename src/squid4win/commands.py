@@ -17,8 +17,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-import yaml
-
 from squid4win.logging_utils import get_logger
 from squid4win.models import (
     AutomationPlan,
@@ -48,6 +46,114 @@ if TYPE_CHECKING:
 
 _BUILD_MISSING_ARGUMENT = "--build=missing"
 _TRAY_EXECUTABLE_NAME = "Squid4Win.Tray.exe"
+_WINDOWS_MSYS2_ENV_DIRECTORY = "mingw64"
+_WINDOWS_MSYS2_BASE_PACKAGES = [
+    "autoconf",
+    "automake",
+    "libtool",
+    "make",
+    "mingw-w64-x86_64-make",
+    "mingw-w64-x86_64-pkgconf",
+    "mingw-w64-x86_64-libgnurx",
+]
+_WINDOWS_DEPENDENCY_SETTINGS: dict[str, dict[str, Any]] = {
+    "libxml2": {
+        "source_option": "libxml2_source",
+        "system_package": "mingw-w64-x86_64-libxml2",
+    },
+    "openssl": {
+        "source_option": "openssl_source",
+        "feature_option": "with_openssl",
+        "system_package": "mingw-w64-x86_64-openssl",
+    },
+    "pcre2": {
+        "source_option": "pcre2_source",
+        "system_package": "mingw-w64-x86_64-pcre2",
+    },
+    "zlib": {
+        "source_option": "zlib_source",
+        "system_package": "mingw-w64-x86_64-zlib",
+    },
+}
+_WINDOWS_RUNTIME_NOTICE_ARTIFACTS: list[dict[str, Any]] = [
+    {
+        "id": "openssl",
+        "name": "OpenSSL",
+        "source_option": "openssl_source",
+        "dependency_by_source": {
+            "system": "msys2",
+            "conan": "openssl",
+        },
+        "package_by_source": {
+            "system": "mingw-w64-x86_64-openssl",
+            "conan": "openssl",
+        },
+        "project_url": "https://openssl-library.org",
+        "license": "spdx:Apache-2.0",
+        "dlls": [
+            "libcrypto-3-x64.dll",
+            "libssl-3-x64.dll",
+        ],
+        "license_files_by_source": {
+            "system": [
+                "licenses\\libopenssl\\LICENSE.txt",
+            ],
+        },
+        "license_directories_by_source": {
+            "conan": [
+                "licenses",
+            ],
+        },
+    },
+    {
+        "id": "winpthreads",
+        "name": "winpthreads",
+        "dependency": "mingw-builds",
+        "package": "mingw-w64-x86_64-libwinpthread",
+        "project_url": "https://www.mingw-w64.org/",
+        "license": "spdx:MIT AND BSD-3-Clause-Clear",
+        "dlls": [
+            "libwinpthread-1.dll",
+        ],
+        "license_files": [
+            "licenses\\winpthreads\\COPYING",
+            "licenses\\mingw-w64\\COPYING.MinGW-w64-runtime.txt",
+        ],
+    },
+    {
+        "id": "libgnurx",
+        "name": "libgnurx",
+        "dependency": "mingw-builds",
+        "package": "mingw-w64-x86_64-libgnurx",
+        "project_url": "https://mingw.sourceforge.io/",
+        "license": "LGPL",
+        "dlls": [
+            "libgnurx-0.dll",
+        ],
+        "license_files": [
+            "licenses\\mingw-libgnurx\\COPYING.LIB",
+        ],
+    },
+]
+_WINDOWS_BUILD_SETTINGS: dict[str, Any] = {
+    "msys2": {
+        "env": _WINDOWS_MSYS2_ENV_DIRECTORY,
+        "packages": list(_WINDOWS_MSYS2_BASE_PACKAGES),
+    },
+    "mingw_builds": {
+        "threads": "posix",
+        "exception": "seh",
+        "runtime": "ucrt",
+    },
+    "dependencies": _WINDOWS_DEPENDENCY_SETTINGS,
+    "runtime_dlls": [
+        "libcrypto-3-x64.dll",
+        "libssl-3-x64.dll",
+        "libwinpthread-1.dll",
+        "libgnurx-0.dll",
+    ],
+    "runtime_notice_artifacts": _WINDOWS_RUNTIME_NOTICE_ARTIFACTS,
+}
 
 
 @dataclass(frozen=True)
@@ -98,7 +204,7 @@ def _string_list(value: object) -> list[str]:
 def _dependency_build_settings(build_settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
     raw_dependencies = build_settings.get("dependencies") or {}
     if not isinstance(raw_dependencies, dict):
-        msg = "conandata.yml build.dependencies must be a mapping."
+        msg = "Windows dependency metadata must be a mapping."
         raise ValueError(msg)
 
     dependencies: dict[str, dict[str, Any]] = {}
@@ -107,7 +213,7 @@ def _dependency_build_settings(build_settings: dict[str, Any]) -> dict[str, dict
         if not normalized_name:
             continue
         if not isinstance(raw_dependency, dict):
-            msg = f"build.dependencies.{normalized_name} must be a mapping."
+            msg = f"Windows dependency metadata for '{normalized_name}' must be a mapping."
             raise ValueError(msg)
         dependencies[normalized_name] = cast(dict[str, Any], raw_dependency)
 
@@ -123,7 +229,7 @@ def _selected_dependency_sources(
     for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
         option_name = str(dependency_settings.get("source_option", "")).strip()
         if not option_name:
-            msg = f"build.dependencies.{dependency_name} must declare source_option."
+            msg = f"Windows dependency metadata for '{dependency_name}' must declare source_option."
             raise ValueError(msg)
 
         source_value = str(option_values.get(option_name, "")).strip().lower()
@@ -232,18 +338,8 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], loaded)
 
 
-def _load_build_settings(paths: RepositoryPaths) -> dict[str, Any]:
-    loaded = yaml.safe_load(paths.conan_data_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(loaded, dict):
-        msg = f"Expected a mapping in '{paths.conan_data_path}'."
-        raise ValueError(msg)
-
-    build_settings = loaded.get("build") or {}
-    if not isinstance(build_settings, dict):
-        msg = f"Expected a top-level 'build' mapping in '{paths.conan_data_path}'."
-        raise ValueError(msg)
-
-    return cast(dict[str, Any], build_settings)
+def _load_build_settings(_paths: RepositoryPaths) -> dict[str, Any]:
+    return _WINDOWS_BUILD_SETTINGS
 
 
 def _recipe_option_arguments(
@@ -282,7 +378,7 @@ def _recipe_option_arguments(
     for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
         option_name = str(dependency_settings.get("source_option", "")).strip()
         if not option_name:
-            msg = f"build.dependencies.{dependency_name} must declare source_option."
+            msg = f"Windows dependency metadata for '{dependency_name}' must declare source_option."
             raise ValueError(msg)
 
         arguments.extend(
@@ -302,7 +398,7 @@ def _description_suffix(options: SquidBuildOptions) -> str:
 
     return (
         "Detect the Conan profile, refresh the lockfile when needed, source the "
-        "root recipe, and build the staged native Squid bundle."
+        "CCI-style Squid recipe, and build the staged native Squid bundle."
     )
 
 
@@ -389,7 +485,7 @@ def _load_conan_graph_info(
             "conan",
             "graph",
             "info",
-            str(context.paths.repository_root),
+            str(context.paths.conan_recipe_root),
             "--profile:host",
             str(context.host_profile_path),
             "--profile:build",
@@ -640,7 +736,7 @@ def _bundle_native_runtime_dlls(
 ) -> list[str]:
     runtime_dlls = _string_list(build_settings.get("runtime_dlls", []))
     if not runtime_dlls:
-        msg = "conandata.yml must declare build.runtime_dlls for the staged Windows bundle."
+        msg = "Windows build metadata must declare runtime_dlls for the staged bundle."
         raise ValueError(msg)
 
     runtime_dll_sources = _runtime_dll_source_directories(
@@ -745,7 +841,7 @@ def _validate_runtime_notice_coverage(
     missing_notice_entries = sorted(bundled_runtime_dll_set - declared_runtime_dlls)
     if missing_notice_entries:
         msg = (
-            "The bundled Windows runtime DLLs are missing notice mappings in conandata.yml: "
+            "The bundled Windows runtime DLLs are missing notice mappings in the Python metadata: "
             + ", ".join(missing_notice_entries)
             + "."
         )
@@ -754,7 +850,7 @@ def _validate_runtime_notice_coverage(
     unused_notice_entries = sorted(declared_runtime_dlls - bundled_runtime_dll_set)
     if unused_notice_entries:
         msg = (
-            "build.runtime_notice_artifacts declares DLLs that were not bundled into the "
+            "Windows runtime notice metadata declares DLLs that were not bundled into the "
             "staged payload: " + ", ".join(unused_notice_entries) + "."
         )
         raise ValueError(msg)
@@ -771,7 +867,7 @@ def _harvest_runtime_notice_bundle(
 ) -> list[dict[str, Any]]:
     raw_notice_entries = cast(list[Any], build_settings.get("runtime_notice_artifacts", []))
     if not raw_notice_entries:
-        msg = "conandata.yml must declare build.runtime_notice_artifacts."
+        msg = "Windows build metadata must declare runtime_notice_artifacts."
         raise ValueError(msg)
 
     notice_root = bundle_root / "licenses" / "third-party" / "windows-runtime"
@@ -780,13 +876,13 @@ def _harvest_runtime_notice_bundle(
     selected_dependency_options = dependency_sources.as_option_values()
     for raw_notice_entry in raw_notice_entries:
         if not isinstance(raw_notice_entry, dict):
-            msg = "Runtime notice entries in conandata.yml must be mappings."
+            msg = "Runtime notice entries in the Windows build metadata must be mappings."
             raise ValueError(msg)
 
         notice_entry = cast(dict[str, Any], raw_notice_entry)
         notice_id = str(notice_entry.get("id", "")).strip()
         if not notice_id:
-            msg = "Each build.runtime_notice_artifacts entry must declare a non-empty id."
+            msg = "Each Windows runtime notice entry must declare a non-empty id."
             raise ValueError(msg)
 
         runtime_dlls = _deduplicate(_string_list(notice_entry.get("dlls", [])))
@@ -1207,7 +1303,7 @@ def _materialize_staged_squid_bundle(
 
     if options.with_packaging_support:
         source_root = (
-            context.paths.repository_root / "sources" / f"squid-{release_metadata['version']}"
+            context.paths.conan_recipe_root / "sources" / f"squid-{release_metadata['version']}"
         )
         licenses_root, _, _ = _copy_packaging_support_files(
             context.paths,
@@ -1614,7 +1710,7 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
         msg = (
             "The standalone Conan recipe no longer accepts ad hoc configure arguments from "
             "the Python CLI. Express Squid feature changes through recipe options or "
-            "conandata.yml build defaults instead."
+                        "recipe defaults instead."
         )
         raise ValueError(msg)
 
@@ -1635,12 +1731,12 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
         if options.refresh_lockfile or not context.lockfile_path.is_file():
             commands.append(
                 ProcessInvocation(
-                    description="Refresh the Conan lockfile for the root Squid recipe.",
+                    description="Refresh the Conan lockfile for the Squid recipe.",
                     command=(
                         "conan",
                         "lock",
                         "create",
-                        str(context.paths.repository_root),
+                        str(context.paths.conan_recipe_root),
                         "--profile:host",
                         str(context.host_profile_path),
                         "--profile:build",
@@ -1660,19 +1756,19 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
 
         commands.append(
             ProcessInvocation(
-                description="Resolve the root Conan recipe source tree.",
-                command=("conan", "source", str(context.paths.repository_root)),
+                description="Resolve the Squid recipe source tree.",
+                command=("conan", "source", str(context.paths.conan_recipe_root)),
                 environment=base_environment,
             )
         )
 
         commands.append(
             ProcessInvocation(
-                description="Build the pure native Squid package with the root Conan recipe.",
+                description="Build the pure native Squid package with the Squid recipe.",
                 command=(
                     "conan",
                     "build",
-                    str(context.paths.repository_root),
+                    str(context.paths.conan_recipe_root),
                     "-of",
                     str(context.layout.conan_output_root),
                     "-pr:h",
@@ -1756,12 +1852,12 @@ def build_conan_lockfile_update_plan(options: ConanLockfileUpdateOptions) -> Aut
                 environment=base_environment,
             ),
             ProcessInvocation(
-                description="Refresh the Conan lockfile for the root Squid recipe.",
+                description="Refresh the Conan lockfile for the Squid recipe.",
                 command=(
                     "conan",
                     "lock",
                     "create",
-                    str(context.paths.repository_root),
+                    str(context.paths.conan_recipe_root),
                     "--profile:host",
                     str(context.host_profile_path),
                     "--profile:build",
@@ -2017,7 +2113,9 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
     with _build_lock(context.layout.build_lock_path, context.layout.conan_output_root):
         if options.clean and not options.bootstrap_only:
             source_root = (
-                context.paths.repository_root / "sources" / (f"squid-{release_metadata['version']}")
+                context.paths.conan_recipe_root
+                / "sources"
+                / (f"squid-{release_metadata['version']}")
             )
             tray_layout = TrayBuildLayout.create(
                 context.paths.repository_root,

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Final
 
-_REPOSITORY_MARKERS: Final[tuple[str, ...]] = ("README.md", "AGENTS.md", "conanfile.py", "scripts")
+_REPOSITORY_MARKERS: Final[tuple[str, ...]] = ("README.md", "AGENTS.md", "scripts", "conan")
 
 
 def _looks_like_repository_root(candidate: Path) -> bool:

@@ -292,6 +292,7 @@ class RepositoryPaths(BaseModel):
     artifact_root: Path
     config_root: Path
     conan_root: Path
+    conan_recipe_root: Path
     conan_home_path: Path
     tray_project_path: Path
     squid_release_metadata_path: Path
@@ -303,6 +304,7 @@ class RepositoryPaths(BaseModel):
     def discover(cls, repository_root: Path | None = None) -> RepositoryPaths:
         root = discover_repository_root(repository_root)
         conan_root = root / "conan"
+        conan_recipe_root = conan_root / "recipes" / "squid" / "all"
         config_root = root / "config"
 
         return cls(
@@ -312,11 +314,12 @@ class RepositoryPaths(BaseModel):
             artifact_root=root / "artifacts",
             config_root=config_root,
             conan_root=conan_root,
+            conan_recipe_root=conan_recipe_root,
             conan_home_path=root / ".conan2",
             tray_project_path=root / "src" / "tray" / "Squid4Win.Tray" / "Squid4Win.Tray.csproj",
             squid_release_metadata_path=conan_root / "squid-release.json",
             squid_version_config_path=config_root / "squid-version.json",
-            conan_data_path=root / "conandata.yml",
+            conan_data_path=conan_recipe_root / "conandata.yml",
             installer_project_path=root / "packaging" / "wix" / "Squid4Win.Installer.wixproj",
         )
 

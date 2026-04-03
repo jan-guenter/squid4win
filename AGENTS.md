@@ -8,9 +8,11 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 1. `README.md`
 2. every ADR under `.agents\design\`, with ADR `0006` as the target-state
    source of truth and ADRs `0001` through `0004` as historical context
-3. `config\squid-version.json`, `conan\squid-release.json`, and `conandata.yml`
-   if you touch the Squid pin or native build metadata
-4. `conanfile.py`, the Python automation package files, `scripts\`,
+3. `config\squid-version.json`, `conan\squid-release.json`, and
+   `conan\recipes\squid\all\conandata.yml` if you touch the Squid pin or native
+   recipe data
+4. `conan\recipes\squid\all\conanfile.py`, the Python automation package files,
+   `scripts\`,
    `packaging\wix\`, and `.github\workflows\` if you touch automation,
    packaging, or release behavior
 5. `.github\copilot-instructions.md` and `.github\instructions\` if you touch
@@ -21,9 +23,10 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - Upstream pin: Squid `7.5` (`SQUID_7_5`)
 - The target architecture is one self-contained native Squid Conan recipe plus a
   direct `.NET 10` tray build outside Conan.
-- The root recipe can source `openssl`, `libxml2`, `pcre2`, and `zlib` either
-  from Conan requirements or from MSYS2/system packages through recipe options;
-  the default remains the MSYS2/system path for the current validated build.
+- The CCI-style Squid recipe under `conan\recipes\squid\all\` can source
+  `openssl`, `libxml2`, `pcre2`, and `zlib` either from Conan requirements or
+  from MSYS2/system packages through recipe options; the default remains the
+  MSYS2/system path for the current validated build.
 - Python 3.14 + `uv` now owns the repo-level build, stage, smoke-test, and
   package entry points.
 - Repository linting is centered on `.mega-linter.yml` plus
@@ -72,21 +75,22 @@ here.
 - Keep `README.md`, `AGENTS.md`, and `.github\copilot-instructions.md` aligned
   when contributor guidance changes.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
-  `conandata.yml` aligned when the Squid pin changes. Prefer
+  `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
   `uv run squid4win-automation upstream-version --execute`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
 - Keep `CONAN_HOME` repo-local at `.\.conan2`.
-- Keep the native Squid build owned by the root `conanfile.py`; do not split it
-  back into multiple primary Conan recipes.
+- Keep the native Squid build owned by the single CCI-style Squid recipe under
+  `conan\recipes\squid\all\conanfile.py`; do not split it back into multiple
+  primary Conan recipes.
 - Do not add new repo-level PowerShell orchestration. Put new contributor and
   CI automation in the Python 3.14 + `uv` package and entry points.
 - Treat `uv run squid4win-automation ...` as the supported repo-level surface
   for Squid builds, tray builds, bundle packaging, validation, metadata
   updates, and Conan lockfile refresh.
-- Keep the Python CLI flags and root Conan recipe options aligned for dependency
+- Keep the Python CLI flags and Squid recipe options aligned for dependency
   source selection: `--openssl-source`, `--libxml2-source`, `--pcre2-source`,
-  and `--zlib-source` should continue to map directly to the root recipe's
+  and `--zlib-source` should continue to map directly to the recipe's
   `*_source` options.
 - Preserve the default committed lockfile for the validated MSYS2/system graph.
   When contributors experiment with Conan-sourced native libraries, the Python
@@ -132,8 +136,9 @@ At minimum, update:
 - `skills\README.md` when repo-owned skill inventory or descriptions change
 - the relevant Python automation docs or package metadata when contributor entry
   points change
-- `config\*.json`, `conan\*.json`, and `conandata.yml` when version metadata or
-  native build defaults change
+- `config\*.json`, `conan\*.json`, and
+  `conan\recipes\squid\all\conandata.yml` when version metadata or native
+  recipe data changes
 
 If markdown audit policy changes, update `skills\gfm\SKILL.md`,
 `skills\README.md`, markdown lint expectations, and top-level contributor docs

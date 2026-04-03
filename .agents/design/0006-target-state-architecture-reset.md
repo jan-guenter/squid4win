@@ -19,10 +19,10 @@ toward without overstating what has already been validated locally or in CI.
 
 The target architecture is:
 
-- keep a single self-contained native Squid Conan recipe at the repo root; it
-  owns Squid source retrieval, patch application, and native MSYS2 + MinGW-w64
-  build only
-- allow the root recipe to source native library inputs such as `openssl`,
+- keep a single self-contained native Squid Conan recipe under
+  `conan\recipes\squid\all\`; it owns Squid source retrieval, patch
+  application, and native MSYS2 + MinGW-w64 build only
+- allow the Squid recipe to source native library inputs such as `openssl`,
   `libxml2`, `pcre2`, and `zlib` either from Conan requirements or from
   MSYS2/system packages via recipe options, while keeping the validated default
   on the MSYS2/system path
@@ -70,11 +70,11 @@ The target architecture is:
   shims.
 - Contributor docs, Copilot guidance, and ADRs must stop describing the tray as
   a Conan-packaged dependency target.
-- The root `conanfile.py` remains the single source of truth for native Squid
-  build inputs, while the Python automation package owns stage assembly,
-  packaging, and repo-level validation.
+- The single CCI-style Squid recipe under `conan\recipes\squid\all\conanfile.py`
+  remains the source of truth for native Squid build inputs, while the Python
+  automation package owns stage assembly, packaging, and repo-level validation.
 - Runtime DLL harvesting, third-party notices, and Python CLI option handling
-  now need to stay aligned with whichever dependency source the root recipe
+  now need to stay aligned with whichever dependency source the Squid recipe
   selects for shipped native libraries.
 - Non-default dependency-source selections should default to build-local
   lockfiles so the committed lockfile continues to represent the validated
@@ -91,7 +91,7 @@ The target architecture is:
 - Update `README.md`, `AGENTS.md`, and `.github\copilot-instructions.md` when
   this target state changes.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
-  `conandata.yml` aligned when the Squid pin changes. Prefer
+  `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
   `uv run squid4win-automation upstream-version --execute`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.

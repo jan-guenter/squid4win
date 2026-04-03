@@ -28,7 +28,7 @@ jobs:
               '.github/dependabot.yml',
               '.markdownlint-cli2.jsonc',
               'config/squid-version.json',
-              'conandata.yml',
+              'conan/recipes/squid/',
               'conan/lockfiles/',
               'conan/squid-release.json',
               'pyproject.toml',

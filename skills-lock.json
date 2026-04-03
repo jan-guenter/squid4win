@@ -26,6 +26,11 @@
       "sourceType": "github",
       "computedHash": "b613ff60d4cb4f5452c6f4d8ca57582b47d87454c06d90c10a6762320aaf9e14"
     },
+    "cpp-pro": {
+      "source": "Jeffallan/claude-skills",
+      "sourceType": "github",
+      "computedHash": "e79d7d2b091213daab62076186f3ef9c9cc03ee175fea4d36c9f88274f38dd9d"
+    },
     "create-architectural-decision-record": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -50,6 +55,11 @@
       "source": "jasonkneen/kiro",
       "sourceType": "github",
       "computedHash": "014c77bfb0dc2ab0ca3f9049d54fbc6b105ed7e948024302beb55431372c0fdc"
+    },
+    "devcontainer-setup": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "computedHash": "fa7690d43a2b1937527d3448bd943581d4802df92aa79350c6758875a3b38aee"
     },
     "documentation-writer": {
       "source": "github/awesome-copilot",

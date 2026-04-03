@@ -9,7 +9,11 @@ tasks rather than reviving repo-wide PowerShell orchestration.
 
 - `ci.yml` - runs MegaLinter, `ty`, the Python `tray-build` command (`.NET 10`
   tray app), the Python `squid-build` command (native MSYS2/MinGW bundle), the
-  Python `smoke-test` command, and SonarQube analysis.
+  reusable Linux Squid recipe validation matrix, the Python `smoke-test`
+  command, and SonarQube analysis.
+- `conan-validate-recipe.yml` - reusable Linux-only workflow that validates the
+  CCI-style Squid recipe under `conan\recipes\squid\all\` with `conan create`
+  against a caller-supplied host profile.
 - `service-runner-validation.yml` - runs on an isolated Windows runner, runs the
   Python `squid-build` command, runs the Python `smoke-test` command, then runs
   the Python `service-runner-validation` command to exercise MSI install/start/

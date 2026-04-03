@@ -2,7 +2,7 @@
 param(
     [string]$MetadataPath = (Join-Path $PSScriptRoot '..\conan\squid-release.json'),
     [string]$ConfigPath = (Join-Path $PSScriptRoot '..\config\squid-version.json'),
-    [string]$ConanDataPath = (Join-Path $PSScriptRoot '..\conandata.yml'),
+    [string]$ConanDataPath = (Join-Path $PSScriptRoot '..\conan\recipes\squid\all\conandata.yml'),
     [ValidatePattern('^[^/]+/[^/]+$')]
     [string]$Repository = 'squid-cache/squid',
     [Nullable[int]]$MajorVersion,
@@ -89,22 +89,22 @@ $updatedConfig = [ordered]@{
 }
 
 if (-not (Test-Path -LiteralPath $resolvedConanDataPath)) {
-    throw "Expected existing conandata.yml at $resolvedConanDataPath so the Squid version update can preserve the current build metadata."
+    throw "Expected existing conandata.yml at $resolvedConanDataPath so the Squid version update can preserve the current patch metadata."
 }
 
 $existingConanDataContent = Get-Content -Raw -LiteralPath $resolvedConanDataPath
-$buildAndPatchSectionMatch = [regex]::Match($existingConanDataContent, '(?ms)^build:\r?\n.*$')
-if (-not $buildAndPatchSectionMatch.Success) {
-    throw "Unable to locate the top-level build section in $resolvedConanDataPath."
+$patchSectionMatch = [regex]::Match($existingConanDataContent, '(?ms)^patches:\r?\n.*$')
+if (-not $patchSectionMatch.Success) {
+    throw "Unable to locate the top-level patches section in $resolvedConanDataPath."
 }
 
 $newline = if ($existingConanDataContent.Contains("`r`n")) { "`r`n" } else { "`n" }
-$newPatchSectionHeader = "patches:$newline  ""$Version"":"
-if ($buildAndPatchSectionMatch.Value -notmatch 'patches:\r?\n\s+"[^"]+":') {
+$newPatchSectionHeader = "patches:$newline  ""$Version"":" 
+if ($patchSectionMatch.Value -notmatch 'patches:\r?\n\s+"[^"]+":') {
     throw "Unable to locate the versioned patches section in $resolvedConanDataPath."
 }
 
-$preservedConanDataTail = $buildAndPatchSectionMatch.Value -replace 'patches:\r?\n\s+"[^"]+":', $newPatchSectionHeader
+$preservedConanDataTail = $patchSectionMatch.Value -replace 'patches:\r?\n\s+"[^"]+":', $newPatchSectionHeader
 $newConanDataContent = (
     @(
         'sources:'

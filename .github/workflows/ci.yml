@@ -127,6 +127,25 @@ jobs:
             --configuration Release `
             --execute
 
+  validate-linux-recipe:
+    name: Validate Linux recipe (${{ matrix.compiler_label }})
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler_label: gcc-13
+            profile_name: linux-gcc-x64
+            build_type: Release
+          - compiler_label: clang-18
+            profile_name: linux-clang-x64
+            build_type: Release
+    uses: ./.github/workflows/conan-validate-recipe.yml
+    with:
+      profile_name: ${{ matrix.profile_name }}
+      compiler_label: ${{ matrix.compiler_label }}
+      build_type: ${{ matrix.build_type }}
+
   build-msys2:
     name: Build MSYS2/MinGW-w64
     runs-on: windows-latest
@@ -172,7 +191,7 @@ jobs:
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ${{ env.CONAN_HOME }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'pyproject.toml', 'uv.lock') }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conan/**', 'pyproject.toml', 'uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-conan-
 

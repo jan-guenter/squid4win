@@ -7,8 +7,9 @@ Windows.
 
 The repository is being reset toward the target state defined in ADR `0006`:
 
-- one self-contained native Squid Conan recipe at the repo root owns Squid
-  source retrieval, patch application, and native MSYS2 + MinGW-w64 build
+- one self-contained native Squid Conan recipe under
+  `conan\recipes\squid\all\` owns Squid source retrieval, patch application,
+  and native MSYS2 + MinGW-w64 build
 - Python 3.14 + `uv` owns repo-level stage assembly, runtime DLL adjacency,
   notice harvesting, smoke testing, MSI/portable packaging, and release-helper
   orchestration
@@ -56,7 +57,7 @@ The repository should not yet claim:
   remain historical context after the architecture reset.
 - Keep `CONAN_HOME` repo-local at `.\.conan2`.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
-  `conandata.yml` aligned when the Squid pin changes. Prefer
+  `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
   `uv run squid4win-automation upstream-version --execute`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
@@ -78,11 +79,12 @@ The supported repo-level entry points for Squid builds, tray builds, bundle
 packaging, validation, metadata updates, and Conan lockfile refresh now live under
 `uv run squid4win-automation ...`.
 
-The root Conan recipe can now source `openssl`, `libxml2`, `pcre2`, and `zlib`
-either from Conan requirements or from the MSYS2/system package set. The
-supported Python entry points expose the matching `--openssl-source`,
-`--libxml2-source`, `--pcre2-source`, and `--zlib-source` switches, while the
-default remains `system` to preserve the current MSYS2-first validated path.
+The CCI-style Squid recipe at `conan\recipes\squid\all\conanfile.py` can now
+source `openssl`, `libxml2`, `pcre2`, and `zlib` either from Conan requirements
+or from the MSYS2/system package set. The supported Python entry points expose
+the matching `--openssl-source`, `--libxml2-source`, `--pcre2-source`, and
+`--zlib-source` switches, while the default remains `system` to preserve the
+current MSYS2-first validated path.
 When any of those switches select `conan` and no explicit `--lockfile-path` is
 provided, the Python automation uses a build-local lockfile under `build\`
 instead of rewriting the committed default lockfile.
@@ -141,8 +143,8 @@ admin-capable Windows runners rather than shared development machines.
 - `skills\` - repo-owned custom skills and `skills\README.md`
 - `.agents\skills\` - externally synced skills plus mirror directories backed
   by symlinked files that expose repo-owned skills to Copilot
-- `conanfile.py` and `conan\` - native Squid recipe inputs, patch metadata,
-  host profiles, and lockfiles
+- `conan\recipes\squid\all\` and `conan\` - the CCI-style native Squid recipe,
+  patch metadata, host profiles, and lockfiles
 - `scripts\` - installer-time helper scripts plus remaining narrow PowerShell
   exceptions such as optional signing and version-update fallback
 - `src\tray\Squid4Win.Tray\` - direct `.NET 10` tray app source

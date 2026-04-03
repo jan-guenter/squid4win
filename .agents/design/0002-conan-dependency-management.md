@@ -34,9 +34,9 @@ Dependency management will use a split model:
 
 - use Conan 2 tool requirements for the foundational shell, compiler, and
   MinGW-w64 runtime environment via `msys2/cci.latest` and `mingw-builds/15.1.0`
-- use `conandata.yml` as the repo-owned source of truth for build metadata such
-  as tool requirements, MSYS2 package composition, runtime DLL harvesting, and
-  `configure` defaults
+- keep `conandata.yml` focused on versioned source and patch metadata while the
+  recipe and Python automation own build defaults, MSYS2 package composition,
+  runtime DLL harvesting, and related staging metadata
 - isolate `CONAN_HOME` to `<repo>\.conan2` for both local work and CI
 - keep the committed host profile, generated metadata, and lockfile locations in
   the repository instead of relying on developer-global profiles or user cache
@@ -87,12 +87,12 @@ with a different platform stack.
   state.
 - The current committed build flow should be described honestly: MSYS2 still
   provides the shell-facing package ecosystem, while Conan now owns the
-  top-level product recipe, versioned source metadata in `conandata.yml`, the
-  Windows compatibility patch set under `conan\patches\`, and the Conan-managed
-  tool bootstrap.
+  CCI-style Squid recipe under `conan\recipes\squid\all\`, versioned source
+  metadata in `conandata.yml`, the active patch set, and the Conan-managed tool
+  bootstrap.
 - The tray package is no longer a separate Conan recipe. The tray now builds
-  directly with `dotnet`, and the root recipe consumes the staged tray package
-  root through `SQUID4WIN_TRAY_PACKAGE_ROOT`.
+  directly with `dotnet`, and the Python automation consumes the staged tray
+  package root through `SQUID4WIN_TRAY_PACKAGE_ROOT`.
 - The committed repository lockfile remains cache-backed; local experimentation
   should use a build-local lockfile instead of rewriting `conan\lockfiles\`.
 - Tag-triggered GitHub release/prerelease publication now depends on the
@@ -119,7 +119,7 @@ with a different platform stack.
 - Keep `.github\workflows\build-release-artifacts.yml` consuming the committed
   repository lockfile for tag-triggered publication and avoid rewriting it
   during a publish run.
-- Keep `conandata.yml` build metadata, wrapper option switches, and workflow
+- Keep the recipe defaults, Python wrapper option switches, and workflow
   defaults synchronized when the native dependency or packaging baseline
   changes.
 

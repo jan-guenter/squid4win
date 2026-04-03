@@ -75,12 +75,12 @@ jobs:
           add-paths: |
             conan/squid-release.json
             config/squid-version.json
-            conandata.yml
+            conan/recipes/squid/all/conandata.yml
           body: |
             ## Summary
             - update `config\squid-version.json` to Squid `${{ steps.update.outputs.version }}`
             - refresh generated `conan\squid-release.json` metadata for the same release
-            - rewrite the versioned `sources` and `patches` entries in `conandata.yml` while preserving the existing Conan build metadata
+            - rewrite the versioned `sources` and `patches` entries in `conan\recipes\squid\all\conandata.yml`
             - use this scheduled workflow because Dependabot does not manage Conan package graphs or raw upstream Squid release pins
 
             ## Validation

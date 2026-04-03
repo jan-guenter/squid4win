@@ -9,8 +9,6 @@ on:
       - 'uv.lock'
       - 'src/squid4win/**'
       - 'conan/**'
-      - 'conandata.yml'
-      - 'conanfile.py'
       - 'packaging/**'
       - 'scripts/**'
   push:
@@ -22,8 +20,6 @@ on:
       - 'uv.lock'
       - 'src/squid4win/**'
       - 'conan/**'
-      - 'conandata.yml'
-      - 'conanfile.py'
       - 'packaging/**'
       - 'scripts/**'
 
@@ -83,7 +79,7 @@ jobs:
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ${{ env.CONAN_HOME }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'pyproject.toml', 'uv.lock') }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conan/**', 'pyproject.toml', 'uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-conan-
 

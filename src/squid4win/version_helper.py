@@ -27,7 +27,6 @@ _DEFAULT_NEWLINE: Final[str] = "\n"
 _DEFAULT_TRACK: Final[str] = "stable"
 _REPOSITORY_PATTERN: Final[re.Pattern[str]] = re.compile(r"^(?P<owner>[^/]+)/(?P<repo>[^/]+)$")
 _PATCH_SECTION_PATTERN: Final[re.Pattern[str]] = re.compile(r'patches:\r?\n\s+"[^"]+":')
-_BUILD_SECTION_PATTERN: Final[re.Pattern[str]] = re.compile(r"(?ms)^build:\r?\n.*$")
 _SHA256_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -369,7 +368,7 @@ class UpstreamVersionManager:
         if conan_existing is None:
             msg = (
                 f"Expected existing conandata.yml at {self._conan_data_path} so the Squid version "
-                "update can preserve the current build metadata."
+                "update can preserve the current patch metadata."
             )
             raise FileNotFoundError(msg)
         conan_content = self._render_conan_data(conan_existing, release)
@@ -424,13 +423,8 @@ class UpstreamVersionManager:
         return SquidVersionConfig.model_validate_json(existing_content).track
 
     def _render_conan_data(self, existing_content: str, release: TargetUpstreamRelease) -> str:
-        build_and_patch_section_match = _BUILD_SECTION_PATTERN.search(existing_content)
-        if build_and_patch_section_match is None:
-            msg = f"Unable to locate the top-level build section in {self._conan_data_path}."
-            raise ValueError(msg)
-
-        build_and_patch_section = build_and_patch_section_match.group(0)
-        if _PATCH_SECTION_PATTERN.search(build_and_patch_section) is None:
+        patch_section_match = _PATCH_SECTION_PATTERN.search(existing_content)
+        if patch_section_match is None:
             msg = f"Unable to locate the versioned patches section in {self._conan_data_path}."
             raise ValueError(msg)
 
@@ -438,7 +432,7 @@ class UpstreamVersionManager:
         new_patch_header = f'patches:{newline}  "{release.version}":'
         preserved_tail = _PATCH_SECTION_PATTERN.sub(
             new_patch_header,
-            build_and_patch_section,
+            existing_content[patch_section_match.start() :],
             count=1,
         )
         lines = (
