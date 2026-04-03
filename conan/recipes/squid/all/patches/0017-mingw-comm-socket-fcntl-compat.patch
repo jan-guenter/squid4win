@@ -74,12 +74,12 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
  static int comm_apply_flags(int new_socket, Ip::Address &addr, int flags, struct addrinfo *AI);
  
 +static int
-+commSockRecvFrom(int fd, void *buf, size_t len, int flags, struct sockaddr *from, size_t *fromLen) /* squid4win-mingw-comm */
++commSockRecvFrom(int fd, void *buf, size_t len, int flags, struct sockaddr *from, socklen_t *fromLen) /* squid4win-mingw-comm */
 +{
 +#if _SQUID_MINGW_
 +    int winsockFromLen = static_cast<int>(*fromLen);
 +    const int result = recvfrom(fd, static_cast<char *>(buf), static_cast<int>(len), flags, from, &winsockFromLen);
-+    *fromLen = static_cast<size_t>(winsockFromLen);
++    *fromLen = static_cast<socklen_t>(winsockFromLen);
 +    return result;
 +#else
 +    return recvfrom(fd, buf, len, flags, from, fromLen);
@@ -97,12 +97,12 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
 +}
 +
 +static int
-+commSockGetSockName(int fd, struct sockaddr *name, size_t *nameLen) /* squid4win-mingw-comm */
++commSockGetSockName(int fd, struct sockaddr *name, socklen_t *nameLen) /* squid4win-mingw-comm */
 +{
 +#if _SQUID_MINGW_
 +    int winsockNameLen = static_cast<int>(*nameLen);
 +    const int result = getsockname(fd, name, &winsockNameLen);
-+    *nameLen = static_cast<size_t>(winsockNameLen);
++    *nameLen = static_cast<socklen_t>(winsockNameLen);
 +    return result;
 +#else
 +    return getsockname(fd, name, nameLen);
@@ -110,17 +110,20 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
 +}
 +
 +static int
-+commSockGetSockOptInt(int fd, int level, int optname, int *value, int *valueLen) /* squid4win-mingw-comm */
++commSockGetSockOptInt(int fd, int level, int optname, int *value, socklen_t *valueLen) /* squid4win-mingw-comm */
 +{
 +#if _SQUID_MINGW_
-+    return getsockopt(fd, level, optname, reinterpret_cast<char *>(value), valueLen);
++    int winsockValueLen = static_cast<int>(*valueLen);
++    const int result = getsockopt(fd, level, optname, reinterpret_cast<char *>(value), &winsockValueLen);
++    *valueLen = static_cast<socklen_t>(winsockValueLen);
++    return result;
 +#else
 +    return getsockopt(fd, level, optname, value, valueLen);
 +#endif
 +}
 +
 +static int
-+commSockSendTo(int fd, const void *buf, int len, int flags, const struct sockaddr *to, size_t toLen) /* squid4win-mingw-comm */
++commSockSendTo(int fd, const void *buf, int len, int flags, const struct sockaddr *to, socklen_t toLen) /* squid4win-mingw-comm */
 +{
 +#if _SQUID_MINGW_
 +    return sendto(fd, static_cast<const char *>(buf), len, flags, to, static_cast<int>(toLen));
