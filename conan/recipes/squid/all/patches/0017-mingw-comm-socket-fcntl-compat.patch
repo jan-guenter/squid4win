@@ -69,7 +69,7 @@ diff --git a/pristine/squid-7.5/compat/os/mingw.h b/patched/squid-7.5/compat/os/
 diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
 --- a/pristine/squid-7.5/src/comm.cc
 +++ b/patched/squid-7.5/src/comm.cc
-@@ -63,6 +63,62 @@
+@@ -63,6 +63,65 @@
  static void comm_init_opened(const Comm::ConnectionPointer &conn, const char *note, struct addrinfo *AI);
  static int comm_apply_flags(int new_socket, Ip::Address &addr, int flags, struct addrinfo *AI);
  
@@ -135,7 +135,7 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
  #if USE_DELAY_POOLS
  CBDATA_CLASS_INIT(CommQuotaQueue);
  
-@@ -129,7 +185,7 @@
+@@ -129,7 +188,7 @@
      debugs(5,8, "comm_udp_recvfrom: FD " << fd << " from " << from);
      struct addrinfo *AI = nullptr;
      Ip::Address::InitAddr(AI);
@@ -144,7 +144,7 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
      from = *AI;
      Ip::Address::FreeAddr(AI);
      return x;
-@@ -145,7 +201,7 @@
+@@ -145,7 +204,7 @@
  ssize_t
  comm_udp_send(int s, const void *buf, size_t len, int flags)
  {
@@ -153,7 +153,7 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
  }
  
  bool
-@@ -183,7 +239,7 @@
+@@ -183,7 +242,7 @@
  
      Ip::Address::InitAddr(addr);
  
@@ -162,7 +162,7 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
          int xerrno = errno;
          debugs(50, DBG_IMPORTANT, "ERROR: " << MYNAME << "Failed to retrieve TCP/UDP port number for socket: FD " << fd << ": " << xstrerr(xerrno));
          Ip::Address::FreeAddr(addr);
-@@ -699,13 +755,13 @@
+@@ -699,13 +758,13 @@
  
          if (xerrno == EINVAL) {
              errlen = sizeof(err);
@@ -178,7 +178,7 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
          if (x == 0)
              xerrno = err;
  
-@@ -930,7 +986,7 @@
+@@ -930,7 +989,7 @@
  
      struct addrinfo *AI = nullptr;
      to_addr.getAddrInfo(AI, fd_table[fd].sock_family);
