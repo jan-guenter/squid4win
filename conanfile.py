@@ -21,7 +21,7 @@ from conan.tools.files import (
     mkdir,
     save,
 )
-from conan.tools.gnu import AutotoolsToolchain
+from conan.tools.gnu import AutotoolsDeps, AutotoolsToolchain, PkgConfigDeps
 
 MACRO_NAME_PATTERN = re.compile(r"[A-Za-z_]\w*\Z", re.ASCII)
 
@@ -40,6 +40,10 @@ class Squid4WinConan(ConanFile):
     no_copy_source = True
     options = {
         "with_openssl": [True, False],
+        "openssl_source": ["system", "conan"],
+        "libxml2_source": ["system", "conan"],
+        "pcre2_source": ["system", "conan"],
+        "zlib_source": ["system", "conan"],
         "enable_win32_service": [True, False],
         "enable_default_hostsfile": [True, False],
         "enable_strict_error_checking": [True, False],
@@ -51,6 +55,10 @@ class Squid4WinConan(ConanFile):
     }
     default_options = {
         "with_openssl": True,
+        "openssl_source": "system",
+        "libxml2_source": "system",
+        "pcre2_source": "system",
+        "zlib_source": "system",
         "enable_win32_service": True,
         "enable_default_hostsfile": True,
         "enable_strict_error_checking": False,
@@ -59,6 +67,10 @@ class Squid4WinConan(ConanFile):
         "auth_digest_helpers": "file",
         "auth_negotiate_helpers": "SSPI",
         "external_acl_helpers": "LM_group,SQL_session,delayer,wbinfo_group",
+        "openssl/*:shared": True,
+        "libxml2/*:shared": False,
+        "pcre2/*:shared": False,
+        "zlib/*:shared": False,
     }
 
     def set_version(self) -> None:
@@ -93,9 +105,23 @@ class Squid4WinConan(ConanFile):
         ):
             self.tool_requires(reference)
 
+    def requirements(self) -> None:
+        for dependency_name, dependency_settings in self._dependency_settings().items():
+            if not self._dependency_uses_conan(dependency_name):
+                continue
+
+            conan_reference = str(dependency_settings.get("conan_reference", "")).strip()
+            if not conan_reference:
+                raise ConanInvalidConfiguration(
+                    f"build.dependencies.{dependency_name} must declare conan_reference."
+                )
+            self.requires(conan_reference)
+
     def generate(self) -> None:
         VirtualBuildEnv(self).generate()
+        AutotoolsDeps(self).generate()
         AutotoolsToolchain(self).generate()
+        PkgConfigDeps(self).generate()
 
     def source(self) -> None:
         source_data = dict(self.conan_data["sources"][str(self.version)])
@@ -147,6 +173,7 @@ class Squid4WinConan(ConanFile):
             f":/{msys2_env_directory}/share/pkgconfig"
         )
         build_env_script = Path(self.generators_folder) / "conanbuild.sh"
+        autotools_deps_script = Path(self.generators_folder) / "conanautotoolsdeps.sh"
         autotools_script = Path(self.generators_folder) / "conanautotoolstoolchain.sh"
 
         shutil.rmtree(install_root, ignore_errors=True)
@@ -200,13 +227,43 @@ class Squid4WinConan(ConanFile):
             "OBJDUMP": mingw_bin_root / "objdump.exe",
             "GCOV": mingw_bin_root / "gcov.exe",
         }
+        conan_dependency_roots = self._conan_dependency_package_roots()
+        conan_dependency_bin_roots_msys = self._deduplicate(
+            [
+                self._to_msys_path(dependency_root / "bin")
+                for dependency_root in conan_dependency_roots.values()
+                if (dependency_root / "bin").is_dir()
+            ]
+        )
+        pkg_config_path_entries = []
+        if conan_dependency_roots:
+            pkg_config_path_entries.append(self._to_msys_path(self.generators_folder))
+        for dependency_root in conan_dependency_roots.values():
+            for pkg_config_root in (
+                dependency_root / "lib" / "pkgconfig",
+                dependency_root / "share" / "pkgconfig",
+            ):
+                if pkg_config_root.is_dir():
+                    pkg_config_path_entries.append(self._to_msys_path(pkg_config_root))
+        pkg_config_path_entries = self._deduplicate(pkg_config_path_entries)
+        path_entries = self._deduplicate(
+            [
+                *conan_dependency_bin_roots_msys,
+                mingw_bin_root_msys,
+                f"/{msys2_env_directory}/bin",
+                "$MSYS_BIN",
+                "/usr/bin",
+                "/usr/bin/core_perl",
+                "$PATH",
+            ]
+        )
 
         bash_common_lines = [
             f"export MSYSTEM={msys2_env_name}",
             "export CHERE_INVOKING=1",
             "set -o pipefail",
         ]
-        for generated_script in (build_env_script, autotools_script):
+        for generated_script in (build_env_script, autotools_deps_script, autotools_script):
             if generated_script.is_file():
                 bash_common_lines.append(
                     f"source {self._bash_quote(self._to_msys_path(generated_script))}"
@@ -215,10 +272,7 @@ class Squid4WinConan(ConanFile):
         bash_common_lines.extend(
             (
                 "source /etc/profile",
-                (
-                    f'export PATH="{mingw_bin_root_msys}:/{msys2_env_directory}/bin:'
-                    '$MSYS_BIN:/usr/bin:/usr/bin/core_perl:$PATH"'
-                ),
+                f'export PATH="{":".join(path_entries)}"',
                 f'export CPPFLAGS="-I{msys2_prefix_path}/include $CPPFLAGS"',
                 f'export LDFLAGS="-L{msys2_prefix_path}/lib $LDFLAGS"',
             )
@@ -233,6 +287,11 @@ class Squid4WinConan(ConanFile):
         bash_common_lines.append(
             f"export PKG_CONFIG_LIBDIR={self._bash_quote(pkg_config_lib_dir)}"
         )
+        if pkg_config_path_entries:
+            bash_common_lines.append(
+                f'export PKG_CONFIG_PATH="{":".join(pkg_config_path_entries)}'
+                '${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"'
+            )
 
         if config_site_path.is_file():
             bash_common_lines.append(
@@ -252,7 +311,8 @@ class Squid4WinConan(ConanFile):
                     "|| [ ! -f ./cfgaux/ltmain.sh ] || [ ! -f ./cfgaux/compile ] "
                     "|| [ ! -f ./cfgaux/config.guess ] || [ ! -f ./cfgaux/config.sub ] "
                     "|| [ ! -f ./cfgaux/missing ] || [ ! -f ./cfgaux/install-sh ]; }; "
-                    f"then ./bootstrap.sh || exit $?; touch {self._bash_quote(bootstrap_marker_path_msys)}; fi"
+                    "then ./bootstrap.sh || exit $?; "
+                    f"touch {self._bash_quote(bootstrap_marker_path_msys)}; fi"
                 ),
                 f"cd {self._bash_quote(build_root_msys)}",
                 'echo "Configuring Squid..."',
@@ -367,6 +427,69 @@ class Squid4WinConan(ConanFile):
             )
 
         return build_settings
+
+    def _dependency_settings(self) -> dict[str, dict[str, object]]:
+        raw_dependencies = self._build_settings().get("dependencies", {})
+        if not isinstance(raw_dependencies, dict):
+            raise ConanInvalidConfiguration(
+                "conandata.yml build.dependencies must be a mapping."
+            )
+
+        dependency_settings: dict[str, dict[str, object]] = {}
+        for dependency_name, raw_dependency in raw_dependencies.items():
+            normalized_name = str(dependency_name).strip()
+            if not normalized_name:
+                continue
+            if not isinstance(raw_dependency, dict):
+                raise ConanInvalidConfiguration(
+                    f"build.dependencies.{normalized_name} must be a mapping."
+                )
+            dependency_settings[normalized_name] = dict(raw_dependency)
+
+        return dependency_settings
+
+    def _dependency_source(self, dependency_name: str) -> str:
+        dependency_settings = self._dependency_settings().get(dependency_name)
+        if dependency_settings is None:
+            raise ConanInvalidConfiguration(
+                f"build.dependencies.{dependency_name} was not defined in conandata.yml."
+            )
+
+        option_name = str(dependency_settings.get("source_option", "")).strip()
+        if not option_name:
+            raise ConanInvalidConfiguration(
+                f"build.dependencies.{dependency_name} must declare source_option."
+            )
+
+        source_value = str(getattr(self.options, option_name, "")).strip().lower()
+        if source_value not in {"system", "conan"}:
+            raise ConanInvalidConfiguration(
+                f"Unsupported source '{source_value}' for dependency '{dependency_name}'."
+            )
+
+        return source_value
+
+    def _dependency_uses_conan(self, dependency_name: str) -> bool:
+        dependency_settings = self._dependency_settings()[dependency_name]
+        feature_option = str(dependency_settings.get("feature_option", "")).strip()
+        if feature_option and not self._option_enabled(feature_option):
+            return False
+        return self._dependency_source(dependency_name) == "conan"
+
+    def _conan_dependency_package_roots(self) -> dict[str, Path]:
+        dependency_roots: dict[str, Path] = {}
+        for dependency_name in self._dependency_settings():
+            if not self._dependency_uses_conan(dependency_name):
+                continue
+
+            dependency_root = self._dependency_package_root(dependency_name)
+            if dependency_root is None:
+                raise ConanException(
+                    f"The Conan dependency '{dependency_name}' is not available to the recipe."
+                )
+            dependency_roots[dependency_name] = dependency_root
+
+        return dependency_roots
 
     @staticmethod
     def _string_list(values: object) -> list[str]:
@@ -500,7 +623,10 @@ class Squid4WinConan(ConanFile):
             return []
 
         configure_cache_lines = [
-            "# Generated by the native Squid Conan recipe to stabilize MSYS2/MinGW-w64 configure checks."
+            (
+                "# Generated by the native Squid Conan recipe to stabilize "
+                "MSYS2/MinGW-w64 configure checks."
+            )
         ]
         for cache_name, cache_value in dict(configure_cache).items():
             name = str(cache_name).strip()
@@ -675,7 +801,8 @@ class Squid4WinConan(ConanFile):
             ]
 
         raise ConanException(
-            f"No autoconf definition source was found. Checked {confdefs_path} and {config_log_path}."
+            "No autoconf definition source was found. "
+            f"Checked {confdefs_path} and {config_log_path}."
         )
 
     @staticmethod

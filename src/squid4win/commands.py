@@ -26,6 +26,7 @@ from squid4win.models import (
     BundlePackageOptions,
     BundlePackageState,
     ConanLockfileUpdateOptions,
+    NativeDependencySourceOptions,
     ProcessInvocation,
     RepositoryPaths,
     ServiceRunnerValidationOptions,
@@ -94,6 +95,107 @@ def _string_list(value: object) -> list[str]:
     return strings
 
 
+def _dependency_build_settings(build_settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw_dependencies = build_settings.get("dependencies") or {}
+    if not isinstance(raw_dependencies, dict):
+        msg = "conandata.yml build.dependencies must be a mapping."
+        raise ValueError(msg)
+
+    dependencies: dict[str, dict[str, Any]] = {}
+    for dependency_name, raw_dependency in raw_dependencies.items():
+        normalized_name = str(dependency_name).strip()
+        if not normalized_name:
+            continue
+        if not isinstance(raw_dependency, dict):
+            msg = f"build.dependencies.{normalized_name} must be a mapping."
+            raise ValueError(msg)
+        dependencies[normalized_name] = cast(dict[str, Any], raw_dependency)
+
+    return dependencies
+
+
+def _selected_dependency_sources(
+    build_settings: dict[str, Any],
+    dependency_sources: NativeDependencySourceOptions,
+) -> dict[str, str]:
+    option_values = dependency_sources.as_option_values()
+    selected_sources: dict[str, str] = {}
+    for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
+        option_name = str(dependency_settings.get("source_option", "")).strip()
+        if not option_name:
+            msg = f"build.dependencies.{dependency_name} must declare source_option."
+            raise ValueError(msg)
+
+        source_value = str(option_values.get(option_name, "")).strip().lower()
+        if source_value not in {"system", "conan"}:
+            msg = (
+                f"Unsupported source '{source_value}' for dependency '{dependency_name}'. "
+                "Expected 'system' or 'conan'."
+            )
+            raise ValueError(msg)
+        selected_sources[dependency_name] = source_value
+
+    return selected_sources
+
+
+def _uses_default_dependency_sources(
+    dependency_sources: NativeDependencySourceOptions,
+) -> bool:
+    return all(source == "system" for source in dependency_sources.as_option_values().values())
+
+
+def _source_specific_string(
+    notice_entry: dict[str, Any],
+    field_name: str,
+    *,
+    selected_source: str | None,
+    notice_id: str,
+) -> str:
+    mapped_field_name = f"{field_name}_by_source"
+    mapped_value = notice_entry.get(mapped_field_name)
+    if mapped_value is None:
+        return str(notice_entry.get(field_name, "")).strip()
+
+    if not isinstance(mapped_value, dict):
+        msg = f"Runtime notice entry '{notice_id}' field '{mapped_field_name}' must be a mapping."
+        raise ValueError(msg)
+
+    if selected_source is None:
+        msg = (
+            f"Runtime notice entry '{notice_id}' declared '{mapped_field_name}' without "
+            "declaring source_option."
+        )
+        raise ValueError(msg)
+
+    return str(mapped_value.get(selected_source, "")).strip()
+
+
+def _source_specific_string_list(
+    notice_entry: dict[str, Any],
+    field_name: str,
+    *,
+    selected_source: str | None,
+    notice_id: str,
+) -> list[str]:
+    mapped_field_name = f"{field_name}_by_source"
+    mapped_value = notice_entry.get(mapped_field_name)
+    if mapped_value is None:
+        return _deduplicate(_string_list(notice_entry.get(field_name, [])))
+
+    if not isinstance(mapped_value, dict):
+        msg = f"Runtime notice entry '{notice_id}' field '{mapped_field_name}' must be a mapping."
+        raise ValueError(msg)
+
+    if selected_source is None:
+        msg = (
+            f"Runtime notice entry '{notice_id}' declared '{mapped_field_name}' without "
+            "declaring source_option."
+        )
+        raise ValueError(msg)
+
+    return _deduplicate(_string_list(mapped_value.get(selected_source, [])))
+
+
 def _powershell_executable() -> str:
     return shutil.which("pwsh") or shutil.which("powershell") or "pwsh"
 
@@ -146,12 +248,27 @@ def _load_build_settings(paths: RepositoryPaths) -> dict[str, Any]:
 
 def _recipe_option_arguments(
     paths: RepositoryPaths,
+    *,
+    dependency_sources: NativeDependencySourceOptions,
 ) -> list[str]:
     arguments: list[str] = []
     build_settings = _load_build_settings(paths)
+    selected_dependency_sources = _selected_dependency_sources(
+        build_settings,
+        dependency_sources,
+    )
     msys2_settings = build_settings.get("msys2") or {}
     if isinstance(msys2_settings, dict):
         packages = _string_list(msys2_settings.get("packages", []))
+        dependency_settings = _dependency_build_settings(build_settings)
+        for dependency_name, dependency_setting in dependency_settings.items():
+            if selected_dependency_sources.get(dependency_name) != "system":
+                continue
+
+            system_package = str(dependency_setting.get("system_package", "")).strip()
+            if system_package:
+                packages.append(system_package)
+
         if packages:
             arguments.extend(["-o:b", f"msys2/*:additional_packages={','.join(packages)}"])
 
@@ -161,6 +278,16 @@ def _recipe_option_arguments(
             option_value = str(mingw_settings.get(option_name, "")).strip()
             if option_value:
                 arguments.extend(["-o:b", f"mingw-builds/*:{option_name}={option_value}"])
+
+    for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
+        option_name = str(dependency_settings.get("source_option", "")).strip()
+        if not option_name:
+            msg = f"build.dependencies.{dependency_name} must declare source_option."
+            raise ValueError(msg)
+
+        arguments.extend(
+            ["-o:h", f"&:{option_name}={selected_dependency_sources[dependency_name]}"]
+        )
 
     return arguments
 
@@ -185,6 +312,7 @@ def _resolve_conan_context(
     configuration: BuildConfiguration,
     host_profile_path: Path | None,
     lockfile_path: Path | None,
+    dependency_sources: NativeDependencySourceOptions,
 ) -> ConanContext:
     paths = RepositoryPaths.discover(repository_root)
     resolved_build_root = _resolved_or_default(
@@ -198,9 +326,13 @@ def _resolve_conan_context(
         paths.conan_root / "profiles" / "msys2-mingw-x64",
         base=paths.repository_root,
     )
-    resolved_lockfile_path = (
-        resolve_path(lockfile_path, base=paths.repository_root) or layout.repo_lockfile_path
-    )
+    resolved_lockfile_path = resolve_path(lockfile_path, base=paths.repository_root)
+    if resolved_lockfile_path is None:
+        resolved_lockfile_path = (
+            layout.repo_lockfile_path
+            if _uses_default_dependency_sources(dependency_sources)
+            else layout.build_lock_path
+        )
 
     return ConanContext(
         paths=paths,
@@ -250,6 +382,7 @@ def _load_conan_graph_info(
     *,
     build_profile: str,
     configuration: BuildConfiguration,
+    dependency_sources: NativeDependencySourceOptions,
 ) -> dict[str, Any]:
     completed = subprocess.run(
         (
@@ -268,7 +401,10 @@ def _load_conan_graph_info(
             "-s:b",
             f"build_type={configuration.value}",
             _BUILD_MISSING_ARGUMENT,
-            *_recipe_option_arguments(context.paths),
+            *_recipe_option_arguments(
+                context.paths,
+                dependency_sources=dependency_sources,
+            ),
             "--format=json",
         ),
         cwd=context.paths.repository_root,
@@ -362,14 +498,17 @@ def _resolve_dependency_package_root(
     return package_root
 
 
-def _runtime_dependency_names(build_settings: dict[str, Any]) -> list[str]:
+def _runtime_dependency_names(
+    build_settings: dict[str, Any],
+    *,
+    dependency_sources: NativeDependencySourceOptions,
+) -> list[str]:
     dependency_names = ["mingw-builds", "msys2"]
-    for raw_notice_entry in cast(list[Any], build_settings.get("runtime_notice_artifacts", [])):
-        if not isinstance(raw_notice_entry, dict):
-            continue
-
-        dependency_name = str(raw_notice_entry.get("dependency", "")).strip()
-        if dependency_name:
+    for dependency_name, selected_source in _selected_dependency_sources(
+        build_settings,
+        dependency_sources,
+    ).items():
+        if selected_source == "conan":
             dependency_names.append(dependency_name)
 
     return _deduplicate(dependency_names)
@@ -381,11 +520,13 @@ def _resolve_dependency_metadata(
     build_profile: str,
     configuration: BuildConfiguration,
     dependency_names: list[str],
+    dependency_sources: NativeDependencySourceOptions,
 ) -> tuple[dict[str, str], dict[str, Path]]:
     graph_info = _load_conan_graph_info(
         context,
         build_profile=build_profile,
         configuration=configuration,
+        dependency_sources=dependency_sources,
     )
     dependency_refs: dict[str, str] = {}
     dependency_roots: dict[str, Path] = {}
@@ -444,6 +585,15 @@ def _runtime_dll_source_directories(
             source_directories,
             seen_directories,
             msys2_root / "bin" / "msys64" / "usr" / "bin",
+        )
+
+    for dependency_name, dependency_root in dependency_roots.items():
+        if dependency_name in {"mingw-builds", "msys2"}:
+            continue
+        _append_existing_directory(
+            source_directories,
+            seen_directories,
+            dependency_root / "bin",
         )
 
     if not source_directories:
@@ -551,6 +701,35 @@ def _copy_runtime_notice_files(
         shutil.copy2(source_path, destination_path)
         copied_notice_files.append(_relative_package_path(destination_path, bundle_root))
 
+    for relative_directory in _deduplicate(
+        _string_list(notice_entry.get("license_directories", []))
+    ):
+        source_directory = dependency_root / Path(relative_directory)
+        if not source_directory.is_dir():
+            msg = (
+                f"Unable to locate the runtime notice directory '{relative_directory}' for "
+                f"entry '{notice_id}' under '{dependency_root}'."
+            )
+            raise FileNotFoundError(msg)
+
+        copied_directory_files = False
+        for source_path in sorted(source_directory.rglob("*")):
+            if not source_path.is_file():
+                continue
+            relative_source_path = source_path.relative_to(dependency_root)
+            destination_path = destination_root / relative_source_path
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, destination_path)
+            copied_notice_files.append(_relative_package_path(destination_path, bundle_root))
+            copied_directory_files = True
+
+        if not copied_directory_files:
+            msg = (
+                f"Runtime notice directory '{relative_directory}' for entry '{notice_id}' "
+                "did not contain any files."
+            )
+            raise RuntimeError(msg)
+
     if not copied_notice_files:
         msg = f"Runtime notice entry '{notice_id}' did not resolve any notice files."
         raise RuntimeError(msg)
@@ -587,6 +766,8 @@ def _harvest_runtime_notice_bundle(
     bundled_runtime_dlls: list[str],
     dependency_roots: dict[str, Path],
     dependency_refs: dict[str, str],
+    *,
+    dependency_sources: NativeDependencySourceOptions,
 ) -> list[dict[str, Any]]:
     raw_notice_entries = cast(list[Any], build_settings.get("runtime_notice_artifacts", []))
     if not raw_notice_entries:
@@ -596,6 +777,7 @@ def _harvest_runtime_notice_bundle(
     notice_root = bundle_root / "licenses" / "third-party" / "windows-runtime"
     declared_runtime_dlls: set[str] = set()
     harvested_notice_entries: list[dict[str, Any]] = []
+    selected_dependency_options = dependency_sources.as_option_values()
     for raw_notice_entry in raw_notice_entries:
         if not isinstance(raw_notice_entry, dict):
             msg = "Runtime notice entries in conandata.yml must be mappings."
@@ -612,7 +794,23 @@ def _harvest_runtime_notice_bundle(
             msg = f"Runtime notice entry '{notice_id}' must declare at least one bundled DLL."
             raise ValueError(msg)
 
-        dependency_name = str(notice_entry.get("dependency", "")).strip()
+        source_option = str(notice_entry.get("source_option", "")).strip()
+        selected_source = None
+        if source_option:
+            selected_source = str(selected_dependency_options.get(source_option, "")).strip()
+            if selected_source not in {"system", "conan"}:
+                msg = (
+                    f"Runtime notice entry '{notice_id}' declared source_option="
+                    f"'{source_option}', but no supported dependency source was selected."
+                )
+                raise ValueError(msg)
+
+        dependency_name = _source_specific_string(
+            notice_entry,
+            "dependency",
+            selected_source=selected_source,
+            notice_id=notice_id,
+        )
         if not dependency_name:
             msg = f"Runtime notice entry '{notice_id}' must declare a dependency."
             raise ValueError(msg)
@@ -627,13 +825,35 @@ def _harvest_runtime_notice_bundle(
             notice_root / notice_id,
             dependency_root,
             notice_id=notice_id,
-            notice_entry=notice_entry,
+            notice_entry={
+                **notice_entry,
+                "license_files": _source_specific_string_list(
+                    notice_entry,
+                    "license_files",
+                    selected_source=selected_source,
+                    notice_id=notice_id,
+                ),
+                "license_directories": _source_specific_string_list(
+                    notice_entry,
+                    "license_directories",
+                    selected_source=selected_source,
+                    notice_id=notice_id,
+                ),
+            },
         )
         harvested_notice_entries.append(
             {
                 "id": notice_id,
                 "name": str(notice_entry.get("name", notice_id)).strip(),
-                "package": str(notice_entry.get("package", notice_id)).strip(),
+                "package": (
+                    _source_specific_string(
+                        notice_entry,
+                        "package",
+                        selected_source=selected_source,
+                        notice_id=notice_id,
+                    )
+                    or notice_id
+                ),
                 "source_dependency": dependency_refs.get(dependency_name, dependency_name),
                 "license": str(notice_entry.get("license", "")).strip(),
                 "project_url": str(notice_entry.get("project_url", "")).strip(),
@@ -964,7 +1184,11 @@ def _materialize_staged_squid_bundle(
             context,
             build_profile=options.build_profile,
             configuration=options.configuration,
-            dependency_names=_runtime_dependency_names(build_settings),
+            dependency_names=_runtime_dependency_names(
+                build_settings,
+                dependency_sources=options.dependency_sources,
+            ),
+            dependency_sources=options.dependency_sources,
         )
         bundled_runtime_dlls = _bundle_native_runtime_dlls(
             stage_root,
@@ -978,6 +1202,7 @@ def _materialize_staged_squid_bundle(
             bundled_runtime_dlls,
             dependency_roots,
             dependency_refs,
+            dependency_sources=options.dependency_sources,
         )
 
     if options.with_packaging_support:
@@ -1383,6 +1608,7 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
         options.configuration,
         options.host_profile_path,
         options.lockfile_path,
+        options.dependency_sources,
     )
     if options.additional_configure_args:
         msg = (
@@ -1392,7 +1618,10 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
         )
         raise ValueError(msg)
 
-    recipe_option_arguments = _recipe_option_arguments(context.paths)
+    recipe_option_arguments = _recipe_option_arguments(
+        context.paths,
+        dependency_sources=options.dependency_sources,
+    )
     base_environment = _base_conan_environment(context.paths)
 
     commands = [
@@ -1508,13 +1737,17 @@ def build_conan_lockfile_update_plan(options: ConanLockfileUpdateOptions) -> Aut
         options.configuration,
         options.host_profile_path,
         options.lockfile_path,
+        options.dependency_sources,
     )
-    recipe_option_arguments = _recipe_option_arguments(context.paths)
+    recipe_option_arguments = _recipe_option_arguments(
+        context.paths,
+        dependency_sources=options.dependency_sources,
+    )
     base_environment = _base_conan_environment(context.paths)
 
     return AutomationPlan(
         name="conan-lockfile-update",
-        summary="Detect the Conan profile and refresh the committed lockfile.",
+        summary="Detect the Conan profile and refresh the selected lockfile.",
         repository_root=context.paths.repository_root,
         commands=(
             ProcessInvocation(
@@ -1613,6 +1846,7 @@ def build_bundle_plan(options: BundlePackageOptions) -> AutomationPlan:
                 with_tray=require_tray,
                 with_runtime_dlls=True,
                 with_packaging_support=True,
+                dependency_sources=options.dependency_sources,
             )
         )
         commands.extend(squid_build_plan.commands)
@@ -1731,6 +1965,7 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
         options.configuration,
         options.host_profile_path,
         options.lockfile_path,
+        options.dependency_sources,
     )
     metadata_path = _resolved_or_default(
         options.metadata_path,
@@ -2790,6 +3025,7 @@ def run_service_runner_validation(
         require_notices=options.require_notices,
         build_installer=True,
         service_name=service_name,
+        dependency_sources=options.dependency_sources,
     )
 
     caught_error: Exception | None = None
@@ -3010,12 +3246,13 @@ def run_conan_lockfile_update(
         options.configuration,
         options.host_profile_path,
         options.lockfile_path,
+        options.dependency_sources,
     )
     plan = build_conan_lockfile_update_plan(options)
     if not execute:
         runner.describe(plan)
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to refresh the committed Conan lockfile."
+            "Dry-run only. Re-run with --execute to refresh the selected Conan lockfile."
         )
 
     if shutil.which("conan") is None:
@@ -3125,6 +3362,7 @@ def run_bundle_package(
                 with_tray=_bundle_requires_tray(options),
                 with_runtime_dlls=True,
                 with_packaging_support=True,
+                dependency_sources=options.dependency_sources,
             ),
             runner,
             execute=True,

@@ -24,6 +24,26 @@ class BuildConfiguration(StrEnum):
     RELEASE = "Release"
 
 
+class DependencySource(StrEnum):
+    SYSTEM = "system"
+    CONAN = "conan"
+
+
+class NativeDependencySourceOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    openssl_source: DependencySource = DependencySource.SYSTEM
+    libxml2_source: DependencySource = DependencySource.SYSTEM
+    pcre2_source: DependencySource = DependencySource.SYSTEM
+    zlib_source: DependencySource = DependencySource.SYSTEM
+
+    def as_option_values(self) -> dict[str, str]:
+        return {
+            option_name: str(option_value)
+            for option_name, option_value in self.model_dump().items()
+        }
+
+
 def _string_from_env(name: str) -> str | None:
     value = os.getenv(name)
     if value is None:
@@ -513,6 +533,9 @@ class SquidBuildOptions(BaseModel):
     with_tray: bool = False
     with_runtime_dlls: bool = False
     with_packaging_support: bool = False
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
 
     @model_validator(mode="after")
     def validate_option_dependencies(self) -> SquidBuildOptions:
@@ -548,6 +571,9 @@ class ConanLockfileUpdateOptions(BaseModel):
     with_tray: bool = False
     with_runtime_dlls: bool = False
     with_packaging_support: bool = False
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
 
     @model_validator(mode="after")
     def validate_option_dependencies(self) -> ConanLockfileUpdateOptions:
@@ -577,6 +603,9 @@ class BundlePackageOptions(BaseModel):
     product_version: str | None = None
     service_name: str = "Squid4Win"
     sign_msi: bool = False
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
 
     @field_validator("service_name")
     @classmethod
@@ -636,6 +665,9 @@ class ServiceRunnerValidationOptions(BaseModel):
     allow_non_runner_execution: bool = False
     require_tray: bool = True
     require_notices: bool = True
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
 
     @field_validator("service_name")
     @classmethod

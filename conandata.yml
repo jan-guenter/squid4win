@@ -20,14 +20,28 @@ build:
       - "mingw-w64-x86_64-make"
       - "mingw-w64-x86_64-pkgconf"
       - "mingw-w64-x86_64-libgnurx"
-      - "mingw-w64-x86_64-libxml2"
-      - "mingw-w64-x86_64-openssl"
-      - "mingw-w64-x86_64-pcre2"
-      - "mingw-w64-x86_64-zlib"
   mingw_builds:
     threads: "posix"
     exception: "seh"
     runtime: "ucrt"
+  dependencies:
+    libxml2:
+      source_option: "libxml2_source"
+      system_package: "mingw-w64-x86_64-libxml2"
+      conan_reference: "libxml2/[>=2 <3]"
+    openssl:
+      source_option: "openssl_source"
+      feature_option: "with_openssl"
+      system_package: "mingw-w64-x86_64-openssl"
+      conan_reference: "openssl/[>=3.0 <4]"
+    pcre2:
+      source_option: "pcre2_source"
+      system_package: "mingw-w64-x86_64-pcre2"
+      conan_reference: "pcre2/[>=10 <11]"
+    zlib:
+      source_option: "zlib_source"
+      system_package: "mingw-w64-x86_64-zlib"
+      conan_reference: "zlib/[>=1.2 <2]"
   runtime_dlls:
     - "libcrypto-3-x64.dll"
     - "libssl-3-x64.dll"
@@ -36,15 +50,24 @@ build:
   runtime_notice_artifacts:
     - id: "openssl"
       name: "OpenSSL"
-      dependency: "msys2"
-      package: "mingw-w64-x86_64-openssl"
+      source_option: "openssl_source"
+      dependency_by_source:
+        system: "msys2"
+        conan: "openssl"
+      package_by_source:
+        system: "mingw-w64-x86_64-openssl"
+        conan: "openssl"
       project_url: "https://openssl-library.org"
       license: "spdx:Apache-2.0"
       dlls:
         - "libcrypto-3-x64.dll"
         - "libssl-3-x64.dll"
-      license_files:
-        - "licenses\\libopenssl\\LICENSE.txt"
+      license_files_by_source:
+        system:
+          - "licenses\\libopenssl\\LICENSE.txt"
+      license_directories_by_source:
+        conan:
+          - "licenses"
     - id: "winpthreads"
       name: "winpthreads"
       dependency: "mingw-builds"

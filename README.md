@@ -78,6 +78,15 @@ The supported repo-level entry points for Squid builds, tray builds, bundle
 packaging, validation, metadata updates, and Conan lockfile refresh now live under
 `uv run squid4win-automation ...`.
 
+The root Conan recipe can now source `openssl`, `libxml2`, `pcre2`, and `zlib`
+either from Conan requirements or from the MSYS2/system package set. The
+supported Python entry points expose the matching `--openssl-source`,
+`--libxml2-source`, `--pcre2-source`, and `--zlib-source` switches, while the
+default remains `system` to preserve the current MSYS2-first validated path.
+When any of those switches select `conan` and no explicit `--lockfile-path` is
+provided, the Python automation uses a build-local lockfile under `build\`
+instead of rewriting the committed default lockfile.
+
 Some checked-in `scripts\*.ps1` files still remain for installer-time behavior,
 optional signing, and historical update fallbacks. Keep them narrow and do not
 extend them as the long-term orchestration model.

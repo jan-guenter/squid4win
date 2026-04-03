@@ -22,6 +22,10 @@ The target architecture is:
 - keep a single self-contained native Squid Conan recipe at the repo root; it
   owns Squid source retrieval, patch application, and native MSYS2 + MinGW-w64
   build only
+- allow the root recipe to source native library inputs such as `openssl`,
+  `libxml2`, `pcre2`, and `zlib` either from Conan requirements or from
+  MSYS2/system packages via recipe options, while keeping the validated default
+  on the MSYS2/system path
 - move repo-level automation to Python 3.14 + `uv`; new developer entry points,
   CI helpers, staged bundle assembly, runtime adjacency, notice harvesting,
   validation, packaging, and metadata update flows should land there instead of
@@ -69,6 +73,13 @@ The target architecture is:
 - The root `conanfile.py` remains the single source of truth for native Squid
   build inputs, while the Python automation package owns stage assembly,
   packaging, and repo-level validation.
+- Runtime DLL harvesting, third-party notices, and Python CLI option handling
+  now need to stay aligned with whichever dependency source the root recipe
+  selects for shipped native libraries.
+- Non-default dependency-source selections should default to build-local
+  lockfiles so the committed lockfile continues to represent the validated
+  MSYS2/system baseline unless a change intentionally refreshes a different
+  graph.
 - The repo must keep `CONAN_HOME` repo-local at `.\.conan2`.
 - Markdown changes should keep markdownlint passing and align with
   `skills\gfm\SKILL.md` plus the repo-owned markdown audit direction.

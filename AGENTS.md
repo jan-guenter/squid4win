@@ -21,6 +21,9 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
 - Upstream pin: Squid `7.5` (`SQUID_7_5`)
 - The target architecture is one self-contained native Squid Conan recipe plus a
   direct `.NET 10` tray build outside Conan.
+- The root recipe can source `openssl`, `libxml2`, `pcre2`, and `zlib` either
+  from Conan requirements or from MSYS2/system packages through recipe options;
+  the default remains the MSYS2/system path for the current validated build.
 - Python 3.14 + `uv` now owns the repo-level build, stage, smoke-test, and
   package entry points.
 - Repository linting is centered on `.mega-linter.yml` plus
@@ -81,6 +84,14 @@ here.
 - Treat `uv run squid4win-automation ...` as the supported repo-level surface
   for Squid builds, tray builds, bundle packaging, validation, metadata
   updates, and Conan lockfile refresh.
+- Keep the Python CLI flags and root Conan recipe options aligned for dependency
+  source selection: `--openssl-source`, `--libxml2-source`, `--pcre2-source`,
+  and `--zlib-source` should continue to map directly to the root recipe's
+  `*_source` options.
+- Preserve the default committed lockfile for the validated MSYS2/system graph.
+  When contributors experiment with Conan-sourced native libraries, the Python
+  automation should use a build-local lockfile unless an explicit
+  `--lockfile-path` says otherwise.
 - Do not reintroduce tray-app Conan packaging or editable flows as the target
   model; the tray builds directly with `dotnet` from
   `src\tray\Squid4Win.Tray`.
