@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/service-runner-validation.yml'
+      - '.github/workflows/conan-validate-recipe-windows.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'src/squid4win/**'
@@ -16,6 +17,7 @@ on:
       - main
     paths:
       - '.github/workflows/service-runner-validation.yml'
+      - '.github/workflows/conan-validate-recipe-windows.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'src/squid4win/**'
@@ -34,8 +36,44 @@ env:
   DOTNET_NOLOGO: true
 
 jobs:
+  validate-windows-recipe:
+    name: Validate Windows recipe (${{ matrix.library_configuration_label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - library_configuration_label: system-libraries
+            openssl_source: system
+            libxml2_source: system
+            pcre2_source: system
+            zlib_source: system
+            openssl_linkage: default
+          - library_configuration_label: conan-mixed
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: shared
+          - library_configuration_label: conan-static
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: static
+    uses: ./.github/workflows/conan-validate-recipe-windows.yml
+    with:
+      profile_name: msys2-mingw-x64
+      build_type: Release
+      library_configuration_label: ${{ matrix.library_configuration_label }}
+      openssl_source: ${{ matrix.openssl_source }}
+      libxml2_source: ${{ matrix.libxml2_source }}
+      pcre2_source: ${{ matrix.pcre2_source }}
+      zlib_source: ${{ matrix.zlib_source }}
+      openssl_linkage: ${{ matrix.openssl_linkage }}
+
   validate-installed-service:
     name: Validate installed service
+    needs: validate-windows-recipe
     runs-on: windows-latest
     timeout-minutes: 180
     env:

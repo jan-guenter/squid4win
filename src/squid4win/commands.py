@@ -23,7 +23,9 @@ from squid4win.models import (
     BuildConfiguration,
     BundlePackageOptions,
     BundlePackageState,
+    ConanDependencyLinkage,
     ConanLockfileUpdateOptions,
+    ConanRecipeValidationOptions,
     NativeDependencySourceOptions,
     ProcessInvocation,
     RepositoryPaths,
@@ -268,6 +270,43 @@ def _validated_dependency_source_value(
     raise ValueError(msg)
 
 
+def _recipe_host_option_arguments(
+    build_settings: dict[str, Any],
+    dependency_sources: NativeDependencySourceOptions,
+    *,
+    openssl_linkage: ConanDependencyLinkage = ConanDependencyLinkage.DEFAULT,
+) -> list[str]:
+    selected_dependency_sources = _selected_dependency_sources(
+        build_settings,
+        dependency_sources,
+    )
+    arguments: list[str] = []
+
+    for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
+        option_name = str(dependency_settings.get("source_option", "")).strip()
+        if not option_name:
+            msg = f"Windows dependency metadata for '{dependency_name}' must declare source_option."
+            raise ValueError(msg)
+
+        arguments.extend(
+            ["-o:h", f"&:{option_name}={selected_dependency_sources[dependency_name]}"]
+        )
+
+        if selected_dependency_sources[dependency_name] != "conan":
+            continue
+
+        if dependency_name == "openssl":
+            openssl_shared = openssl_linkage.as_shared_option()
+            if openssl_shared is None:
+                openssl_shared = True
+            arguments.extend(["-o:h", f"openssl/*:shared={openssl_shared}"])
+            continue
+
+        arguments.extend(["-o:h", f"{dependency_name}/*:shared=False"])
+
+    return arguments
+
+
 def _uses_default_dependency_sources(
     dependency_sources: NativeDependencySourceOptions,
 ) -> bool:
@@ -370,13 +409,11 @@ def _recipe_option_arguments(
     paths: RepositoryPaths,
     *,
     dependency_sources: NativeDependencySourceOptions,
+    openssl_linkage: ConanDependencyLinkage = ConanDependencyLinkage.DEFAULT,
 ) -> list[str]:
     arguments: list[str] = []
     build_settings = _load_build_settings(paths)
-    selected_dependency_sources = _selected_dependency_sources(
-        build_settings,
-        dependency_sources,
-    )
+    selected_dependency_sources = _selected_dependency_sources(build_settings, dependency_sources)
     msys2_settings = build_settings.get("msys2") or {}
     if isinstance(msys2_settings, dict):
         packages = _string_list(msys2_settings.get("packages", []))
@@ -399,16 +436,13 @@ def _recipe_option_arguments(
             if option_value:
                 arguments.extend(["-o:b", f"mingw-builds/*:{option_name}={option_value}"])
 
-    for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
-        option_name = str(dependency_settings.get("source_option", "")).strip()
-        if not option_name:
-            msg = f"Windows dependency metadata for '{dependency_name}' must declare source_option."
-            raise ValueError(msg)
-
-        arguments.extend(
-            ["-o:h", f"&:{option_name}={selected_dependency_sources[dependency_name]}"]
+    arguments.extend(
+        _recipe_host_option_arguments(
+            build_settings,
+            dependency_sources,
+            openssl_linkage=openssl_linkage,
         )
-
+    )
     return arguments
 
 
@@ -1869,6 +1903,83 @@ def build_tray_plan(options: TrayBuildOptions) -> AutomationPlan:
                     "-p:SelfContained=false",
                     "-p:PublishSingleFile=false",
                 ),
+            ),
+        ),
+    )
+
+
+def _default_recipe_validation_profile_path(paths: RepositoryPaths) -> Path:
+    profile_name = "msys2-mingw-x64" if os.name == "nt" else "linux-gcc-x64"
+    return paths.conan_root / "profiles" / profile_name
+
+
+def _resolved_recipe_validation_profile_path(
+    paths: RepositoryPaths,
+    host_profile_path: Path | None,
+) -> Path:
+    return _resolved_or_default(
+        host_profile_path,
+        _default_recipe_validation_profile_path(paths),
+        base=paths.repository_root,
+    )
+
+
+def build_conan_recipe_validation_plan(
+    options: ConanRecipeValidationOptions,
+) -> AutomationPlan:
+    paths = RepositoryPaths.discover(options.repository_root)
+    resolved_host_profile_path = _resolved_recipe_validation_profile_path(
+        paths,
+        options.host_profile_path,
+    )
+    build_settings = _load_build_settings(paths)
+    host_option_arguments = _recipe_host_option_arguments(
+        build_settings,
+        options.dependency_sources,
+        openssl_linkage=options.openssl_linkage,
+    )
+    recipe_option_arguments = (
+        _recipe_option_arguments(
+            paths,
+            dependency_sources=options.dependency_sources,
+            openssl_linkage=options.openssl_linkage,
+        )
+        if os.name == "nt"
+        else host_option_arguments
+    )
+    base_environment = _base_conan_environment(paths)
+
+    return AutomationPlan(
+        name="conan-recipe-validate",
+        summary=(
+            "Detect the Conan profile and validate the standalone Squid recipe "
+            "with conan create."
+        ),
+        repository_root=paths.repository_root,
+        commands=(
+            ProcessInvocation(
+                description="Detect the Conan default profile for the repo-local CONAN_HOME.",
+                command=("conan", "profile", "detect", "--force"),
+                environment=base_environment,
+            ),
+            ProcessInvocation(
+                description="Validate the Squid recipe with conan create.",
+                command=(
+                    "conan",
+                    "create",
+                    str(paths.conan_recipe_root),
+                    "--profile:host",
+                    str(resolved_host_profile_path),
+                    "--profile:build",
+                    options.build_profile,
+                    "-s:h",
+                    f"build_type={options.configuration.value}",
+                    "-s:b",
+                    f"build_type={options.configuration.value}",
+                    _BUILD_MISSING_ARGUMENT,
+                    *recipe_option_arguments,
+                ),
+                environment=base_environment,
             ),
         ),
     )
@@ -3377,6 +3488,36 @@ def run_service_runner_validation(
         raise RuntimeError(msg)
 
     logger.info("Service runner validation passed for %s.", msi_path)
+    return 0
+
+
+def run_conan_recipe_validation(
+    options: ConanRecipeValidationOptions,
+    runner: PlanRunner,
+    *,
+    execute: bool,
+) -> int:
+    paths = RepositoryPaths.discover(options.repository_root)
+    resolved_host_profile_path = _resolved_recipe_validation_profile_path(
+        paths,
+        options.host_profile_path,
+    )
+    plan = build_conan_recipe_validation_plan(options)
+    if not execute:
+        runner.describe(plan)
+        return _log_dry_run_footer(
+            "Dry-run only. Re-run with --execute to validate the Squid recipe with conan create."
+        )
+
+    if shutil.which("conan") is None:
+        msg = "The conan CLI is not available on PATH. Run uv sync first."
+        raise FileNotFoundError(msg)
+    if not resolved_host_profile_path.is_file():
+        msg = f"The Conan host profile '{resolved_host_profile_path}' does not exist."
+        raise FileNotFoundError(msg)
+
+    paths.conan_home_path.mkdir(parents=True, exist_ok=True)
+    runner.run(plan)
     return 0
 
 

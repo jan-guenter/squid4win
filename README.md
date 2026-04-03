@@ -85,6 +85,14 @@ or from the MSYS2/system package set. The supported Python entry points expose
 the matching `--openssl-source`, `--libxml2-source`, `--pcre2-source`, and
 `--zlib-source` switches, while the default remains `system` to preserve the
 current MSYS2-first validated path.
+CI recipe validation now exercises three dependency profiles on both Linux and
+Windows runners:
+
+- `system-libraries`
+- `conan-mixed` (Conan dependencies with shared OpenSSL and static `libxml2`,
+  `pcre2`, and `zlib`)
+- `conan-static` (Conan dependencies with static linkage for the same library set)
+
 When any of those switches select `conan` and no explicit `--lockfile-path` is
 provided, the Python automation uses a build-local lockfile under `build\`
 instead of rewriting the committed default lockfile.

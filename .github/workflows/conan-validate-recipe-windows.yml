@@ -1,14 +1,10 @@
-name: Validate Conan recipe
+name: Validate Conan recipe on Windows
 
 on:
   workflow_call:
     inputs:
       profile_name:
-        description: Linux Conan host profile under conan/profiles.
-        required: true
-        type: string
-      compiler_label:
-        description: Human-readable compiler label for cache partitioning.
+        description: Windows Conan host profile under conan/profiles.
         required: true
         type: string
       build_type:
@@ -46,12 +42,16 @@ permissions:
   contents: read
 
 env:
-  CONAN_HOME: ${{ github.workspace }}/.conan2
+  CONAN_HOME: ${{ github.workspace }}\.conan2
 
 jobs:
   validate:
-    name: ${{ inputs.compiler_label }} / ${{ inputs.library_configuration_label }} / ${{ inputs.build_type }}
-    runs-on: ubuntu-24.04
+    name: ${{ inputs.library_configuration_label }} / ${{ inputs.build_type }}
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -81,47 +81,21 @@ jobs:
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ${{ env.CONAN_HOME }}
-          key: ${{ runner.os }}-${{ inputs.compiler_label }}-${{ inputs.library_configuration_label }}-conan-${{ hashFiles('conan/recipes/squid/**', 'conan/profiles/**', 'pyproject.toml', 'uv.lock') }}
+          key: ${{ runner.os }}-${{ inputs.library_configuration_label }}-conan-${{ hashFiles('conan/recipes/squid/**', 'conan/profiles/**', 'pyproject.toml', 'uv.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ inputs.compiler_label }}-${{ inputs.library_configuration_label }}-conan-
-            ${{ runner.os }}-${{ inputs.compiler_label }}-conan-
+            ${{ runner.os }}-${{ inputs.library_configuration_label }}-conan-
             ${{ runner.os }}-conan-
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            autoconf \
-            automake \
-            bison \
-            clang-18 \
-            flex \
-            gcc-13 \
-            g++-13 \
-            libpcre2-dev \
-            libssl-dev \
-            libtool \
-            libxml2-dev \
-            llvm-18 \
-            m4 \
-            make \
-            perl \
-            pkg-config \
-            zlib1g-dev
-
-      - name: Detect default Conan build profile
-        run: uv run conan profile detect --force
 
       - name: Validate Squid recipe with Python automation
         run: |
-          uv run squid4win-automation conan-recipe-validate \
-            --execute \
-            --repository-root "$GITHUB_WORKSPACE" \
-            --configuration "${{ inputs.build_type }}" \
-            --host-profile-path "conan/profiles/${{ inputs.profile_name }}" \
-            --build-profile default \
-            --openssl-source "${{ inputs.openssl_source }}" \
-            --libxml2-source "${{ inputs.libxml2_source }}" \
-            --pcre2-source "${{ inputs.pcre2_source }}" \
-            --zlib-source "${{ inputs.zlib_source }}" \
-            --openssl-linkage "${{ inputs.openssl_linkage }}"
+          uv run squid4win-automation conan-recipe-validate `
+            --execute `
+            --repository-root $PWD.Path `
+            --configuration ${{ inputs.build_type }} `
+            --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
+            --build-profile default `
+            --openssl-source ${{ inputs.openssl_source }} `
+            --libxml2-source ${{ inputs.libxml2_source }} `
+            --pcre2-source ${{ inputs.pcre2_source }} `
+            --zlib-source ${{ inputs.zlib_source }} `
+            --openssl-linkage ${{ inputs.openssl_linkage }}

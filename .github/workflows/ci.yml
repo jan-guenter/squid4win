@@ -128,7 +128,7 @@ jobs:
             --execute
 
   validate-linux-recipe:
-    name: Validate Linux recipe (${{ matrix.compiler_label }})
+    name: Validate Linux recipe (${{ matrix.compiler_label }}, ${{ matrix.library_configuration_label }})
     needs: lint
     strategy:
       fail-fast: false
@@ -137,19 +137,111 @@ jobs:
           - compiler_label: gcc-13
             profile_name: linux-gcc-x64
             build_type: Release
+            library_configuration_label: system-libraries
+            openssl_source: system
+            libxml2_source: system
+            pcre2_source: system
+            zlib_source: system
+            openssl_linkage: default
+          - compiler_label: gcc-13
+            profile_name: linux-gcc-x64
+            build_type: Release
+            library_configuration_label: conan-mixed
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: shared
+          - compiler_label: gcc-13
+            profile_name: linux-gcc-x64
+            build_type: Release
+            library_configuration_label: conan-static
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: static
           - compiler_label: clang-18
             profile_name: linux-clang-x64
             build_type: Release
+            library_configuration_label: system-libraries
+            openssl_source: system
+            libxml2_source: system
+            pcre2_source: system
+            zlib_source: system
+            openssl_linkage: default
+          - compiler_label: clang-18
+            profile_name: linux-clang-x64
+            build_type: Release
+            library_configuration_label: conan-mixed
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: shared
+          - compiler_label: clang-18
+            profile_name: linux-clang-x64
+            build_type: Release
+            library_configuration_label: conan-static
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: static
     uses: ./.github/workflows/conan-validate-recipe.yml
     with:
       profile_name: ${{ matrix.profile_name }}
       compiler_label: ${{ matrix.compiler_label }}
       build_type: ${{ matrix.build_type }}
+      library_configuration_label: ${{ matrix.library_configuration_label }}
+      openssl_source: ${{ matrix.openssl_source }}
+      libxml2_source: ${{ matrix.libxml2_source }}
+      pcre2_source: ${{ matrix.pcre2_source }}
+      zlib_source: ${{ matrix.zlib_source }}
+      openssl_linkage: ${{ matrix.openssl_linkage }}
+
+  validate-windows-recipe:
+    name: Validate Windows recipe (${{ matrix.library_configuration_label }})
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - library_configuration_label: system-libraries
+            openssl_source: system
+            libxml2_source: system
+            pcre2_source: system
+            zlib_source: system
+            openssl_linkage: default
+          - library_configuration_label: conan-mixed
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: shared
+          - library_configuration_label: conan-static
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: static
+    uses: ./.github/workflows/conan-validate-recipe-windows.yml
+    with:
+      profile_name: msys2-mingw-x64
+      build_type: Release
+      library_configuration_label: ${{ matrix.library_configuration_label }}
+      openssl_source: ${{ matrix.openssl_source }}
+      libxml2_source: ${{ matrix.libxml2_source }}
+      pcre2_source: ${{ matrix.pcre2_source }}
+      zlib_source: ${{ matrix.zlib_source }}
+      openssl_linkage: ${{ matrix.openssl_linkage }}
 
   build-msys2:
     name: Build MSYS2/MinGW-w64
     runs-on: windows-latest
-    needs: lint
+    needs:
+      - lint
+      - validate-windows-recipe
     env:
       CONAN_HOME: ${{ github.workspace }}\.conan2
     defaults:

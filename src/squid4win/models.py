@@ -29,6 +29,17 @@ class DependencySource(StrEnum):
     CONAN = "conan"
 
 
+class ConanDependencyLinkage(StrEnum):
+    DEFAULT = "default"
+    SHARED = "shared"
+    STATIC = "static"
+
+    def as_shared_option(self) -> bool | None:
+        if self is ConanDependencyLinkage.DEFAULT:
+            return None
+        return self is ConanDependencyLinkage.SHARED
+
+
 class NativeDependencySourceOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -626,6 +637,29 @@ class TrayBuildOptions(BaseModel):
     project_path: Path | None = None
     publish_root: Path | None = None
     package_root: Path | None = None
+
+
+class ConanRecipeValidationOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repository_root: Path | None = None
+    configuration: BuildConfiguration = BuildConfiguration.RELEASE
+    host_profile_path: Path | None = None
+    build_profile: str = "default"
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
+    openssl_linkage: ConanDependencyLinkage = ConanDependencyLinkage.DEFAULT
+
+    @model_validator(mode="after")
+    def validate_linkage_dependencies(self) -> ConanRecipeValidationOptions:
+        if (
+            self.openssl_linkage is not ConanDependencyLinkage.DEFAULT
+            and self.dependency_sources.openssl_source is not DependencySource.CONAN
+        ):
+            msg = "--openssl-linkage requires --openssl-source conan."
+            raise ValueError(msg)
+        return self
 
 
 class ConanLockfileUpdateOptions(BaseModel):
