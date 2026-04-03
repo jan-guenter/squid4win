@@ -43,7 +43,7 @@ from squid4win.utils.actions import context as github_actions_context
 from squid4win.version_helper import TargetUpstreamRelease, UpstreamVersionManager
 
 _DEFAULT_REPOSITORY = "jan-guenter/squid4win"
-_DEPENDENCY_SOURCE_CHOICES = tuple(str(source) for source in DependencySource)
+_DEPENDENCY_SOURCE_CHOICES = tuple(source.value for source in DependencySource)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -286,7 +286,7 @@ def _add_dependency_source_arguments(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             f"--{dependency_name}-source",
             choices=_DEPENDENCY_SOURCE_CHOICES,
-            default=str(DependencySource.SYSTEM),
+            default=DependencySource.SYSTEM.value,
             help=(
                 f"Select whether {dependency_name} comes from Conan requirements "
                 "or system/MSYS2 packages."
@@ -296,10 +296,10 @@ def _add_dependency_source_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _dependency_sources_from_args(args: argparse.Namespace) -> NativeDependencySourceOptions:
     return NativeDependencySourceOptions(
-        openssl_source=args.openssl_source,
-        libxml2_source=args.libxml2_source,
-        pcre2_source=args.pcre2_source,
-        zlib_source=args.zlib_source,
+        openssl_source=DependencySource(args.openssl_source),
+        libxml2_source=DependencySource(args.libxml2_source),
+        pcre2_source=DependencySource(args.pcre2_source),
+        zlib_source=DependencySource(args.zlib_source),
     )
 
 

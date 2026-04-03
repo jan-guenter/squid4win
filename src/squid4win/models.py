@@ -39,8 +39,10 @@ class NativeDependencySourceOptions(BaseModel):
 
     def as_option_values(self) -> dict[str, str]:
         return {
-            option_name: str(option_value)
-            for option_name, option_value in self.model_dump().items()
+            "openssl_source": self.openssl_source.value,
+            "libxml2_source": self.libxml2_source.value,
+            "pcre2_source": self.pcre2_source.value,
+            "zlib_source": self.zlib_source.value,
         }
 
 
