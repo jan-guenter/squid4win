@@ -99,7 +99,7 @@ if (-not $patchSectionMatch.Success) {
 }
 
 $newline = if ($existingConanDataContent.Contains("`r`n")) { "`r`n" } else { "`n" }
-$newPatchSectionHeader = "patches:$newline  ""$Version"":" 
+$newPatchSectionHeader = ('patches:{0}  "{1}":' -f $newline, $Version)
 if ($patchSectionMatch.Value -notmatch 'patches:\r?\n\s+"[^"]+":') {
     throw "Unable to locate the versioned patches section in $resolvedConanDataPath."
 }
