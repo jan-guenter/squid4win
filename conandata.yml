@@ -160,3 +160,11 @@ patches:
       patch_description: "Enable the Win32 AIO backend for MinGW DiskIO AIO builds."
       base_path: "."
       strip: 2
+    - patch_file: "conan/patches/squid/0019-mingw-lockfileex-overlapped.patch"
+      patch_description: "Pass a real OVERLAPPED structure when locking MinGW files on Windows."
+      base_path: "."
+      strip: 2
+    - patch_file: "conan/patches/squid/0020-mingw-setfilepointerex-truncate.patch"
+      patch_description: "Use SetFilePointerEx for MinGW file truncation on Windows."
+      base_path: "."
+      strip: 2
