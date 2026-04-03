@@ -440,11 +440,16 @@ def _resolve_conan_context(
         paths.build_root,
         base=paths.repository_root,
     )
-    layout = SquidBuildLayout.create(paths.repository_root, resolved_build_root, configuration)
     resolved_host_profile_path = _resolved_or_default(
         host_profile_path,
         paths.conan_root / "profiles" / "msys2-mingw-x64",
         base=paths.repository_root,
+    )
+    layout = SquidBuildLayout.create(
+        paths.repository_root,
+        resolved_build_root,
+        configuration,
+        host_profile_path=resolved_host_profile_path,
     )
     resolved_lockfile_path = resolve_path(lockfile_path, base=paths.repository_root)
     if resolved_lockfile_path is None:

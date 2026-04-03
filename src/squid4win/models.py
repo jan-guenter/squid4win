@@ -134,6 +134,51 @@ def _int_from_value(value: object) -> int | None:
     return None
 
 
+def _conan_profile_settings(profile_path: Path) -> dict[str, str]:
+    if not profile_path.is_file():
+        msg = f"Expected the Conan host profile at '{profile_path}'."
+        raise FileNotFoundError(msg)
+
+    settings: dict[str, str] = {}
+    in_settings = False
+    for raw_line in profile_path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_settings = stripped.casefold() == "[settings]"
+            continue
+
+        if not in_settings or "=" not in stripped:
+            continue
+
+        key, value = stripped.split("=", 1)
+        normalized_key = key.strip()
+        normalized_value = value.strip()
+        if normalized_key and normalized_value:
+            settings[normalized_key] = normalized_value
+
+    return settings
+
+
+def _conan_configuration_label(
+    profile_path: Path,
+    configuration: BuildConfiguration,
+) -> str:
+    settings = _conan_profile_settings(profile_path)
+    os_name = settings.get("os")
+    compiler_name = settings.get("compiler")
+    if not os_name or not compiler_name:
+        msg = (
+            f"Conan host profile '{profile_path}' must declare [settings] os and compiler "
+            "so the automation can mirror the recipe layout."
+        )
+        raise ValueError(msg)
+
+    return "-".join((os_name.lower(), compiler_name.lower(), configuration.value.lower()))
+
+
 def _pull_request_number_from_event(payload: dict[str, Any] | None) -> int | None:
     if payload is None:
         return None
@@ -333,6 +378,7 @@ class SquidBuildLayout(BaseModel):
     build_root: Path
     configuration: BuildConfiguration
     configuration_label: str
+    conan_configuration_label: str
     profile_name: str
     stage_root: Path
     downloads_root: Path
@@ -352,9 +398,14 @@ class SquidBuildLayout(BaseModel):
         build_root: Path,
         configuration: BuildConfiguration,
         *,
-        profile_name: str = "msys2-mingw-x64",
+        host_profile_path: Path,
     ) -> SquidBuildLayout:
+        profile_name = host_profile_path.name
         configuration_label = configuration.value.lower()
+        conan_configuration_label = _conan_configuration_label(
+            host_profile_path,
+            configuration,
+        )
         profile_stem = f"{profile_name}-{configuration_label}"
 
         return cls(
@@ -362,18 +413,31 @@ class SquidBuildLayout(BaseModel):
             build_root=build_root,
             configuration=configuration,
             configuration_label=configuration_label,
+            conan_configuration_label=conan_configuration_label,
             profile_name=profile_name,
             stage_root=build_root / "install" / configuration_label,
             downloads_root=build_root / "downloads",
             sources_root=build_root / "sources" / profile_stem,
             work_root=build_root / profile_stem,
             conan_output_root=build_root / "conan" / profile_stem,
-            conan_build_root=build_root / "conan" / profile_stem / "build" / configuration_label,
+            conan_build_root=(
+                build_root / "conan" / profile_stem / "build" / conan_configuration_label
+            ),
             conan_install_root=(
-                build_root / "conan" / profile_stem / "build" / configuration_label / "package"
+                build_root
+                / "conan"
+                / profile_stem
+                / "build"
+                / conan_configuration_label
+                / "package"
             ),
             conan_generators_root=(
-                build_root / "conan" / profile_stem / "build" / configuration_label / "conan"
+                build_root
+                / "conan"
+                / profile_stem
+                / "build"
+                / conan_configuration_label
+                / "conan"
             ),
             repo_lockfile_path=repository_root / "conan" / "lockfiles" / f"{profile_stem}.lock",
             build_lock_path=build_root / "locks" / f"{profile_stem}.lock",
