@@ -770,9 +770,7 @@ class SquidConan(ConanFile):
 
     def _recipe_configure_args(self) -> list[str]:
         return [
-            self._toggle_configure_arg(
-                "with_openssl", "--with-openssl", "--without-openssl"
-            ),
+            self._openssl_configure_arg(),
             self._toggle_configure_arg(
                 "enable_win32_service",
                 "--enable-win32-service",
@@ -800,6 +798,19 @@ class SquidConan(ConanFile):
             self._list_configure_arg("auth_negotiate_helpers", "auth-negotiate"),
             self._list_configure_arg("external_acl_helpers", "external-acl-helpers"),
         ]
+
+    def _openssl_configure_arg(self) -> str:
+        if not self._option_enabled("with_openssl"):
+            return "--without-openssl"
+
+        if not self._dependency_uses_conan("openssl"):
+            return "--with-openssl"
+
+        package_root = self._dependency_package_root("openssl")
+        if package_root is None:
+            raise ConanException("The Conan dependency 'openssl' is not available to the recipe.")
+
+        return f"--with-openssl={self._shell_path(package_root)}"
 
     def _toggle_configure_arg(
         self,
