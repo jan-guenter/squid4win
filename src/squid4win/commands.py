@@ -17,15 +17,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-import yaml
-
 from squid4win.logging_utils import get_logger
 from squid4win.models import (
     AutomationPlan,
     BuildConfiguration,
     BundlePackageOptions,
     BundlePackageState,
+    ConanDependencyLinkage,
     ConanLockfileUpdateOptions,
+    ConanRecipeValidationOptions,
+    NativeDependencySourceOptions,
     ProcessInvocation,
     RepositoryPaths,
     ServiceRunnerValidationOptions,
@@ -47,6 +48,119 @@ if TYPE_CHECKING:
 
 _BUILD_MISSING_ARGUMENT = "--build=missing"
 _TRAY_EXECUTABLE_NAME = "Squid4Win.Tray.exe"
+_DETECT_CONAN_PROFILE_DESCRIPTION = (
+    "Detect the Conan default profile for the repo-local CONAN_HOME."
+)
+_CONAN_CLI_UNAVAILABLE_MESSAGE = "The conan CLI is not available on PATH. Run uv sync first."
+_SUPPORTED_DEPENDENCY_SOURCES = frozenset({"system", "conan"})
+_WINDOWS_MSYS2_ENV_DIRECTORY = "mingw64"
+_WINDOWS_MSYS2_BASE_PACKAGES = [
+    "autoconf",
+    "automake",
+    "libtool",
+    "make",
+    "mingw-w64-x86_64-make",
+    "mingw-w64-x86_64-pkgconf",
+    "mingw-w64-x86_64-libgnurx",
+]
+_WINDOWS_DEPENDENCY_SETTINGS: dict[str, dict[str, Any]] = {
+    "libxml2": {
+        "source_option": "libxml2_source",
+        "system_package": "mingw-w64-x86_64-libxml2",
+    },
+    "openssl": {
+        "source_option": "openssl_source",
+        "feature_option": "with_openssl",
+        "system_package": "mingw-w64-x86_64-openssl",
+    },
+    "pcre2": {
+        "source_option": "pcre2_source",
+        "system_package": "mingw-w64-x86_64-pcre2",
+    },
+    "zlib": {
+        "source_option": "zlib_source",
+        "system_package": "mingw-w64-x86_64-zlib",
+    },
+}
+_WINDOWS_RUNTIME_NOTICE_ARTIFACTS: list[dict[str, Any]] = [
+    {
+        "id": "openssl",
+        "name": "OpenSSL",
+        "source_option": "openssl_source",
+        "dependency_by_source": {
+            "system": "msys2",
+            "conan": "openssl",
+        },
+        "package_by_source": {
+            "system": "mingw-w64-x86_64-openssl",
+            "conan": "openssl",
+        },
+        "project_url": "https://openssl-library.org",
+        "license": "spdx:Apache-2.0",
+        "dlls": [
+            "libcrypto-3-x64.dll",
+            "libssl-3-x64.dll",
+        ],
+        "license_files_by_source": {
+            "system": [
+                "licenses\\libopenssl\\LICENSE.txt",
+            ],
+        },
+        "license_directories_by_source": {
+            "conan": [
+                "licenses",
+            ],
+        },
+    },
+    {
+        "id": "winpthreads",
+        "name": "winpthreads",
+        "dependency": "mingw-builds",
+        "package": "mingw-w64-x86_64-libwinpthread",
+        "project_url": "https://www.mingw-w64.org/",
+        "license": "spdx:MIT AND BSD-3-Clause-Clear",
+        "dlls": [
+            "libwinpthread-1.dll",
+        ],
+        "license_files": [
+            "licenses\\winpthreads\\COPYING",
+            "licenses\\mingw-w64\\COPYING.MinGW-w64-runtime.txt",
+        ],
+    },
+    {
+        "id": "libgnurx",
+        "name": "libgnurx",
+        "dependency": "mingw-builds",
+        "package": "mingw-w64-x86_64-libgnurx",
+        "project_url": "https://mingw.sourceforge.io/",
+        "license": "LGPL",
+        "dlls": [
+            "libgnurx-0.dll",
+        ],
+        "license_files": [
+            "licenses\\mingw-libgnurx\\COPYING.LIB",
+        ],
+    },
+]
+_WINDOWS_BUILD_SETTINGS: dict[str, Any] = {
+    "msys2": {
+        "env": _WINDOWS_MSYS2_ENV_DIRECTORY,
+        "packages": list(_WINDOWS_MSYS2_BASE_PACKAGES),
+    },
+    "mingw_builds": {
+        "threads": "posix",
+        "exception": "seh",
+        "runtime": "ucrt",
+    },
+    "dependencies": _WINDOWS_DEPENDENCY_SETTINGS,
+    "runtime_dlls": [
+        "libcrypto-3-x64.dll",
+        "libssl-3-x64.dll",
+        "libwinpthread-1.dll",
+        "libgnurx-0.dll",
+    ],
+    "runtime_notice_artifacts": _WINDOWS_RUNTIME_NOTICE_ARTIFACTS,
+}
 
 
 @dataclass(frozen=True)
@@ -66,6 +180,17 @@ class TrayContext:
     publish_root: Path
     package_root: Path
     license_path: Path
+
+
+@dataclass(frozen=True)
+class BundleContext:
+    paths: RepositoryPaths
+    build_root: Path
+    artifact_root: Path
+    squid_stage_root: Path
+    installer_project_path: Path
+    bundle_state: BundlePackageState
+    prerequisite_reasons: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -92,6 +217,240 @@ def _string_list(value: object) -> list[str]:
         if text:
             strings.append(text)
     return strings
+
+
+def _dependency_build_settings(build_settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw_dependencies = build_settings.get("dependencies") or {}
+    if not isinstance(raw_dependencies, dict):
+        msg = "Windows dependency metadata must be a mapping."
+        raise ValueError(msg)
+
+    dependencies: dict[str, dict[str, Any]] = {}
+    for dependency_name, raw_dependency in raw_dependencies.items():
+        normalized_name = str(dependency_name).strip()
+        if not normalized_name:
+            continue
+        if not isinstance(raw_dependency, dict):
+            msg = f"Windows dependency metadata for '{normalized_name}' must be a mapping."
+            raise ValueError(msg)
+        dependencies[normalized_name] = cast(dict[str, Any], raw_dependency)
+
+    return dependencies
+
+
+def _selected_dependency_sources(
+    build_settings: dict[str, Any],
+    dependency_sources: NativeDependencySourceOptions,
+) -> dict[str, str]:
+    option_values = dependency_sources.as_option_values()
+    selected_sources: dict[str, str] = {}
+    for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
+        option_name = _dependency_source_option_name(
+            dependency_name,
+            dependency_settings,
+        )
+        selected_sources[dependency_name] = _validated_dependency_source_value(
+            dependency_name,
+            option_name,
+            option_values,
+        )
+
+    return selected_sources
+
+
+def _dependency_source_option_name(
+    dependency_name: str,
+    dependency_settings: dict[str, Any],
+) -> str:
+    option_name = str(dependency_settings.get("source_option", "")).strip()
+    if option_name:
+        return option_name
+
+    msg = f"Windows dependency metadata for '{dependency_name}' must declare source_option."
+    raise ValueError(msg)
+
+
+def _validated_dependency_source_value(
+    dependency_name: str,
+    option_name: str,
+    option_values: dict[str, str],
+) -> str:
+    source_value = str(option_values.get(option_name, "")).strip().lower()
+    if source_value in {"system", "conan"}:
+        return source_value
+
+    msg = (
+        f"Unsupported source '{source_value}' for dependency '{dependency_name}'. "
+        "Expected 'system' or 'conan'."
+    )
+    raise ValueError(msg)
+
+
+def _recipe_host_option_arguments(
+    build_settings: dict[str, Any],
+    dependency_sources: NativeDependencySourceOptions,
+    *,
+    openssl_linkage: ConanDependencyLinkage = ConanDependencyLinkage.DEFAULT,
+) -> list[str]:
+    selected_dependency_sources = _selected_dependency_sources(
+        build_settings,
+        dependency_sources,
+    )
+    arguments: list[str] = []
+
+    for dependency_name, dependency_settings in _dependency_build_settings(build_settings).items():
+        option_name = str(dependency_settings.get("source_option", "")).strip()
+        if not option_name:
+            msg = f"Windows dependency metadata for '{dependency_name}' must declare source_option."
+            raise ValueError(msg)
+
+        arguments.extend(
+            ["-o:h", f"&:{option_name}={selected_dependency_sources[dependency_name]}"]
+        )
+
+        if selected_dependency_sources[dependency_name] == "conan":
+            arguments.extend(
+                _conan_dependency_host_option_arguments(
+                    dependency_name,
+                    openssl_linkage=openssl_linkage,
+                )
+            )
+
+    return arguments
+
+
+def _conan_dependency_host_option_arguments(
+    dependency_name: str,
+    *,
+    openssl_linkage: ConanDependencyLinkage,
+) -> list[str]:
+    if dependency_name != "openssl":
+        return ["-o:h", f"{dependency_name}/*:shared=False"]
+
+    openssl_shared = openssl_linkage.as_shared_option()
+    if openssl_shared is None:
+        openssl_shared = True
+
+    return [
+        "-o:h",
+        f"openssl/*:shared={openssl_shared}",
+    ]
+
+
+def _windows_recipe_conf_arguments(
+    selected_dependency_sources: dict[str, str],
+) -> list[str]:
+    arguments: list[str] = []
+
+    if any(source == "conan" for source in selected_dependency_sources.values()):
+        arguments.extend(_windows_mingw_compiler_conf_arguments())
+
+    if selected_dependency_sources.get("openssl") == "conan":
+        arguments.extend(_windows_openssl_conan_conf_arguments())
+
+    return arguments
+
+
+def _windows_openssl_conan_host_option_arguments(
+    selected_dependency_sources: dict[str, str],
+) -> list[str]:
+    if selected_dependency_sources.get("openssl") != "conan":
+        return []
+
+    return [
+        "-o:h",
+        "openssl/*:no_dgram=True",
+        "-o:h",
+        "openssl/*:no_apps=True",
+    ]
+
+
+def _windows_mingw_compiler_conf_arguments() -> list[str]:
+    # Dependency recipes like OpenSSL otherwise resolve bare gcc/g++ to the
+    # MSYS/Cygwin toolchain instead of the Conan-provided MinGW toolchain.
+    return [
+        "-c:h",
+        (
+            'tools.build:compiler_executables={'
+            '"c":"x86_64-w64-mingw32-gcc",'
+            '"cpp":"x86_64-w64-mingw32-g++"'
+            "}"
+        ),
+    ]
+
+
+def _windows_openssl_conan_conf_arguments() -> list[str]:
+    # OpenSSL's MinGW build still needs explicit Windows+MinGW defines so
+    # e_os2.h/e_os.h and sha.h take compatible branches before dso_win32.c
+    # reaches tlhelp32.h.
+    return [
+        "-c:h",
+        (
+            'openssl/*:tools.build:defines=['
+            '"_WIN32",'
+            '"__MINGW32__",'
+            '"_alloca=__builtin_alloca"'
+            "]"
+        ),
+    ]
+
+
+def _uses_default_dependency_sources(
+    dependency_sources: NativeDependencySourceOptions,
+) -> bool:
+    return all(source == "system" for source in dependency_sources.as_option_values().values())
+
+
+def _source_specific_string(
+    notice_entry: dict[str, Any],
+    field_name: str,
+    *,
+    selected_source: str | None,
+    notice_id: str,
+) -> str:
+    mapped_field_name = f"{field_name}_by_source"
+    mapped_value = notice_entry.get(mapped_field_name)
+    if mapped_value is None:
+        return str(notice_entry.get(field_name, "")).strip()
+
+    if not isinstance(mapped_value, dict):
+        msg = f"Runtime notice entry '{notice_id}' field '{mapped_field_name}' must be a mapping."
+        raise ValueError(msg)
+
+    if selected_source is None:
+        msg = (
+            f"Runtime notice entry '{notice_id}' declared '{mapped_field_name}' without "
+            "declaring source_option."
+        )
+        raise ValueError(msg)
+
+    return str(mapped_value.get(selected_source, "")).strip()
+
+
+def _source_specific_string_list(
+    notice_entry: dict[str, Any],
+    field_name: str,
+    *,
+    selected_source: str | None,
+    notice_id: str,
+) -> list[str]:
+    mapped_field_name = f"{field_name}_by_source"
+    mapped_value = notice_entry.get(mapped_field_name)
+    if mapped_value is None:
+        return _deduplicate(_string_list(notice_entry.get(field_name, [])))
+
+    if not isinstance(mapped_value, dict):
+        msg = f"Runtime notice entry '{notice_id}' field '{mapped_field_name}' must be a mapping."
+        raise ValueError(msg)
+
+    if selected_source is None:
+        msg = (
+            f"Runtime notice entry '{notice_id}' declared '{mapped_field_name}' without "
+            "declaring source_option."
+        )
+        raise ValueError(msg)
+
+    return _deduplicate(_string_list(mapped_value.get(selected_source, [])))
 
 
 def _powershell_executable() -> str:
@@ -130,43 +489,90 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], loaded)
 
 
-def _load_build_settings(paths: RepositoryPaths) -> dict[str, Any]:
-    loaded = yaml.safe_load(paths.conan_data_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(loaded, dict):
-        msg = f"Expected a mapping in '{paths.conan_data_path}'."
-        raise ValueError(msg)
+def _load_build_settings(_paths: RepositoryPaths) -> dict[str, Any]:
+    return _WINDOWS_BUILD_SETTINGS
 
-    build_settings = loaded.get("build") or {}
-    if not isinstance(build_settings, dict):
-        msg = f"Expected a top-level 'build' mapping in '{paths.conan_data_path}'."
-        raise ValueError(msg)
 
-    return cast(dict[str, Any], build_settings)
+def _msys2_additional_package_arguments(
+    build_settings: dict[str, Any],
+    selected_dependency_sources: dict[str, str],
+) -> list[str]:
+    msys2_settings = build_settings.get("msys2") or {}
+    if not isinstance(msys2_settings, dict):
+        return []
+
+    packages = _string_list(msys2_settings.get("packages", []))
+    for dependency_name, dependency_setting in _dependency_build_settings(build_settings).items():
+        if selected_dependency_sources.get(dependency_name) != "system":
+            continue
+
+        system_package = str(dependency_setting.get("system_package", "")).strip()
+        if system_package:
+            packages.append(system_package)
+
+    if not packages:
+        return []
+
+    return ["-o:b", f"msys2/*:additional_packages={','.join(packages)}"]
+
+
+def _mingw_build_option_arguments(build_settings: dict[str, Any]) -> list[str]:
+    mingw_settings = build_settings.get("mingw_builds") or {}
+    if not isinstance(mingw_settings, dict):
+        return []
+
+    arguments: list[str] = []
+    for option_name in ("threads", "exception", "runtime"):
+        option_value = str(mingw_settings.get(option_name, "")).strip()
+        if option_value:
+            arguments.extend(["-o:b", f"mingw-builds/*:{option_name}={option_value}"])
+
+    return arguments
 
 
 def _recipe_option_arguments(
     paths: RepositoryPaths,
+    *,
+    dependency_sources: NativeDependencySourceOptions,
+    openssl_linkage: ConanDependencyLinkage = ConanDependencyLinkage.DEFAULT,
 ) -> list[str]:
     arguments: list[str] = []
     build_settings = _load_build_settings(paths)
-    msys2_settings = build_settings.get("msys2") or {}
-    if isinstance(msys2_settings, dict):
-        packages = _string_list(msys2_settings.get("packages", []))
-        if packages:
-            arguments.extend(["-o:b", f"msys2/*:additional_packages={','.join(packages)}"])
-
-    mingw_settings = build_settings.get("mingw_builds") or {}
-    if isinstance(mingw_settings, dict):
-        for option_name in ("threads", "exception", "runtime"):
-            option_value = str(mingw_settings.get(option_name, "")).strip()
-            if option_value:
-                arguments.extend(["-o:b", f"mingw-builds/*:{option_name}={option_value}"])
-
+    selected_dependency_sources = _selected_dependency_sources(build_settings, dependency_sources)
+    arguments.extend(
+        _msys2_additional_package_arguments(
+            build_settings,
+            selected_dependency_sources,
+        )
+    )
+    arguments.extend(_mingw_build_option_arguments(build_settings))
+    arguments.extend(
+        _recipe_host_option_arguments(
+            build_settings,
+            dependency_sources,
+            openssl_linkage=openssl_linkage,
+        )
+    )
+    arguments.extend(_windows_openssl_conan_host_option_arguments(selected_dependency_sources))
+    arguments.extend(_windows_recipe_conf_arguments(selected_dependency_sources))
     return arguments
 
 
 def _base_conan_environment(paths: RepositoryPaths) -> dict[str, str]:
     return {"CONAN_HOME": str(paths.conan_home_path)}
+
+
+def _detect_conan_profile_invocation(base_environment: dict[str, str]) -> ProcessInvocation:
+    return ProcessInvocation(
+        description=_DETECT_CONAN_PROFILE_DESCRIPTION,
+        command=("conan", "profile", "detect", "--force"),
+        environment=base_environment,
+    )
+
+
+def _require_conan_cli() -> None:
+    if shutil.which("conan") is None:
+        raise FileNotFoundError(_CONAN_CLI_UNAVAILABLE_MESSAGE)
 
 
 def _description_suffix(options: SquidBuildOptions) -> str:
@@ -175,7 +581,7 @@ def _description_suffix(options: SquidBuildOptions) -> str:
 
     return (
         "Detect the Conan profile, refresh the lockfile when needed, source the "
-        "root recipe, and build the staged native Squid bundle."
+        "CCI-style Squid recipe, and build the staged native Squid bundle."
     )
 
 
@@ -185,6 +591,7 @@ def _resolve_conan_context(
     configuration: BuildConfiguration,
     host_profile_path: Path | None,
     lockfile_path: Path | None,
+    dependency_sources: NativeDependencySourceOptions,
 ) -> ConanContext:
     paths = RepositoryPaths.discover(repository_root)
     resolved_build_root = _resolved_or_default(
@@ -192,15 +599,24 @@ def _resolve_conan_context(
         paths.build_root,
         base=paths.repository_root,
     )
-    layout = SquidBuildLayout.create(paths.repository_root, resolved_build_root, configuration)
     resolved_host_profile_path = _resolved_or_default(
         host_profile_path,
         paths.conan_root / "profiles" / "msys2-mingw-x64",
         base=paths.repository_root,
     )
-    resolved_lockfile_path = (
-        resolve_path(lockfile_path, base=paths.repository_root) or layout.repo_lockfile_path
+    layout = SquidBuildLayout.create(
+        paths.repository_root,
+        resolved_build_root,
+        configuration,
+        host_profile_path=resolved_host_profile_path,
     )
+    resolved_lockfile_path = resolve_path(lockfile_path, base=paths.repository_root)
+    if resolved_lockfile_path is None:
+        resolved_lockfile_path = (
+            layout.repo_lockfile_path
+            if _uses_default_dependency_sources(dependency_sources)
+            else layout.build_lock_path
+        )
 
     return ConanContext(
         paths=paths,
@@ -245,18 +661,86 @@ def _resolve_tray_context(options: TrayBuildOptions) -> TrayContext:
     )
 
 
+def _resolve_bundle_context(options: BundlePackageOptions) -> BundleContext:
+    paths = RepositoryPaths.discover(options.repository_root)
+    build_root = _resolved_or_default(
+        options.build_root,
+        paths.build_root,
+        base=paths.repository_root,
+    )
+    if options.squid_stage_root is not None and options.build_root is None:
+        explicit_stage_root = resolve_path(options.squid_stage_root, base=paths.repository_root)
+        if explicit_stage_root is not None:
+            inferred_build_root = _infer_build_root_from_stage_root(
+                explicit_stage_root,
+                options.configuration,
+            )
+            if inferred_build_root is not None:
+                build_root = inferred_build_root
+
+    artifact_root = _resolved_or_default(
+        options.artifact_root,
+        paths.artifact_root,
+        base=paths.repository_root,
+    )
+    squid_stage_root = _resolved_or_default(
+        options.squid_stage_root,
+        build_root / "install" / options.configuration.value.lower(),
+        base=paths.repository_root,
+    )
+    installer_project_path = _resolved_or_default(
+        options.installer_project_path,
+        paths.installer_project_path,
+        base=paths.repository_root,
+    )
+    bundle_state = BundlePackageState.inspect(
+        paths.repository_root,
+        build_root,
+        options.configuration,
+        squid_stage_root=squid_stage_root,
+        artifact_root=artifact_root,
+        installer_project_path=installer_project_path,
+    )
+    prerequisite_reasons = tuple(
+        _bundle_prerequisite_reasons(options, bundle_state=bundle_state)
+    )
+    buildable_stage_root = build_root / "install" / options.configuration.value.lower()
+    if prerequisite_reasons and squid_stage_root != buildable_stage_root:
+        msg = (
+            "bundle-package can only materialize missing prerequisites when "
+            "--squid-stage-root matches '<build-root>\\install\\<configuration>'. "
+            f"Expected '{buildable_stage_root}', but received '{squid_stage_root}'."
+        )
+        raise ValueError(msg)
+
+    if options.build_installer and not installer_project_path.is_file():
+        msg = f"Installer project '{installer_project_path}' does not exist."
+        raise FileNotFoundError(msg)
+
+    return BundleContext(
+        paths=paths,
+        build_root=build_root,
+        artifact_root=artifact_root,
+        squid_stage_root=squid_stage_root,
+        installer_project_path=installer_project_path,
+        bundle_state=bundle_state,
+        prerequisite_reasons=prerequisite_reasons,
+    )
+
+
 def _load_conan_graph_info(
     context: ConanContext,
     *,
     build_profile: str,
     configuration: BuildConfiguration,
+    dependency_sources: NativeDependencySourceOptions,
 ) -> dict[str, Any]:
     completed = subprocess.run(
         (
             "conan",
             "graph",
             "info",
-            str(context.paths.repository_root),
+            str(context.paths.conan_recipe_root),
             "--profile:host",
             str(context.host_profile_path),
             "--profile:build",
@@ -268,7 +752,10 @@ def _load_conan_graph_info(
             "-s:b",
             f"build_type={configuration.value}",
             _BUILD_MISSING_ARGUMENT,
-            *_recipe_option_arguments(context.paths),
+            *_recipe_option_arguments(
+                context.paths,
+                dependency_sources=dependency_sources,
+            ),
             "--format=json",
         ),
         cwd=context.paths.repository_root,
@@ -362,14 +849,17 @@ def _resolve_dependency_package_root(
     return package_root
 
 
-def _runtime_dependency_names(build_settings: dict[str, Any]) -> list[str]:
+def _runtime_dependency_names(
+    build_settings: dict[str, Any],
+    *,
+    dependency_sources: NativeDependencySourceOptions,
+) -> list[str]:
     dependency_names = ["mingw-builds", "msys2"]
-    for raw_notice_entry in cast(list[Any], build_settings.get("runtime_notice_artifacts", [])):
-        if not isinstance(raw_notice_entry, dict):
-            continue
-
-        dependency_name = str(raw_notice_entry.get("dependency", "")).strip()
-        if dependency_name:
+    for dependency_name, selected_source in _selected_dependency_sources(
+        build_settings,
+        dependency_sources,
+    ).items():
+        if selected_source == "conan":
             dependency_names.append(dependency_name)
 
     return _deduplicate(dependency_names)
@@ -381,11 +871,13 @@ def _resolve_dependency_metadata(
     build_profile: str,
     configuration: BuildConfiguration,
     dependency_names: list[str],
+    dependency_sources: NativeDependencySourceOptions,
 ) -> tuple[dict[str, str], dict[str, Path]]:
     graph_info = _load_conan_graph_info(
         context,
         build_profile=build_profile,
         configuration=configuration,
+        dependency_sources=dependency_sources,
     )
     dependency_refs: dict[str, str] = {}
     dependency_roots: dict[str, Path] = {}
@@ -429,28 +921,78 @@ def _runtime_dll_source_directories(
     source_directories: list[Path] = []
     seen_directories: set[str] = set()
 
-    mingw_root = dependency_roots.get("mingw-builds")
-    if mingw_root is not None:
-        _append_existing_directory(source_directories, seen_directories, mingw_root / "bin")
-
-    msys2_root = dependency_roots.get("msys2")
-    if msys2_root is not None:
-        _append_existing_directory(
-            source_directories,
-            seen_directories,
-            msys2_root / "bin" / "msys64" / msys2_env_directory / "bin",
-        )
-        _append_existing_directory(
-            source_directories,
-            seen_directories,
-            msys2_root / "bin" / "msys64" / "usr" / "bin",
-        )
+    _append_windows_runtime_tool_directories(
+        source_directories,
+        seen_directories,
+        dependency_roots,
+        msys2_env_directory=msys2_env_directory,
+    )
+    _append_dependency_runtime_bin_directories(
+        source_directories,
+        seen_directories,
+        dependency_roots,
+    )
 
     if not source_directories:
         msg = "Unable to locate runtime DLL source directories from the Conan dependency graph."
         raise FileNotFoundError(msg)
 
     return source_directories
+
+
+def _append_windows_runtime_tool_directories(
+    source_directories: list[Path],
+    seen_directories: set[str],
+    dependency_roots: dict[str, Path],
+    *,
+    msys2_env_directory: str,
+) -> None:
+    mingw_root = dependency_roots.get("mingw-builds")
+    if mingw_root is not None:
+        _append_existing_directory(source_directories, seen_directories, mingw_root / "bin")
+
+    _append_msys2_runtime_directories(
+        source_directories,
+        seen_directories,
+        dependency_roots.get("msys2"),
+        msys2_env_directory=msys2_env_directory,
+    )
+
+
+def _append_msys2_runtime_directories(
+    source_directories: list[Path],
+    seen_directories: set[str],
+    msys2_root: Path | None,
+    *,
+    msys2_env_directory: str,
+) -> None:
+    if msys2_root is None:
+        return
+
+    _append_existing_directory(
+        source_directories,
+        seen_directories,
+        msys2_root / "bin" / "msys64" / msys2_env_directory / "bin",
+    )
+    _append_existing_directory(
+        source_directories,
+        seen_directories,
+        msys2_root / "bin" / "msys64" / "usr" / "bin",
+    )
+
+
+def _append_dependency_runtime_bin_directories(
+    source_directories: list[Path],
+    seen_directories: set[str],
+    dependency_roots: dict[str, Path],
+) -> None:
+    for dependency_name, dependency_root in dependency_roots.items():
+        if dependency_name not in {"mingw-builds", "msys2"}:
+            _append_existing_directory(
+                source_directories,
+                seen_directories,
+                dependency_root / "bin",
+            )
 
 
 def _native_executable_directories(bundle_root: Path) -> list[Path]:
@@ -490,7 +1032,7 @@ def _bundle_native_runtime_dlls(
 ) -> list[str]:
     runtime_dlls = _string_list(build_settings.get("runtime_dlls", []))
     if not runtime_dlls:
-        msg = "conandata.yml must declare build.runtime_dlls for the staged Windows bundle."
+        msg = "Windows build metadata must declare runtime_dlls for the staged bundle."
         raise ValueError(msg)
 
     runtime_dll_sources = _runtime_dll_source_directories(
@@ -501,20 +1043,19 @@ def _bundle_native_runtime_dlls(
     copied_runtime_dlls: list[str] = []
     missing_runtime_dlls: list[str] = []
     for runtime_dll in runtime_dlls:
-        runtime_dll_source_path = next(
-            (
-                source_directory / runtime_dll
-                for source_directory in runtime_dll_sources
-                if (source_directory / runtime_dll).is_file()
-            ),
-            None,
+        runtime_dll_source_path = _runtime_dll_source_path(
+            runtime_dll,
+            runtime_dll_sources,
         )
         if runtime_dll_source_path is None:
             missing_runtime_dlls.append(runtime_dll)
             continue
 
-        for executable_directory in executable_directories:
-            shutil.copy2(runtime_dll_source_path, executable_directory / runtime_dll)
+        _copy_runtime_dll_to_executables(
+            runtime_dll_source_path,
+            runtime_dll,
+            executable_directories,
+        )
         copied_runtime_dlls.append(runtime_dll)
 
     if missing_runtime_dlls:
@@ -526,6 +1067,26 @@ def _bundle_native_runtime_dlls(
         raise FileNotFoundError(msg)
 
     return copied_runtime_dlls
+
+
+def _runtime_dll_source_path(runtime_dll: str, runtime_dll_sources: list[Path]) -> Path | None:
+    return next(
+        (
+            source_directory / runtime_dll
+            for source_directory in runtime_dll_sources
+            if (source_directory / runtime_dll).is_file()
+        ),
+        None,
+    )
+
+
+def _copy_runtime_dll_to_executables(
+    runtime_dll_source_path: Path,
+    runtime_dll: str,
+    executable_directories: list[Path],
+) -> None:
+    for executable_directory in executable_directories:
+        shutil.copy2(runtime_dll_source_path, executable_directory / runtime_dll)
 
 
 def _copy_runtime_notice_files(
@@ -551,6 +1112,35 @@ def _copy_runtime_notice_files(
         shutil.copy2(source_path, destination_path)
         copied_notice_files.append(_relative_package_path(destination_path, bundle_root))
 
+    for relative_directory in _deduplicate(
+        _string_list(notice_entry.get("license_directories", []))
+    ):
+        source_directory = dependency_root / Path(relative_directory)
+        if not source_directory.is_dir():
+            msg = (
+                f"Unable to locate the runtime notice directory '{relative_directory}' for "
+                f"entry '{notice_id}' under '{dependency_root}'."
+            )
+            raise FileNotFoundError(msg)
+
+        copied_directory_files = False
+        for source_path in sorted(source_directory.rglob("*")):
+            if not source_path.is_file():
+                continue
+            relative_source_path = source_path.relative_to(dependency_root)
+            destination_path = destination_root / relative_source_path
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, destination_path)
+            copied_notice_files.append(_relative_package_path(destination_path, bundle_root))
+            copied_directory_files = True
+
+        if not copied_directory_files:
+            msg = (
+                f"Runtime notice directory '{relative_directory}' for entry '{notice_id}' "
+                "did not contain any files."
+            )
+            raise RuntimeError(msg)
+
     if not copied_notice_files:
         msg = f"Runtime notice entry '{notice_id}' did not resolve any notice files."
         raise RuntimeError(msg)
@@ -566,7 +1156,7 @@ def _validate_runtime_notice_coverage(
     missing_notice_entries = sorted(bundled_runtime_dll_set - declared_runtime_dlls)
     if missing_notice_entries:
         msg = (
-            "The bundled Windows runtime DLLs are missing notice mappings in conandata.yml: "
+            "The bundled Windows runtime DLLs are missing notice mappings in the Python metadata: "
             + ", ".join(missing_notice_entries)
             + "."
         )
@@ -575,10 +1165,92 @@ def _validate_runtime_notice_coverage(
     unused_notice_entries = sorted(declared_runtime_dlls - bundled_runtime_dll_set)
     if unused_notice_entries:
         msg = (
-            "build.runtime_notice_artifacts declares DLLs that were not bundled into the "
+            "Windows runtime notice metadata declares DLLs that were not bundled into the "
             "staged payload: " + ", ".join(unused_notice_entries) + "."
         )
         raise ValueError(msg)
+
+
+def _runtime_notice_entries(build_settings: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_notice_entries = cast(list[Any], build_settings.get("runtime_notice_artifacts", []))
+    if not raw_notice_entries:
+        msg = "Windows build metadata must declare runtime_notice_artifacts."
+        raise ValueError(msg)
+
+    notice_entries: list[dict[str, Any]] = []
+    for raw_notice_entry in raw_notice_entries:
+        if not isinstance(raw_notice_entry, dict):
+            msg = "Runtime notice entries in the Windows build metadata must be mappings."
+            raise ValueError(msg)
+        notice_entries.append(cast(dict[str, Any], raw_notice_entry))
+
+    return notice_entries
+
+
+def _runtime_notice_id(notice_entry: dict[str, Any]) -> str:
+    notice_id = str(notice_entry.get("id", "")).strip()
+    if notice_id:
+        return notice_id
+
+    msg = "Each Windows runtime notice entry must declare a non-empty id."
+    raise ValueError(msg)
+
+
+def _runtime_notice_dlls(notice_entry: dict[str, Any], *, notice_id: str) -> list[str]:
+    runtime_dlls = _deduplicate(_string_list(notice_entry.get("dlls", [])))
+    if runtime_dlls:
+        return runtime_dlls
+
+    msg = f"Runtime notice entry '{notice_id}' must declare at least one bundled DLL."
+    raise ValueError(msg)
+
+
+def _selected_runtime_notice_source(
+    notice_entry: dict[str, Any],
+    *,
+    notice_id: str,
+    selected_dependency_options: dict[str, str],
+) -> str | None:
+    source_option = str(notice_entry.get("source_option", "")).strip()
+    if not source_option:
+        return None
+
+    selected_source = str(selected_dependency_options.get(source_option, "")).strip()
+    if selected_source in _SUPPORTED_DEPENDENCY_SOURCES:
+        return selected_source
+
+    msg = (
+        f"Runtime notice entry '{notice_id}' declared source_option='{source_option}', "
+        "but no supported dependency source was selected."
+    )
+    raise ValueError(msg)
+
+
+def _resolved_runtime_notice_dependency(
+    notice_entry: dict[str, Any],
+    *,
+    notice_id: str,
+    selected_source: str | None,
+    dependency_roots: dict[str, Path],
+    dependency_refs: dict[str, str],
+) -> tuple[str, Path, str]:
+    dependency_name = _source_specific_string(
+        notice_entry,
+        "dependency",
+        selected_source=selected_source,
+        notice_id=notice_id,
+    )
+    if not dependency_name:
+        msg = f"Runtime notice entry '{notice_id}' must declare a dependency."
+        raise ValueError(msg)
+
+    dependency_root = dependency_roots.get(dependency_name)
+    if dependency_root is None:
+        msg = f"Unable to locate dependency '{dependency_name}' for '{notice_id}'."
+        raise FileNotFoundError(msg)
+
+    dependency_ref = dependency_refs.get(dependency_name, dependency_name)
+    return dependency_name, dependency_root, dependency_ref
 
 
 def _harvest_runtime_notice_bundle(
@@ -587,54 +1259,63 @@ def _harvest_runtime_notice_bundle(
     bundled_runtime_dlls: list[str],
     dependency_roots: dict[str, Path],
     dependency_refs: dict[str, str],
+    *,
+    dependency_sources: NativeDependencySourceOptions,
 ) -> list[dict[str, Any]]:
-    raw_notice_entries = cast(list[Any], build_settings.get("runtime_notice_artifacts", []))
-    if not raw_notice_entries:
-        msg = "conandata.yml must declare build.runtime_notice_artifacts."
-        raise ValueError(msg)
-
     notice_root = bundle_root / "licenses" / "third-party" / "windows-runtime"
     declared_runtime_dlls: set[str] = set()
     harvested_notice_entries: list[dict[str, Any]] = []
-    for raw_notice_entry in raw_notice_entries:
-        if not isinstance(raw_notice_entry, dict):
-            msg = "Runtime notice entries in conandata.yml must be mappings."
-            raise ValueError(msg)
-
-        notice_entry = cast(dict[str, Any], raw_notice_entry)
-        notice_id = str(notice_entry.get("id", "")).strip()
-        if not notice_id:
-            msg = "Each build.runtime_notice_artifacts entry must declare a non-empty id."
-            raise ValueError(msg)
-
-        runtime_dlls = _deduplicate(_string_list(notice_entry.get("dlls", [])))
-        if not runtime_dlls:
-            msg = f"Runtime notice entry '{notice_id}' must declare at least one bundled DLL."
-            raise ValueError(msg)
-
-        dependency_name = str(notice_entry.get("dependency", "")).strip()
-        if not dependency_name:
-            msg = f"Runtime notice entry '{notice_id}' must declare a dependency."
-            raise ValueError(msg)
-
-        dependency_root = dependency_roots.get(dependency_name)
-        if dependency_root is None:
-            msg = f"Unable to locate dependency '{dependency_name}' for '{notice_id}'."
-            raise FileNotFoundError(msg)
-
+    selected_dependency_options = dependency_sources.as_option_values()
+    for notice_entry in _runtime_notice_entries(build_settings):
+        notice_id = _runtime_notice_id(notice_entry)
+        runtime_dlls = _runtime_notice_dlls(notice_entry, notice_id=notice_id)
+        selected_source = _selected_runtime_notice_source(
+            notice_entry,
+            notice_id=notice_id,
+            selected_dependency_options=selected_dependency_options,
+        )
+        _, dependency_root, dependency_ref = _resolved_runtime_notice_dependency(
+            notice_entry,
+            notice_id=notice_id,
+            selected_source=selected_source,
+            dependency_roots=dependency_roots,
+            dependency_refs=dependency_refs,
+        )
         copied_notice_files = _copy_runtime_notice_files(
             bundle_root,
             notice_root / notice_id,
             dependency_root,
             notice_id=notice_id,
-            notice_entry=notice_entry,
+            notice_entry={
+                **notice_entry,
+                "license_files": _source_specific_string_list(
+                    notice_entry,
+                    "license_files",
+                    selected_source=selected_source,
+                    notice_id=notice_id,
+                ),
+                "license_directories": _source_specific_string_list(
+                    notice_entry,
+                    "license_directories",
+                    selected_source=selected_source,
+                    notice_id=notice_id,
+                ),
+            },
         )
         harvested_notice_entries.append(
             {
                 "id": notice_id,
                 "name": str(notice_entry.get("name", notice_id)).strip(),
-                "package": str(notice_entry.get("package", notice_id)).strip(),
-                "source_dependency": dependency_refs.get(dependency_name, dependency_name),
+                "package": (
+                    _source_specific_string(
+                        notice_entry,
+                        "package",
+                        selected_source=selected_source,
+                        notice_id=notice_id,
+                    )
+                    or notice_id
+                ),
+                "source_dependency": dependency_ref,
                 "license": str(notice_entry.get("license", "")).strip(),
                 "project_url": str(notice_entry.get("project_url", "")).strip(),
                 "dlls": runtime_dlls,
@@ -964,7 +1645,11 @@ def _materialize_staged_squid_bundle(
             context,
             build_profile=options.build_profile,
             configuration=options.configuration,
-            dependency_names=_runtime_dependency_names(build_settings),
+            dependency_names=_runtime_dependency_names(
+                build_settings,
+                dependency_sources=options.dependency_sources,
+            ),
+            dependency_sources=options.dependency_sources,
         )
         bundled_runtime_dlls = _bundle_native_runtime_dlls(
             stage_root,
@@ -978,11 +1663,12 @@ def _materialize_staged_squid_bundle(
             bundled_runtime_dlls,
             dependency_roots,
             dependency_refs,
+            dependency_sources=options.dependency_sources,
         )
 
     if options.with_packaging_support:
         source_root = (
-            context.paths.repository_root / "sources" / f"squid-{release_metadata['version']}"
+            context.paths.conan_recipe_root / "sources" / f"squid-{release_metadata['version']}"
         )
         licenses_root, _, _ = _copy_packaging_support_files(
             context.paths,
@@ -1383,35 +2069,33 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
         options.configuration,
         options.host_profile_path,
         options.lockfile_path,
+        options.dependency_sources,
     )
     if options.additional_configure_args:
         msg = (
             "The standalone Conan recipe no longer accepts ad hoc configure arguments from "
             "the Python CLI. Express Squid feature changes through recipe options or "
-            "conandata.yml build defaults instead."
+                        "recipe defaults instead."
         )
         raise ValueError(msg)
 
-    recipe_option_arguments = _recipe_option_arguments(context.paths)
+    recipe_option_arguments = _recipe_option_arguments(
+        context.paths,
+        dependency_sources=options.dependency_sources,
+    )
     base_environment = _base_conan_environment(context.paths)
 
-    commands = [
-        ProcessInvocation(
-            description="Detect the Conan default profile for the repo-local CONAN_HOME.",
-            command=("conan", "profile", "detect", "--force"),
-            environment=base_environment,
-        )
-    ]
+    commands = [_detect_conan_profile_invocation(base_environment)]
     if not options.bootstrap_only:
         if options.refresh_lockfile or not context.lockfile_path.is_file():
             commands.append(
                 ProcessInvocation(
-                    description="Refresh the Conan lockfile for the root Squid recipe.",
+                    description="Refresh the Conan lockfile for the Squid recipe.",
                     command=(
                         "conan",
                         "lock",
                         "create",
-                        str(context.paths.repository_root),
+                        str(context.paths.conan_recipe_root),
                         "--profile:host",
                         str(context.host_profile_path),
                         "--profile:build",
@@ -1431,19 +2115,19 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
 
         commands.append(
             ProcessInvocation(
-                description="Resolve the root Conan recipe source tree.",
-                command=("conan", "source", str(context.paths.repository_root)),
+                description="Resolve the Squid recipe source tree.",
+                command=("conan", "source", str(context.paths.conan_recipe_root)),
                 environment=base_environment,
             )
         )
 
         commands.append(
             ProcessInvocation(
-                description="Build the pure native Squid package with the root Conan recipe.",
+                description="Build the pure native Squid package with the Squid recipe.",
                 command=(
                     "conan",
                     "build",
-                    str(context.paths.repository_root),
+                    str(context.paths.conan_recipe_root),
                     "-of",
                     str(context.layout.conan_output_root),
                     "-pr:h",
@@ -1501,6 +2185,79 @@ def build_tray_plan(options: TrayBuildOptions) -> AutomationPlan:
     )
 
 
+def _default_recipe_validation_profile_path(paths: RepositoryPaths) -> Path:
+    profile_name = "msys2-mingw-x64" if os.name == "nt" else "linux-gcc-x64"
+    return paths.conan_root / "profiles" / profile_name
+
+
+def _resolved_recipe_validation_profile_path(
+    paths: RepositoryPaths,
+    host_profile_path: Path | None,
+) -> Path:
+    return _resolved_or_default(
+        host_profile_path,
+        _default_recipe_validation_profile_path(paths),
+        base=paths.repository_root,
+    )
+
+
+def build_conan_recipe_validation_plan(
+    options: ConanRecipeValidationOptions,
+) -> AutomationPlan:
+    paths = RepositoryPaths.discover(options.repository_root)
+    resolved_host_profile_path = _resolved_recipe_validation_profile_path(
+        paths,
+        options.host_profile_path,
+    )
+    build_settings = _load_build_settings(paths)
+    host_option_arguments = _recipe_host_option_arguments(
+        build_settings,
+        options.dependency_sources,
+        openssl_linkage=options.openssl_linkage,
+    )
+    recipe_option_arguments = (
+        _recipe_option_arguments(
+            paths,
+            dependency_sources=options.dependency_sources,
+            openssl_linkage=options.openssl_linkage,
+        )
+        if os.name == "nt"
+        else host_option_arguments
+    )
+    base_environment = _base_conan_environment(paths)
+
+    return AutomationPlan(
+        name="conan-recipe-validate",
+        summary=(
+            "Detect the Conan profile and validate the standalone Squid recipe "
+            "with conan create."
+        ),
+        repository_root=paths.repository_root,
+        commands=(
+            _detect_conan_profile_invocation(base_environment),
+            ProcessInvocation(
+                description="Validate the Squid recipe with conan create.",
+                command=(
+                    "conan",
+                    "create",
+                    str(paths.conan_recipe_root),
+                    "--profile:host",
+                    str(resolved_host_profile_path),
+                    "--profile:build",
+                    options.build_profile,
+                    "-s:h",
+                    f"build_type={options.configuration.value}",
+                    "-s:b",
+                    f"build_type={options.configuration.value}",
+                    _BUILD_MISSING_ARGUMENT,
+                    *recipe_option_arguments,
+                ),
+                environment=base_environment,
+            ),
+        ),
+    )
+
+
 def build_conan_lockfile_update_plan(options: ConanLockfileUpdateOptions) -> AutomationPlan:
     context = _resolve_conan_context(
         options.repository_root,
@@ -1508,27 +2265,27 @@ def build_conan_lockfile_update_plan(options: ConanLockfileUpdateOptions) -> Aut
         options.configuration,
         options.host_profile_path,
         options.lockfile_path,
+        options.dependency_sources,
     )
-    recipe_option_arguments = _recipe_option_arguments(context.paths)
+    recipe_option_arguments = _recipe_option_arguments(
+        context.paths,
+        dependency_sources=options.dependency_sources,
+    )
     base_environment = _base_conan_environment(context.paths)
 
     return AutomationPlan(
         name="conan-lockfile-update",
-        summary="Detect the Conan profile and refresh the committed lockfile.",
+        summary="Detect the Conan profile and refresh the selected lockfile.",
         repository_root=context.paths.repository_root,
         commands=(
+            _detect_conan_profile_invocation(base_environment),
             ProcessInvocation(
-                description="Detect the Conan default profile for the repo-local CONAN_HOME.",
-                command=("conan", "profile", "detect", "--force"),
-                environment=base_environment,
-            ),
-            ProcessInvocation(
-                description="Refresh the Conan lockfile for the root Squid recipe.",
+                description="Refresh the Conan lockfile for the Squid recipe.",
                 command=(
                     "conan",
                     "lock",
                     "create",
-                    str(context.paths.repository_root),
+                    str(context.paths.conan_recipe_root),
                     "--profile:host",
                     str(context.host_profile_path),
                     "--profile:build",
@@ -1549,79 +2306,28 @@ def build_conan_lockfile_update_plan(options: ConanLockfileUpdateOptions) -> Aut
 
 
 def build_bundle_plan(options: BundlePackageOptions) -> AutomationPlan:
-    paths = RepositoryPaths.discover(options.repository_root)
-    build_root = _resolved_or_default(
-        options.build_root,
-        paths.build_root,
-        base=paths.repository_root,
-    )
-    if options.squid_stage_root is not None and options.build_root is None:
-        explicit_stage_root = resolve_path(options.squid_stage_root, base=paths.repository_root)
-        if explicit_stage_root is not None:
-            inferred_build_root = _infer_build_root_from_stage_root(
-                explicit_stage_root,
-                options.configuration,
-            )
-            if inferred_build_root is not None:
-                build_root = inferred_build_root
-
-    artifact_root = _resolved_or_default(
-        options.artifact_root,
-        paths.artifact_root,
-        base=paths.repository_root,
-    )
-    squid_stage_root = _resolved_or_default(
-        options.squid_stage_root,
-        build_root / "install" / options.configuration.value.lower(),
-        base=paths.repository_root,
-    )
-    installer_project_path = _resolved_or_default(
-        options.installer_project_path,
-        paths.installer_project_path,
-        base=paths.repository_root,
-    )
-    bundle_state = BundlePackageState.inspect(
-        paths.repository_root,
-        build_root,
-        options.configuration,
-        squid_stage_root=squid_stage_root,
-        artifact_root=artifact_root,
-        installer_project_path=installer_project_path,
-    )
-    prerequisite_reasons = _bundle_prerequisite_reasons(options, bundle_state=bundle_state)
-    buildable_stage_root = build_root / "install" / options.configuration.value.lower()
-    if prerequisite_reasons and squid_stage_root != buildable_stage_root:
-        msg = (
-            "bundle-package can only materialize missing prerequisites when "
-            "--squid-stage-root matches '<build-root>\\install\\<configuration>'. "
-            f"Expected '{buildable_stage_root}', but received '{squid_stage_root}'."
-        )
-        raise ValueError(msg)
-
-    if options.build_installer and not installer_project_path.is_file():
-        msg = f"Installer project '{installer_project_path}' does not exist."
-        raise FileNotFoundError(msg)
-
+    context = _resolve_bundle_context(options)
     require_tray = _bundle_requires_tray(options)
     commands: list[ProcessInvocation] = []
-    if prerequisite_reasons:
+    if context.prerequisite_reasons:
         squid_build_plan = build_squid_plan(
             SquidBuildOptions(
-                repository_root=paths.repository_root,
+                repository_root=context.paths.repository_root,
                 configuration=options.configuration,
-                build_root=build_root,
+                build_root=context.build_root,
                 with_tray=require_tray,
                 with_runtime_dlls=True,
                 with_packaging_support=True,
+                dependency_sources=options.dependency_sources,
             )
         )
         commands.extend(squid_build_plan.commands)
 
-    install_payload_root = artifact_root / "install-root"
+    install_payload_root = context.artifact_root / "install-root"
     if options.sign_payload_files:
         commands.append(
             _signing_invocation(
-                paths,
+                context.paths,
                 target_path=install_payload_root,
                 recurse=True,
                 description="Sign the staged payload files in the install root.",
@@ -1630,7 +2336,7 @@ def build_bundle_plan(options: BundlePackageOptions) -> AutomationPlan:
 
     if options.build_installer:
         product_version = options.product_version or _derive_installer_version(
-            paths.squid_release_metadata_path
+            context.paths.squid_release_metadata_path
         )
         commands.append(
             ProcessInvocation(
@@ -1638,7 +2344,7 @@ def build_bundle_plan(options: BundlePackageOptions) -> AutomationPlan:
                 command=(
                     "dotnet",
                     "build",
-                    str(installer_project_path),
+                    str(context.installer_project_path),
                     "-c",
                     options.configuration.value,
                     "-t:Rebuild",
@@ -1652,8 +2358,8 @@ def build_bundle_plan(options: BundlePackageOptions) -> AutomationPlan:
         if options.sign_msi:
             commands.append(
                 _signing_invocation(
-                    paths,
-                    target_path=artifact_root / "squid4win.msi",
+                    context.paths,
+                    target_path=context.artifact_root / "squid4win.msi",
                     recurse=False,
                     description="Sign the built MSI artifact.",
                 )
@@ -1661,8 +2367,8 @@ def build_bundle_plan(options: BundlePackageOptions) -> AutomationPlan:
 
     return AutomationPlan(
         name="bundle-package",
-        summary=_bundle_summary(options, prerequisite_reasons=prerequisite_reasons),
-        repository_root=paths.repository_root,
+        summary=_bundle_summary(options, prerequisite_reasons=context.prerequisite_reasons),
+        repository_root=context.paths.repository_root,
         commands=tuple(commands),
     )
 
@@ -1731,6 +2437,7 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
         options.configuration,
         options.host_profile_path,
         options.lockfile_path,
+        options.dependency_sources,
     )
     metadata_path = _resolved_or_default(
         options.metadata_path,
@@ -1759,9 +2466,7 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
             "Dry-run only. Re-run with --execute to run Conan and the Python-owned staging steps."
         )
 
-    if shutil.which("conan") is None:
-        msg = "The conan CLI is not available on PATH. Run uv sync first."
-        raise FileNotFoundError(msg)
+    _require_conan_cli()
 
     context.paths.conan_home_path.mkdir(parents=True, exist_ok=True)
     context.layout.conan_output_root.mkdir(parents=True, exist_ok=True)
@@ -1782,7 +2487,9 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
     with _build_lock(context.layout.build_lock_path, context.layout.conan_output_root):
         if options.clean and not options.bootstrap_only:
             source_root = (
-                context.paths.repository_root / "sources" / (f"squid-{release_metadata['version']}")
+                context.paths.conan_recipe_root
+                / "sources"
+                / (f"squid-{release_metadata['version']}")
             )
             tray_layout = TrayBuildLayout.create(
                 context.paths.repository_root,
@@ -2790,6 +3497,7 @@ def run_service_runner_validation(
         require_notices=options.require_notices,
         build_installer=True,
         service_name=service_name,
+        dependency_sources=options.dependency_sources,
     )
 
     caught_error: Exception | None = None
@@ -2998,6 +3706,34 @@ def run_service_runner_validation(
     return 0
 
 
+def run_conan_recipe_validation(
+    options: ConanRecipeValidationOptions,
+    runner: PlanRunner,
+    *,
+    execute: bool,
+) -> int:
+    paths = RepositoryPaths.discover(options.repository_root)
+    resolved_host_profile_path = _resolved_recipe_validation_profile_path(
+        paths,
+        options.host_profile_path,
+    )
+    plan = build_conan_recipe_validation_plan(options)
+    if not execute:
+        runner.describe(plan)
+        return _log_dry_run_footer(
+            "Dry-run only. Re-run with --execute to validate the Squid recipe with conan create."
+        )
+
+    _require_conan_cli()
+    if not resolved_host_profile_path.is_file():
+        msg = f"The Conan host profile '{resolved_host_profile_path}' does not exist."
+        raise FileNotFoundError(msg)
+
+    paths.conan_home_path.mkdir(parents=True, exist_ok=True)
+    runner.run(plan)
+    return 0
+
+
 def run_conan_lockfile_update(
     options: ConanLockfileUpdateOptions,
     runner: PlanRunner,
@@ -3010,17 +3746,16 @@ def run_conan_lockfile_update(
         options.configuration,
         options.host_profile_path,
         options.lockfile_path,
+        options.dependency_sources,
     )
     plan = build_conan_lockfile_update_plan(options)
     if not execute:
         runner.describe(plan)
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to refresh the committed Conan lockfile."
+            "Dry-run only. Re-run with --execute to refresh the selected Conan lockfile."
         )
 
-    if shutil.which("conan") is None:
-        msg = "The conan CLI is not available on PATH. Run uv sync first."
-        raise FileNotFoundError(msg)
+    _require_conan_cli()
 
     context.paths.conan_home_path.mkdir(parents=True, exist_ok=True)
     context.lockfile_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3035,80 +3770,28 @@ def run_bundle_package(
     execute: bool,
 ) -> int:
     logger = get_logger("squid4win")
-    paths = RepositoryPaths.discover(options.repository_root)
-    build_root = _resolved_or_default(
-        options.build_root,
-        paths.build_root,
-        base=paths.repository_root,
-    )
-    if options.squid_stage_root is not None and options.build_root is None:
-        explicit_stage_root = resolve_path(options.squid_stage_root, base=paths.repository_root)
-        if explicit_stage_root is not None:
-            inferred_build_root = _infer_build_root_from_stage_root(
-                explicit_stage_root,
-                options.configuration,
-            )
-            if inferred_build_root is not None:
-                build_root = inferred_build_root
-
-    artifact_root = _resolved_or_default(
-        options.artifact_root,
-        paths.artifact_root,
-        base=paths.repository_root,
-    )
-    squid_stage_root = _resolved_or_default(
-        options.squid_stage_root,
-        build_root / "install" / options.configuration.value.lower(),
-        base=paths.repository_root,
-    )
-    installer_project_path = _resolved_or_default(
-        options.installer_project_path,
-        paths.installer_project_path,
-        base=paths.repository_root,
-    )
-    bundle_state = BundlePackageState.inspect(
-        paths.repository_root,
-        build_root,
-        options.configuration,
-        squid_stage_root=squid_stage_root,
-        artifact_root=artifact_root,
-        installer_project_path=installer_project_path,
-    )
-    prerequisite_reasons = _bundle_prerequisite_reasons(options, bundle_state=bundle_state)
-    buildable_stage_root = build_root / "install" / options.configuration.value.lower()
-    if prerequisite_reasons and squid_stage_root != buildable_stage_root:
-        msg = (
-            "bundle-package can only materialize missing prerequisites when "
-            "--squid-stage-root matches '<build-root>\\install\\<configuration>'. "
-            f"Expected '{buildable_stage_root}', but received '{squid_stage_root}'."
-        )
-        raise ValueError(msg)
-
-    if options.build_installer and not installer_project_path.is_file():
-        msg = f"Installer project '{installer_project_path}' does not exist."
-        raise FileNotFoundError(msg)
-
+    context = _resolve_bundle_context(options)
     plan = build_bundle_plan(options)
     if not execute:
-        if prerequisite_reasons:
+        if context.prerequisite_reasons:
             logger.info(
                 "The bundle prerequisites are incomplete (%s). The Python automation will "
                 "materialize them first.",
-                "; ".join(prerequisite_reasons),
+                "; ".join(context.prerequisite_reasons),
             )
             if _bundle_requires_tray(options):
                 tray_plan = build_tray_plan(
                     TrayBuildOptions(
-                        repository_root=paths.repository_root,
+                        repository_root=context.paths.repository_root,
                         configuration=options.configuration,
-                        build_root=build_root,
+                        build_root=context.build_root,
                     )
                 )
                 runner.describe(tray_plan)
         logger.info(
             "The Python automation will mirror '%s' into '%s'.",
-            squid_stage_root,
-            bundle_state.installer_payload_root,
+            context.squid_stage_root,
+            context.bundle_state.installer_payload_root,
         )
         runner.describe(plan)
         return _log_dry_run_footer(
@@ -3116,33 +3799,42 @@ def run_bundle_package(
             "installer artifacts."
         )
 
-    if prerequisite_reasons:
+    if context.prerequisite_reasons:
         run_squid_build(
             SquidBuildOptions(
-                repository_root=paths.repository_root,
+                repository_root=context.paths.repository_root,
                 configuration=options.configuration,
-                build_root=build_root,
+                build_root=context.build_root,
                 with_tray=_bundle_requires_tray(options),
                 with_runtime_dlls=True,
                 with_packaging_support=True,
+                dependency_sources=options.dependency_sources,
             ),
             runner,
             execute=True,
         )
-        bundle_state = BundlePackageState.inspect(
-            paths.repository_root,
-            build_root,
-            options.configuration,
-            squid_stage_root=squid_stage_root,
-            artifact_root=artifact_root,
-            installer_project_path=installer_project_path,
+        context = BundleContext(
+            paths=context.paths,
+            build_root=context.build_root,
+            artifact_root=context.artifact_root,
+            squid_stage_root=context.squid_stage_root,
+            installer_project_path=context.installer_project_path,
+            bundle_state=BundlePackageState.inspect(
+                context.paths.repository_root,
+                context.build_root,
+                options.configuration,
+                squid_stage_root=context.squid_stage_root,
+                artifact_root=context.artifact_root,
+                installer_project_path=context.installer_project_path,
+            ),
+            prerequisite_reasons=(),
         )
 
-    install_payload_root = bundle_state.installer_payload_root
-    artifact_root.mkdir(parents=True, exist_ok=True)
+    install_payload_root = context.bundle_state.installer_payload_root
+    context.artifact_root.mkdir(parents=True, exist_ok=True)
     _remove_tree(install_payload_root)
     install_payload_root.mkdir(parents=True, exist_ok=True)
-    _copy_directory_contents(bundle_state.squid_stage_root, install_payload_root)
+    _copy_directory_contents(context.bundle_state.squid_stage_root, install_payload_root)
 
     tray_executable_path = install_payload_root / _TRAY_EXECUTABLE_NAME
     if _bundle_requires_tray(options) and not tray_executable_path.is_file():
@@ -3169,10 +3861,10 @@ def run_bundle_package(
     if options.sign_payload_files:
         _run_invocation(
             runner,
-            paths.repository_root,
+            context.paths.repository_root,
             name="sign-payload",
             invocation=_signing_invocation(
-                paths,
+                context.paths,
                 target_path=install_payload_root,
                 recurse=True,
                 description="Sign the staged payload files in the install root.",
@@ -3180,13 +3872,16 @@ def run_bundle_package(
         )
 
     if options.create_portable_zip:
-        _compress_directory_contents(install_payload_root, bundle_state.portable_zip_path)
+        _compress_directory_contents(
+            install_payload_root,
+            context.bundle_state.portable_zip_path,
+        )
 
     if options.build_installer:
         product_version = options.product_version or _derive_installer_version(
-            paths.squid_release_metadata_path
+            context.paths.squid_release_metadata_path
         )
-        project_directory = installer_project_path.parent
+        project_directory = context.installer_project_path.parent
         configuration_output_root = project_directory / "bin" / options.configuration.value
         configuration_intermediate_root = project_directory / "obj" / options.configuration.value
         for path_to_clear in (configuration_output_root, configuration_intermediate_root):
@@ -3194,14 +3889,14 @@ def run_bundle_package(
 
         _run_invocation(
             runner,
-            paths.repository_root,
+            context.paths.repository_root,
             name="build-installer",
             invocation=ProcessInvocation(
                 description="Build the WiX installer project from the staged payload.",
                 command=(
                     "dotnet",
                     "build",
-                    str(installer_project_path),
+                    str(context.installer_project_path),
                     "-c",
                     options.configuration.value,
                     "-t:Rebuild",
@@ -3228,15 +3923,15 @@ def run_bundle_package(
             msg = f"Unable to locate the built MSI under '{project_directory / 'bin'}'."
             raise FileNotFoundError(msg)
 
-        shutil.copy2(built_msi, bundle_state.msi_path)
+        shutil.copy2(built_msi, context.bundle_state.msi_path)
         if options.sign_msi:
             _run_invocation(
                 runner,
-                paths.repository_root,
+                context.paths.repository_root,
                 name="sign-msi",
                 invocation=_signing_invocation(
-                    paths,
-                    target_path=bundle_state.msi_path,
+                    context.paths,
+                    target_path=context.bundle_state.msi_path,
                     recurse=False,
                     description="Sign the built MSI artifact.",
                 ),

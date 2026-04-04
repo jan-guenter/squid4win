@@ -1,0 +1,17 @@
+# Conan host profile for Linux Squid recipe validation with Clang.
+
+[settings]
+os=Linux
+arch=x86_64
+compiler=clang
+compiler.version=18
+compiler.cppstd=gnu17
+compiler.libcxx=libstdc++11
+build_type=Release
+
+[conf]
+tools.build:jobs=4
+
+[buildenv]
+CC=clang-18
+CXX=clang++-18

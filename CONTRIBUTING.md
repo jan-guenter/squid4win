@@ -23,10 +23,10 @@ and the distinction between validated behavior and planned target-state work.
 
 Keep your change aligned with these current project rules:
 
-- the repo root `conanfile.py` is the single primary Conan recipe for the
-  native Squid build only; Python 3.14 + `uv` owns stage assembly, runtime DLL
-  adjacency, notice harvesting, smoke testing, bundle packaging, and
-  service-runner validation orchestration
+- the CCI-style recipe at `conan\recipes\squid\all\conanfile.py` is the single
+  primary Conan recipe for the native Squid build only; Python 3.14 + `uv`
+  owns stage assembly, runtime DLL adjacency, notice harvesting, smoke
+  testing, bundle packaging, and service-runner validation orchestration
 - repo-level automation is moving to Python 3.14 + `uv`
 - the tray app is moving toward a direct `.NET 10` build from
   `src\tray\Squid4Win.Tray`
@@ -75,7 +75,7 @@ improvements when they stay within the current repository contracts.
 - Do not split the native Windows build back into multiple primary Conan
   recipes.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
-  `conandata.yml` aligned when the Squid pin changes. Prefer
+  `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
   `uv run squid4win-automation upstream-version --execute` for that update flow;
   keep `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when
   the Python automation environment is unavailable.

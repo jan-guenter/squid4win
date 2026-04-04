@@ -6,7 +6,7 @@ from conan import ConanFile
 from conan.errors import ConanException
 
 
-class SquidNativeTestPackage(ConanFile):
+class SquidTestPackage(ConanFile):
     settings = "os", "arch", "compiler", "build_type"
     test_type = "explicit"
 
@@ -29,7 +29,9 @@ class SquidNativeTestPackage(ConanFile):
     def _require_squid_executable(package_root: Path) -> Path:
         squid_candidates = (
             package_root / "sbin" / "squid.exe",
+            package_root / "sbin" / "squid",
             package_root / "bin" / "squid.exe",
+            package_root / "bin" / "squid",
         )
         squid_executable = next(
             (candidate for candidate in squid_candidates if candidate.is_file()),
@@ -37,7 +39,7 @@ class SquidNativeTestPackage(ConanFile):
         )
         if squid_executable is None:
             raise ConanException(
-                f"Expected squid.exe under {package_root}, but none was found."
+                f"Expected a squid executable under {package_root}, but none was found."
             )
 
         return squid_executable

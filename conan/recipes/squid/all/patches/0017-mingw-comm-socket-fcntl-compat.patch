@@ -69,17 +69,17 @@ diff --git a/pristine/squid-7.5/compat/os/mingw.h b/patched/squid-7.5/compat/os/
 diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
 --- a/pristine/squid-7.5/src/comm.cc
 +++ b/patched/squid-7.5/src/comm.cc
-@@ -63,6 +63,62 @@
+@@ -63,6 +63,65 @@
  static void comm_init_opened(const Comm::ConnectionPointer &conn, const char *note, struct addrinfo *AI);
  static int comm_apply_flags(int new_socket, Ip::Address &addr, int flags, struct addrinfo *AI);
  
 +static int
-+commSockRecvFrom(int fd, void *buf, size_t len, int flags, struct sockaddr *from, size_t *fromLen) /* squid4win-mingw-comm */
++commSockRecvFrom(int fd, void *buf, size_t len, int flags, struct sockaddr *from, socklen_t *fromLen) /* squid4win-mingw-comm */
 +{
 +#if _SQUID_MINGW_
 +    int winsockFromLen = static_cast<int>(*fromLen);
 +    const int result = recvfrom(fd, static_cast<char *>(buf), static_cast<int>(len), flags, from, &winsockFromLen);
-+    *fromLen = static_cast<size_t>(winsockFromLen);
++    *fromLen = static_cast<socklen_t>(winsockFromLen);
 +    return result;
 +#else
 +    return recvfrom(fd, buf, len, flags, from, fromLen);
@@ -97,12 +97,12 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
 +}
 +
 +static int
-+commSockGetSockName(int fd, struct sockaddr *name, size_t *nameLen) /* squid4win-mingw-comm */
++commSockGetSockName(int fd, struct sockaddr *name, socklen_t *nameLen) /* squid4win-mingw-comm */
 +{
 +#if _SQUID_MINGW_
 +    int winsockNameLen = static_cast<int>(*nameLen);
 +    const int result = getsockname(fd, name, &winsockNameLen);
-+    *nameLen = static_cast<size_t>(winsockNameLen);
++    *nameLen = static_cast<socklen_t>(winsockNameLen);
 +    return result;
 +#else
 +    return getsockname(fd, name, nameLen);
@@ -110,17 +110,20 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
 +}
 +
 +static int
-+commSockGetSockOptInt(int fd, int level, int optname, int *value, int *valueLen) /* squid4win-mingw-comm */
++commSockGetSockOptInt(int fd, int level, int optname, int *value, socklen_t *valueLen) /* squid4win-mingw-comm */
 +{
 +#if _SQUID_MINGW_
-+    return getsockopt(fd, level, optname, reinterpret_cast<char *>(value), valueLen);
++    int winsockValueLen = static_cast<int>(*valueLen);
++    const int result = getsockopt(fd, level, optname, reinterpret_cast<char *>(value), &winsockValueLen);
++    *valueLen = static_cast<socklen_t>(winsockValueLen);
++    return result;
 +#else
 +    return getsockopt(fd, level, optname, value, valueLen);
 +#endif
 +}
 +
 +static int
-+commSockSendTo(int fd, const void *buf, int len, int flags, const struct sockaddr *to, size_t toLen) /* squid4win-mingw-comm */
++commSockSendTo(int fd, const void *buf, int len, int flags, const struct sockaddr *to, socklen_t toLen) /* squid4win-mingw-comm */
 +{
 +#if _SQUID_MINGW_
 +    return sendto(fd, static_cast<const char *>(buf), len, flags, to, static_cast<int>(toLen));
@@ -132,16 +135,22 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
  #if USE_DELAY_POOLS
  CBDATA_CLASS_INIT(CommQuotaQueue);
  
-@@ -129,7 +185,7 @@
+@@ -129,7 +188,13 @@
      debugs(5,8, "comm_udp_recvfrom: FD " << fd << " from " << from);
      struct addrinfo *AI = nullptr;
      Ip::Address::InitAddr(AI);
 -    int x = recvfrom(fd, buf, len, flags, AI->ai_addr, &AI->ai_addrlen);
++#if _SQUID_MINGW_
++    socklen_t fromLen = static_cast<socklen_t>(AI->ai_addrlen);
++    int x = commSockRecvFrom(fd, buf, len, flags, AI->ai_addr, &fromLen);
++    AI->ai_addrlen = static_cast<size_t>(fromLen);
++#else
 +    int x = commSockRecvFrom(fd, buf, len, flags, AI->ai_addr, &AI->ai_addrlen);
++#endif
      from = *AI;
      Ip::Address::FreeAddr(AI);
      return x;
-@@ -145,7 +201,7 @@
+@@ -145,7 +210,7 @@
  ssize_t
  comm_udp_send(int s, const void *buf, size_t len, int flags)
  {
@@ -150,16 +159,23 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
  }
  
  bool
-@@ -183,7 +239,7 @@
+@@ -183,7 +248,14 @@
  
      Ip::Address::InitAddr(addr);
  
 -    if (getsockname(fd, addr->ai_addr, &(addr->ai_addrlen)) ) {
++#if _SQUID_MINGW_
++    socklen_t addrLen = static_cast<socklen_t>(addr->ai_addrlen);
++    const int getSockNameResult = commSockGetSockName(fd, addr->ai_addr, &addrLen);
++    addr->ai_addrlen = static_cast<size_t>(addrLen);
++    if (getSockNameResult) {
++#else
 +    if (commSockGetSockName(fd, addr->ai_addr, &(addr->ai_addrlen)) ) {
++#endif
          int xerrno = errno;
          debugs(50, DBG_IMPORTANT, "ERROR: " << MYNAME << "Failed to retrieve TCP/UDP port number for socket: FD " << fd << ": " << xstrerr(xerrno));
          Ip::Address::FreeAddr(addr);
-@@ -699,13 +755,13 @@
+@@ -699,13 +771,13 @@
  
          if (xerrno == EINVAL) {
              errlen = sizeof(err);
@@ -175,7 +191,7 @@ diff --git a/pristine/squid-7.5/src/comm.cc b/patched/squid-7.5/src/comm.cc
          if (x == 0)
              xerrno = err;
  
-@@ -930,7 +986,7 @@
+@@ -930,7 +1002,7 @@
  
      struct addrinfo *AI = nullptr;
      to_addr.getAddrInfo(AI, fd_table[fd].sock_family);

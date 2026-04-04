@@ -1,0 +1,146 @@
+name: Validate Conan recipe
+
+on:
+  workflow_call:
+    inputs:
+      profile_name:
+        description: Linux Conan host profile under conan/profiles.
+        required: true
+        type: string
+      compiler_label:
+        description: Human-readable compiler label for cache partitioning.
+        required: true
+        type: string
+      build_type:
+        description: Conan build_type to validate.
+        required: false
+        default: Release
+        type: string
+      library_configuration_label:
+        description: Human-readable label for the dependency/source matrix entry.
+        required: true
+        type: string
+      openssl_source:
+        description: Source selection for OpenSSL.
+        required: true
+        type: string
+      libxml2_source:
+        description: Source selection for libxml2.
+        required: true
+        type: string
+      pcre2_source:
+        description: Source selection for PCRE2.
+        required: true
+        type: string
+      zlib_source:
+        description: Source selection for zlib.
+        required: true
+        type: string
+      openssl_linkage:
+        description: Linkage override for the Conan OpenSSL package.
+        required: false
+        default: default
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CONAN_HOME: ${{ github.workspace }}/.conan2
+
+jobs:
+  validate:
+    name: ${{ inputs.compiler_label }} / ${{ inputs.library_configuration_label }} / ${{ inputs.build_type }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          enable-cache: true
+
+      - name: Cache Python virtual environment
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: .venv
+          key: ${{ runner.os }}-${{ runner.arch }}-py314-venv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-py314-venv-
+
+      - name: Sync automation environment
+        run: uv sync --locked
+
+      - name: Cache Conan home
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ env.CONAN_HOME }}
+          key: ${{ runner.os }}-${{ inputs.compiler_label }}-${{ inputs.library_configuration_label }}-conan-${{ hashFiles('conan/recipes/squid/**', 'conan/profiles/**', 'pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ inputs.compiler_label }}-${{ inputs.library_configuration_label }}-conan-
+            ${{ runner.os }}-${{ inputs.compiler_label }}-conan-
+            ${{ runner.os }}-conan-
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          common_packages=(
+            autoconf
+            automake
+            bison
+            flex
+            libpcre2-dev
+            libssl-dev
+            libtool
+            libxml2-dev
+            m4
+            make
+            perl
+            pkg-config
+            zlib1g-dev
+          )
+
+          compiler_label="${{ inputs.compiler_label }}"
+          profile_name="${{ inputs.profile_name }}"
+          toolchain_packages=()
+
+          case "${compiler_label,,}:${profile_name,,}" in
+            *clang*:*|*:*clang*)
+              toolchain_packages=(
+                clang-18
+                llvm-18
+              )
+              ;;
+            *gcc*:*|*g++*:*|*:*gcc*|*:*g++*)
+              toolchain_packages=(
+                gcc-13
+                g++-13
+              )
+              ;;
+            *)
+              echo "Unsupported compiler selection: compiler_label='${compiler_label}', profile_name='${profile_name}'" >&2
+              exit 1
+              ;;
+          esac
+
+          sudo apt-get install --yes "${common_packages[@]}" "${toolchain_packages[@]}"
+
+      - name: Validate Squid recipe with Python automation
+        run: |
+          uv run squid4win-automation conan-recipe-validate \
+            --execute \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --configuration "${{ inputs.build_type }}" \
+            --host-profile-path "conan/profiles/${{ inputs.profile_name }}" \
+            --build-profile default \
+            --openssl-source "${{ inputs.openssl_source }}" \
+            --libxml2-source "${{ inputs.libxml2_source }}" \
+            --pcre2-source "${{ inputs.pcre2_source }}" \
+            --zlib-source "${{ inputs.zlib_source }}" \
+            --openssl-linkage "${{ inputs.openssl_linkage }}"

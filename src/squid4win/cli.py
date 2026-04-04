@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from squid4win.commands import (
     run_bundle_package,
     run_conan_lockfile_update,
+    run_conan_recipe_validation,
     run_service_runner_validation,
     run_smoke_test,
     run_squid_build,
@@ -18,7 +19,11 @@ from squid4win.commands import (
 from squid4win.logging_utils import configure_logging, get_logger
 from squid4win.models import (
     BundlePackageOptions,
+    ConanDependencyLinkage,
     ConanLockfileUpdateOptions,
+    ConanRecipeValidationOptions,
+    DependencySource,
+    NativeDependencySourceOptions,
     PackageManagerExportOptions,
     PublishChocolateyOptions,
     PublishScoopOptions,
@@ -41,6 +46,7 @@ from squid4win.utils.actions import context as github_actions_context
 from squid4win.version_helper import TargetUpstreamRelease, UpstreamVersionManager
 
 _DEFAULT_REPOSITORY = "jan-guenter/squid4win"
+_DEPENDENCY_SOURCE_CHOICES = tuple(source.value for source in DependencySource)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,7 +64,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     squid_build = subparsers.add_parser(
         "squid-build",
-        help="Plan or run the root Conan Squid build with native Python orchestration.",
+        help=(
+            "Plan or run the CCI-style Squid recipe build from "
+            "conan\\recipes\\squid\\all with native Python orchestration."
+        ),
     )
     _add_common_command_arguments(squid_build)
     squid_build.add_argument("--configuration", choices=("Debug", "Release"), default="Release")
@@ -75,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     squid_build.add_argument("--with-tray", action="store_true")
     squid_build.add_argument("--with-runtime-dlls", action="store_true")
     squid_build.add_argument("--with-packaging-support", action="store_true")
+    _add_dependency_source_arguments(squid_build)
     squid_build.set_defaults(handler=_handle_squid_build)
 
     tray_build = subparsers.add_parser(
@@ -99,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     conan_lockfile_update = subparsers.add_parser(
         "conan-lockfile-update",
-        help="Plan or refresh the committed Conan lockfile with native Python orchestration.",
+        help="Plan or refresh the selected Conan lockfile with native Python orchestration.",
     )
     _add_common_command_arguments(conan_lockfile_update)
     conan_lockfile_update.add_argument(
@@ -114,7 +124,32 @@ def build_parser() -> argparse.ArgumentParser:
     conan_lockfile_update.add_argument("--with-tray", action="store_true")
     conan_lockfile_update.add_argument("--with-runtime-dlls", action="store_true")
     conan_lockfile_update.add_argument("--with-packaging-support", action="store_true")
+    _add_dependency_source_arguments(conan_lockfile_update)
     conan_lockfile_update.set_defaults(handler=_handle_conan_lockfile_update)
+
+    conan_recipe_validate = subparsers.add_parser(
+        "conan-recipe-validate",
+        help="Plan or run conan create validation for the standalone Squid recipe.",
+    )
+    _add_common_command_arguments(conan_recipe_validate)
+    conan_recipe_validate.add_argument(
+        "--configuration",
+        choices=("Debug", "Release"),
+        default="Release",
+    )
+    conan_recipe_validate.add_argument("--host-profile-path", type=Path)
+    conan_recipe_validate.add_argument("--build-profile", default="default")
+    conan_recipe_validate.add_argument(
+        "--openssl-linkage",
+        choices=tuple(linkage.value for linkage in ConanDependencyLinkage),
+        default=ConanDependencyLinkage.DEFAULT.value,
+        help=(
+            "Override the Conan OpenSSL package linkage. Use 'shared' for the mixed "
+            "Conan dependency profile or 'static' for the fully static Conan profile."
+        ),
+    )
+    _add_dependency_source_arguments(conan_recipe_validate)
+    conan_recipe_validate.set_defaults(handler=_handle_conan_recipe_validate)
 
     bundle_package = subparsers.add_parser(
         "bundle-package",
@@ -136,6 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_package.add_argument("--product-version")
     bundle_package.add_argument("--service-name", default="Squid4Win")
     bundle_package.add_argument("--sign-msi", action="store_true")
+    _add_dependency_source_arguments(bundle_package)
     bundle_package.set_defaults(handler=_handle_bundle_package)
 
     smoke_test = subparsers.add_parser(
@@ -178,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-non-runner-execution",
         action="store_true",
     )
+    _add_dependency_source_arguments(service_runner_validation)
     service_runner_validation.set_defaults(handler=_handle_service_runner_validation)
 
     package_manager_export = subparsers.add_parser(
@@ -274,6 +311,28 @@ def _add_common_command_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_dependency_source_arguments(parser: argparse.ArgumentParser) -> None:
+    for dependency_name in ("openssl", "libxml2", "pcre2", "zlib"):
+        parser.add_argument(
+            f"--{dependency_name}-source",
+            choices=_DEPENDENCY_SOURCE_CHOICES,
+            default=DependencySource.SYSTEM.value,
+            help=(
+                f"Select whether {dependency_name} comes from Conan requirements "
+                "or system packages (MSYS2 on Windows)."
+            ),
+        )
+
+
+def _dependency_sources_from_args(args: argparse.Namespace) -> NativeDependencySourceOptions:
+    return NativeDependencySourceOptions(
+        openssl_source=DependencySource(args.openssl_source),
+        libxml2_source=DependencySource(args.libxml2_source),
+        pcre2_source=DependencySource(args.pcre2_source),
+        zlib_source=DependencySource(args.zlib_source),
+    )
+
+
 def _handle_squid_build(args: argparse.Namespace, runner: PlanRunner) -> int:
     options = SquidBuildOptions(
         repository_root=args.repository_root,
@@ -291,6 +350,7 @@ def _handle_squid_build(args: argparse.Namespace, runner: PlanRunner) -> int:
         with_tray=args.with_tray,
         with_runtime_dlls=args.with_runtime_dlls,
         with_packaging_support=args.with_packaging_support,
+        dependency_sources=_dependency_sources_from_args(args),
     )
     return run_squid_build(options, runner, execute=args.execute)
 
@@ -316,8 +376,21 @@ def _handle_conan_lockfile_update(args: argparse.Namespace, runner: PlanRunner) 
         with_tray=args.with_tray,
         with_runtime_dlls=args.with_runtime_dlls,
         with_packaging_support=args.with_packaging_support,
+        dependency_sources=_dependency_sources_from_args(args),
     )
     return run_conan_lockfile_update(options, runner, execute=args.execute)
+
+
+def _handle_conan_recipe_validate(args: argparse.Namespace, runner: PlanRunner) -> int:
+    options = ConanRecipeValidationOptions(
+        repository_root=args.repository_root,
+        configuration=args.configuration,
+        host_profile_path=args.host_profile_path,
+        build_profile=args.build_profile,
+        dependency_sources=_dependency_sources_from_args(args),
+        openssl_linkage=ConanDependencyLinkage(args.openssl_linkage),
+    )
+    return run_conan_recipe_validation(options, runner, execute=args.execute)
 
 
 def _handle_bundle_package(args: argparse.Namespace, runner: PlanRunner) -> int:
@@ -336,6 +409,7 @@ def _handle_bundle_package(args: argparse.Namespace, runner: PlanRunner) -> int:
         product_version=args.product_version,
         service_name=args.service_name,
         sign_msi=args.sign_msi,
+        dependency_sources=_dependency_sources_from_args(args),
     )
     return run_bundle_package(options, runner, execute=args.execute)
 
@@ -367,6 +441,7 @@ def _handle_service_runner_validation(
         install_root=args.install_root,
         service_timeout_seconds=args.service_timeout_seconds,
         allow_non_runner_execution=args.allow_non_runner_execution,
+        dependency_sources=_dependency_sources_from_args(args),
     )
     return run_service_runner_validation(options, runner, execute=args.execute)
 

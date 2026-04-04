@@ -5,12 +5,11 @@ on:
   pull_request:
     paths:
       - '.github/workflows/service-runner-validation.yml'
+      - '.github/workflows/conan-validate-recipe-windows.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'src/squid4win/**'
       - 'conan/**'
-      - 'conandata.yml'
-      - 'conanfile.py'
       - 'packaging/**'
       - 'scripts/**'
   push:
@@ -18,12 +17,11 @@ on:
       - main
     paths:
       - '.github/workflows/service-runner-validation.yml'
+      - '.github/workflows/conan-validate-recipe-windows.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'src/squid4win/**'
       - 'conan/**'
-      - 'conandata.yml'
-      - 'conanfile.py'
       - 'packaging/**'
       - 'scripts/**'
 
@@ -38,8 +36,44 @@ env:
   DOTNET_NOLOGO: true
 
 jobs:
+  validate-windows-recipe:
+    name: Validate Windows recipe (${{ matrix.library_configuration_label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - library_configuration_label: system-libraries
+            openssl_source: system
+            libxml2_source: system
+            pcre2_source: system
+            zlib_source: system
+            openssl_linkage: default
+          - library_configuration_label: conan-mixed
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: shared
+          - library_configuration_label: conan-static
+            openssl_source: conan
+            libxml2_source: conan
+            pcre2_source: conan
+            zlib_source: conan
+            openssl_linkage: static
+    uses: ./.github/workflows/conan-validate-recipe-windows.yml
+    with:
+      profile_name: msys2-mingw-x64
+      build_type: Release
+      library_configuration_label: ${{ matrix.library_configuration_label }}
+      openssl_source: ${{ matrix.openssl_source }}
+      libxml2_source: ${{ matrix.libxml2_source }}
+      pcre2_source: ${{ matrix.pcre2_source }}
+      zlib_source: ${{ matrix.zlib_source }}
+      openssl_linkage: ${{ matrix.openssl_linkage }}
+
   validate-installed-service:
     name: Validate installed service
+    needs: validate-windows-recipe
     runs-on: windows-latest
     timeout-minutes: 180
     env:
@@ -83,7 +117,7 @@ jobs:
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ${{ env.CONAN_HOME }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'pyproject.toml', 'uv.lock') }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conan/**', 'pyproject.toml', 'uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-conan-
 
@@ -105,10 +139,14 @@ jobs:
       - name: Validate installed service lifecycle
         run: uv run squid4win-automation service-runner-validation --execute --configuration Release
 
-      - name: Upload runner validation artifacts
-        if: ${{ failure() }}
+      - name: Upload runner build and validation artifacts
+        if: ${{ always() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: service-runner-validation
-          path: artifacts\service-validation\**
-          if-no-files-found: ignore
+          path: |
+            build\tray\release\**
+            build\install\release\**
+            build\conan\msys2-mingw-x64-release\build\**\config.log
+            artifacts\service-validation\**
+          if-no-files-found: warn

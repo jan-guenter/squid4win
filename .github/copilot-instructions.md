@@ -7,9 +7,9 @@ the architecture reset.
 
 Repo-specific directives:
 
-- Preserve the target state: one self-contained native Squid Conan recipe at
-  the repo root owns Squid source retrieval, patch application, and native
-  MSYS2/MinGW build only.
+- Preserve the target state: one self-contained native Squid Conan recipe under
+  `conan\recipes\squid\all\` owns Squid source retrieval, patch application,
+  and native MSYS2/MinGW build only.
 - Keep Python 3.14 + `uv` responsible for staged bundle assembly, runtime DLL
   adjacency, notice harvesting, smoke testing, bundle packaging, and other
   repo-level orchestration around the pure Conan output.
@@ -35,12 +35,13 @@ Repo-specific directives:
   remain space-free.
 - Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
-  `conandata.yml` aligned when the Squid pin changes. Prefer
+  `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
   `uv run squid4win-automation upstream-version --execute`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
 - Keep staged native notice harvesting synchronized between the Python
-  automation, `conandata.yml`, and any direct tray release assets that ship.
+  automation's Python metadata, the Squid recipe options, and any direct tray
+  release assets that ship.
 - Treat `.agents\design\*.md` as project memory. If an accepted design changes,
   update the ADR and preserve alternatives/history sections.
 - Treat `skills\` as the canonical home for repo-owned skills.

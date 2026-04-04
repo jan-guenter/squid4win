@@ -72,14 +72,14 @@ The first committed installer contract is:
 
 ## Implementation notes
 
-- The root `conanfile.py` is the source of truth for assembling the staged
-  bundle that later becomes `artifacts\install-root`.
-- `conandata.yml` declares the `build.runtime_dlls` list that the root recipe
-  harvests from the Conan-managed MSYS2 and MinGW dependency graph into each
-  staged native executable directory.
-- `conandata.yml` also declares the runtime notice artifacts that the root
-  recipe copies into `licenses\third-party\windows-runtime\` for the staged
-  bundle.
+- The single CCI-style Squid recipe under `conan\recipes\squid\all\conanfile.py`
+  is the source of truth for the native Squid build inputs that feed the staged
+  bundle later mirrored into `artifacts\install-root`.
+- The Python automation package now owns the Windows runtime DLL inventory and
+  notice metadata that it harvests from the Conan-managed MSYS2 and MinGW
+  dependency graph into each staged native executable directory.
+- The Python automation package copies the corresponding notice artifacts into
+  `licenses\third-party\windows-runtime\` for the staged bundle.
 - `uv run squid4win-automation bundle-package --execute` is the supported
   repo-level entry point that mirrors the Conan-built staged bundle into
   `artifacts\install-root`, optionally creates the portable zip, and can build
@@ -96,7 +96,7 @@ The first committed installer contract is:
   of hand-maintaining every Squid file in WiX XML.
 - `uv run squid4win-automation tray-build --execute` now publishes the tray app
   and harvests license and notice files for shipped NuGet package dependencies
-  so the root recipe can merge them into the staged bundle before MSI
+  so the Python automation can merge them into the staged bundle before MSI
   harvesting.
 - `scripts\installer\Manage-SquidService.ps1` runs inside the installed payload
   and performs config materialization, `squid.exe -k parse`,

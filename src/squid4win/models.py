@@ -24,6 +24,39 @@ class BuildConfiguration(StrEnum):
     RELEASE = "Release"
 
 
+class DependencySource(StrEnum):
+    SYSTEM = "system"
+    CONAN = "conan"
+
+
+class ConanDependencyLinkage(StrEnum):
+    DEFAULT = "default"
+    SHARED = "shared"
+    STATIC = "static"
+
+    def as_shared_option(self) -> bool | None:
+        if self is ConanDependencyLinkage.DEFAULT:
+            return None
+        return self is ConanDependencyLinkage.SHARED
+
+
+class NativeDependencySourceOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    openssl_source: DependencySource = DependencySource.SYSTEM
+    libxml2_source: DependencySource = DependencySource.SYSTEM
+    pcre2_source: DependencySource = DependencySource.SYSTEM
+    zlib_source: DependencySource = DependencySource.SYSTEM
+
+    def as_option_values(self) -> dict[str, str]:
+        return {
+            "openssl_source": self.openssl_source.value,
+            "libxml2_source": self.libxml2_source.value,
+            "pcre2_source": self.pcre2_source.value,
+            "zlib_source": self.zlib_source.value,
+        }
+
+
 def _string_from_env(name: str) -> str | None:
     value = os.getenv(name)
     if value is None:
@@ -110,6 +143,51 @@ def _int_from_value(value: object) -> int | None:
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return None
+
+
+def _conan_profile_settings(profile_path: Path) -> dict[str, str]:
+    if not profile_path.is_file():
+        msg = f"Expected the Conan host profile at '{profile_path}'."
+        raise FileNotFoundError(msg)
+
+    settings: dict[str, str] = {}
+    in_settings = False
+    for raw_line in profile_path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_settings = stripped.casefold() == "[settings]"
+            continue
+
+        if not in_settings or "=" not in stripped:
+            continue
+
+        key, value = stripped.split("=", 1)
+        normalized_key = key.strip()
+        normalized_value = value.strip()
+        if normalized_key and normalized_value:
+            settings[normalized_key] = normalized_value
+
+    return settings
+
+
+def _conan_configuration_label(
+    profile_path: Path,
+    configuration: BuildConfiguration,
+) -> str:
+    settings = _conan_profile_settings(profile_path)
+    os_name = settings.get("os")
+    compiler_name = settings.get("compiler")
+    if not os_name or not compiler_name:
+        msg = (
+            f"Conan host profile '{profile_path}' must declare [settings] os and compiler "
+            "so the automation can mirror the recipe layout."
+        )
+        raise ValueError(msg)
+
+    return "-".join((os_name.lower(), compiler_name.lower(), configuration.value.lower()))
 
 
 def _pull_request_number_from_event(payload: dict[str, Any] | None) -> int | None:
@@ -272,6 +350,7 @@ class RepositoryPaths(BaseModel):
     artifact_root: Path
     config_root: Path
     conan_root: Path
+    conan_recipe_root: Path
     conan_home_path: Path
     tray_project_path: Path
     squid_release_metadata_path: Path
@@ -283,6 +362,7 @@ class RepositoryPaths(BaseModel):
     def discover(cls, repository_root: Path | None = None) -> RepositoryPaths:
         root = discover_repository_root(repository_root)
         conan_root = root / "conan"
+        conan_recipe_root = conan_root / "recipes" / "squid" / "all"
         config_root = root / "config"
 
         return cls(
@@ -292,11 +372,12 @@ class RepositoryPaths(BaseModel):
             artifact_root=root / "artifacts",
             config_root=config_root,
             conan_root=conan_root,
+            conan_recipe_root=conan_recipe_root,
             conan_home_path=root / ".conan2",
             tray_project_path=root / "src" / "tray" / "Squid4Win.Tray" / "Squid4Win.Tray.csproj",
             squid_release_metadata_path=conan_root / "squid-release.json",
             squid_version_config_path=config_root / "squid-version.json",
-            conan_data_path=root / "conandata.yml",
+            conan_data_path=conan_recipe_root / "conandata.yml",
             installer_project_path=root / "packaging" / "wix" / "Squid4Win.Installer.wixproj",
         )
 
@@ -308,6 +389,7 @@ class SquidBuildLayout(BaseModel):
     build_root: Path
     configuration: BuildConfiguration
     configuration_label: str
+    conan_configuration_label: str
     profile_name: str
     stage_root: Path
     downloads_root: Path
@@ -327,9 +409,14 @@ class SquidBuildLayout(BaseModel):
         build_root: Path,
         configuration: BuildConfiguration,
         *,
-        profile_name: str = "msys2-mingw-x64",
+        host_profile_path: Path,
     ) -> SquidBuildLayout:
+        profile_name = host_profile_path.name
         configuration_label = configuration.value.lower()
+        conan_configuration_label = _conan_configuration_label(
+            host_profile_path,
+            configuration,
+        )
         profile_stem = f"{profile_name}-{configuration_label}"
 
         return cls(
@@ -337,18 +424,31 @@ class SquidBuildLayout(BaseModel):
             build_root=build_root,
             configuration=configuration,
             configuration_label=configuration_label,
+            conan_configuration_label=conan_configuration_label,
             profile_name=profile_name,
             stage_root=build_root / "install" / configuration_label,
             downloads_root=build_root / "downloads",
             sources_root=build_root / "sources" / profile_stem,
             work_root=build_root / profile_stem,
             conan_output_root=build_root / "conan" / profile_stem,
-            conan_build_root=build_root / "conan" / profile_stem / "build" / configuration_label,
+            conan_build_root=(
+                build_root / "conan" / profile_stem / "build" / conan_configuration_label
+            ),
             conan_install_root=(
-                build_root / "conan" / profile_stem / "build" / configuration_label / "package"
+                build_root
+                / "conan"
+                / profile_stem
+                / "build"
+                / conan_configuration_label
+                / "package"
             ),
             conan_generators_root=(
-                build_root / "conan" / profile_stem / "build" / configuration_label / "conan"
+                build_root
+                / "conan"
+                / profile_stem
+                / "build"
+                / conan_configuration_label
+                / "conan"
             ),
             repo_lockfile_path=repository_root / "conan" / "lockfiles" / f"{profile_stem}.lock",
             build_lock_path=build_root / "locks" / f"{profile_stem}.lock",
@@ -513,6 +613,9 @@ class SquidBuildOptions(BaseModel):
     with_tray: bool = False
     with_runtime_dlls: bool = False
     with_packaging_support: bool = False
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
 
     @model_validator(mode="after")
     def validate_option_dependencies(self) -> SquidBuildOptions:
@@ -536,6 +639,29 @@ class TrayBuildOptions(BaseModel):
     package_root: Path | None = None
 
 
+class ConanRecipeValidationOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repository_root: Path | None = None
+    configuration: BuildConfiguration = BuildConfiguration.RELEASE
+    host_profile_path: Path | None = None
+    build_profile: str = "default"
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
+    openssl_linkage: ConanDependencyLinkage = ConanDependencyLinkage.DEFAULT
+
+    @model_validator(mode="after")
+    def validate_linkage_dependencies(self) -> ConanRecipeValidationOptions:
+        if (
+            self.openssl_linkage is not ConanDependencyLinkage.DEFAULT
+            and self.dependency_sources.openssl_source is not DependencySource.CONAN
+        ):
+            msg = "--openssl-linkage requires --openssl-source conan."
+            raise ValueError(msg)
+        return self
+
+
 class ConanLockfileUpdateOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -548,6 +674,9 @@ class ConanLockfileUpdateOptions(BaseModel):
     with_tray: bool = False
     with_runtime_dlls: bool = False
     with_packaging_support: bool = False
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
 
     @model_validator(mode="after")
     def validate_option_dependencies(self) -> ConanLockfileUpdateOptions:
@@ -577,6 +706,9 @@ class BundlePackageOptions(BaseModel):
     product_version: str | None = None
     service_name: str = "Squid4Win"
     sign_msi: bool = False
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
 
     @field_validator("service_name")
     @classmethod
@@ -636,6 +768,9 @@ class ServiceRunnerValidationOptions(BaseModel):
     allow_non_runner_execution: bool = False
     require_tray: bool = True
     require_notices: bool = True
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
 
     @field_validator("service_name")
     @classmethod

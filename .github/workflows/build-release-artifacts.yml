@@ -106,7 +106,7 @@ jobs:
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
           path: ${{ env.CONAN_HOME }}
-          key: ${{ runner.os }}-conan-${{ hashFiles('conanfile.py', 'conandata.yml', 'conan/**', 'pyproject.toml', 'uv.lock') }}
+          key: ${{ runner.os }}-conan-${{ hashFiles('conan/**', 'pyproject.toml', 'uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-conan-
 
@@ -333,6 +333,17 @@ jobs:
           }
 
           $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload build binaries and symbols
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: ${{ inputs.artifact_name }}-build-output
+          path: |
+            build\tray\release\**
+            build\install\release\**
+            build\conan\msys2-mingw-x64-release\build\**\config.log
+          if-no-files-found: warn
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
