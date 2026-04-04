@@ -21,7 +21,9 @@ The target architecture is:
 
 - keep a single self-contained native Squid Conan recipe under
   `conan\recipes\squid\all\`; it owns Squid source retrieval, patch
-  application, and native MSYS2 + MinGW-w64 build only
+  application, and the native MSYS2 + MinGW-w64 build only; direct `cl.exe`
+  and `clang-cl` support remain out of scope unless a future ADR changes that
+  feasibility boundary
 - allow the Squid recipe to source native library inputs such as `openssl`,
   `libxml2`, `pcre2`, and `zlib` either from Conan requirements or from
   MSYS2/system packages via recipe options, while keeping the validated default
@@ -90,6 +92,9 @@ The target architecture is:
 
 - Update `README.md`, `AGENTS.md`, and `.github\copilot-instructions.md` when
   this target state changes.
+- Keep direct `cl.exe` / `clang-cl` feasibility guidance aligned with ADR
+  `0007`; future LLVM-on-Windows exploration should prefer MSYS2-Clang unless a
+  later accepted ADR records a different conclusion.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
   `uv run squid4win-automation upstream-version --execute`; keep

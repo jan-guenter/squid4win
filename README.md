@@ -9,7 +9,8 @@ The repository is being reset toward the target state defined in ADR `0006`:
 
 - one self-contained native Squid Conan recipe under
   `conan\recipes\squid\all\` owns Squid source retrieval, patch application,
-  and native MSYS2 + MinGW-w64 build
+  and the validated native MSYS2 + MinGW-w64 build; direct `cl.exe` and
+  `clang-cl` support are not current target-state goals
 - Python 3.14 + `uv` owns repo-level stage assembly, runtime DLL adjacency,
   notice harvesting, smoke testing, MSI/portable packaging, and release-helper
   orchestration
@@ -104,6 +105,14 @@ validated `mingw-builds` toolchain during the `conan-mixed` and
 force `openssl/*:no_dgram=True` and add the extra compiler inputs needed for
 the upstream `wcslen`, `_alloca`, and `in_pktinfo.ipi_spec_dst` MinGW/UCRT
 failures.
+
+The repository also investigated direct Microsoft `cl.exe` and `clang-cl`
+support for the Squid recipe. The current conclusion is that Squid's upstream
+Autotools and Windows portability layer remain fundamentally GCC/MinGW-oriented,
+so those compiler families are out of scope for now. If a Clang-based Windows
+follow-up is pursued, the practical next candidate is **MSYS2-Clang**, because
+it preserves the MinGW runtime and POSIX compatibility layer that Squid already
+expects. See ADR `0007`.
 
 When any of those switches select `conan` and no explicit `--lockfile-path` is
 provided, the Python automation uses a build-local lockfile under `build\`

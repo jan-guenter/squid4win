@@ -9,7 +9,9 @@ Repo-specific directives:
 
 - Preserve the target state: one self-contained native Squid Conan recipe under
   `conan\recipes\squid\all\` owns Squid source retrieval, patch application,
-  and native MSYS2/MinGW build only.
+  and the validated native MSYS2/MinGW build. Direct `cl.exe` and `clang-cl`
+  paths are currently out of scope unless an accepted ADR changes that
+  feasibility boundary.
 - Keep Python 3.14 + `uv` responsible for staged bundle assembly, runtime DLL
   adjacency, notice harvesting, smoke testing, bundle packaging, and other
   repo-level orchestration around the pure Conan output.
@@ -42,6 +44,9 @@ Repo-specific directives:
 - Keep staged native notice harvesting synchronized between the Python
   automation's Python metadata, the Squid recipe options, and any direct tray
   release assets that ship.
+- If future LLVM-on-Windows exploration resumes, prefer MSYS2-Clang over
+  `clang-cl` unless a new ADR and validation evidence show that direct
+  MSVC-family support became viable upstream.
 - Keep Conan-sourced Windows runtime DLLs staged from the selected Conan
   package bins into `build\install\...` so `bundle-package` mirrors them into
   `artifacts\install-root`, and keep the runtime notice manifest aligned when
