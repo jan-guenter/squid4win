@@ -25,6 +25,7 @@ from squid4win.models import (
     BundlePackageState,
     ConanDependencyLinkage,
     ConanLockfileUpdateOptions,
+    ConanRecipeArtifactStageOptions,
     ConanRecipeValidationOptions,
     NativeDependencySourceOptions,
     ProcessInvocation,
@@ -52,6 +53,9 @@ _DETECT_CONAN_PROFILE_DESCRIPTION = (
     "Detect the Conan default profile for the repo-local CONAN_HOME."
 )
 _CONAN_CLI_UNAVAILABLE_MESSAGE = "The conan CLI is not available on PATH. Run uv sync first."
+_CONAN_VALIDATION_LOG_FILENAMES = frozenset(
+    {"config.log", "config.status", "config.cache", "CMakeOutput.log", "CMakeError.log"}
+)
 _SUPPORTED_DEPENDENCY_SOURCES = frozenset({"system", "conan"})
 _WINDOWS_MSYS2_ENV_DIRECTORY = "mingw64"
 _WINDOWS_MSYS2_BASE_PACKAGES = [
@@ -2201,6 +2205,72 @@ def _resolved_recipe_validation_profile_path(
     )
 
 
+def _artifact_token(*segments: str) -> str:
+    token = re.sub(
+        r"-{2,}",
+        "-",
+        re.sub(r"[^A-Za-z0-9-]", "-", "-".join(segment for segment in segments if segment)),
+    ).strip("-")
+    return token or "artifact"
+
+
+def _latest_tree_modification_time(path: Path) -> float:
+    latest_mtime = 0.0
+    try:
+        latest_mtime = path.stat().st_mtime
+    except OSError:
+        return latest_mtime
+
+    for candidate in path.rglob("*"):
+        try:
+            candidate_mtime = candidate.stat().st_mtime
+        except OSError:
+            continue
+        if candidate_mtime > latest_mtime:
+            latest_mtime = candidate_mtime
+    return latest_mtime
+
+
+def _latest_squid_validation_cache_root(conan_home: Path) -> Path | None:
+    cache_build_root = conan_home / "p" / "b"
+    if not cache_build_root.is_dir():
+        return None
+
+    candidates = [candidate for candidate in cache_build_root.glob("squid*") if candidate.is_dir()]
+    if not candidates:
+        return None
+
+    return max(candidates, key=_latest_tree_modification_time)
+
+
+def _copy_if_file(source: Path, destination: Path) -> bool:
+    if not source.is_file():
+        return False
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    return True
+
+
+def _stage_validation_log_files(cache_root: Path, staging_root: Path) -> list[str]:
+    build_root = cache_root / "b"
+    if not build_root.is_dir():
+        return []
+
+    copied_logs: list[str] = []
+    logs_root = staging_root / "logs"
+    for source_path in sorted(
+        candidate
+        for candidate in build_root.rglob("*")
+        if candidate.is_file() and candidate.name in _CONAN_VALIDATION_LOG_FILENAMES
+    ):
+        destination_path = logs_root / source_path.relative_to(build_root)
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination_path)
+        copied_logs.append(_relative_summary_path(destination_path, staging_root))
+    return copied_logs
+
+
 def build_conan_recipe_validation_plan(
     options: ConanRecipeValidationOptions,
 ) -> AutomationPlan:
@@ -3731,6 +3801,132 @@ def run_conan_recipe_validation(
 
     paths.conan_home_path.mkdir(parents=True, exist_ok=True)
     runner.run(plan)
+    return 0
+
+
+def run_conan_recipe_artifact_staging(
+    options: ConanRecipeArtifactStageOptions,
+    runner: PlanRunner,
+    *,
+    execute: bool,
+) -> int:
+    del runner
+    logger = get_logger("squid4win")
+    paths = RepositoryPaths.discover(options.repository_root)
+    artifact_base_root = _resolved_or_default(
+        options.artifact_root,
+        paths.artifact_root,
+        base=paths.repository_root,
+    )
+    resolved_host_profile_path = _resolved_recipe_validation_profile_path(
+        paths,
+        options.host_profile_path,
+    )
+    platform_label = "windows" if os.name == "nt" else "linux"
+    compiler_label = options.compiler_label or resolved_host_profile_path.stem
+    staging_root = (
+        artifact_base_root
+        / "conan-recipe-validation"
+        / _artifact_token(
+            platform_label,
+            compiler_label,
+            options.library_configuration_label,
+            options.configuration.value.lower(),
+        )
+    )
+
+    if not execute:
+        logger.info(
+            "The Python automation will stage Conan recipe validation artifacts in '%s'.",
+            staging_root,
+        )
+        return _log_dry_run_footer(
+            "Dry-run only. Re-run with --execute to stage the latest Conan validation outputs."
+        )
+
+    conan_home = Path(os.getenv("CONAN_HOME", os.fspath(paths.conan_home_path)))
+    cache_root = _latest_squid_validation_cache_root(conan_home)
+
+    _remove_tree(staging_root)
+    staging_root.mkdir(parents=True, exist_ok=True)
+
+    staged_entries: list[str] = []
+    copied_logs: list[str] = []
+    if cache_root is not None:
+        package_source_root = cache_root / "p"
+        if package_source_root.is_dir():
+            package_destination_root = staging_root / "package"
+            shutil.copytree(package_source_root, package_destination_root, dirs_exist_ok=True)
+            staged_entries.append(_relative_summary_path(package_destination_root, staging_root))
+
+        metadata_source_root = cache_root / "d" / "metadata"
+        if metadata_source_root.is_dir():
+            metadata_destination_root = staging_root / "cache-metadata"
+            shutil.copytree(metadata_source_root, metadata_destination_root, dirs_exist_ok=True)
+            staged_entries.append(_relative_summary_path(metadata_destination_root, staging_root))
+
+        build_metadata_root = staging_root / "build-metadata"
+        for source_path, destination_path in (
+            (cache_root / "b" / "conaninfo.txt", build_metadata_root / "conaninfo.txt"),
+            (cache_root / "b" / "conanbuild.sh", build_metadata_root / "conanbuild.sh"),
+            (cache_root / "b" / "conanbuild.bat", build_metadata_root / "conanbuild.bat"),
+        ):
+            if _copy_if_file(source_path, destination_path):
+                staged_entries.append(_relative_summary_path(destination_path, staging_root))
+
+        copied_logs = _stage_validation_log_files(cache_root, staging_root)
+        staged_entries.extend(copied_logs)
+    else:
+        logger.warning("No Squid Conan validation cache root was found under %s.", conan_home)
+
+    metadata_path = staging_root / "validation-artifact-metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.now(UTC).isoformat(timespec="seconds").replace(
+                    "+00:00",
+                    "Z",
+                ),
+                "platform": platform_label,
+                "compiler_label": options.compiler_label,
+                "host_profile_path": _relative_summary_path(
+                    resolved_host_profile_path,
+                    paths.repository_root,
+                ),
+                "library_configuration_label": options.library_configuration_label,
+                "configuration": options.configuration.value,
+                "dependency_sources": options.dependency_sources.as_option_values(),
+                "openssl_linkage": options.openssl_linkage.value,
+                "conan_home": _relative_summary_path(conan_home, paths.repository_root),
+                "selected_cache_root": (
+                    None
+                    if cache_root is None
+                    else _relative_summary_path(cache_root, conan_home)
+                ),
+                "staged_entries": sorted(set(staged_entries)),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    append_step_summary(
+        "\n".join(
+            [
+                "## Conan recipe validation artifacts",
+                "",
+                f"- Artifact root: `{staging_root}`",
+                f"- Host profile: `{resolved_host_profile_path}`",
+                f"- Library configuration: `{options.library_configuration_label}`",
+                f"- Selected cache root: `{cache_root if cache_root is not None else 'not found'}`",
+                f"- Staged log files: `{len(copied_logs)}`",
+                f"- Metadata: `{metadata_path}`",
+            ]
+        )
+        + "\n"
+    )
+    logger.info("Staged Conan recipe validation artifacts at %s.", staging_root)
     return 0
 
 

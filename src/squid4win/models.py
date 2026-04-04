@@ -662,6 +662,31 @@ class ConanRecipeValidationOptions(BaseModel):
         return self
 
 
+class ConanRecipeArtifactStageOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repository_root: Path | None = None
+    artifact_root: Path | None = None
+    configuration: BuildConfiguration = BuildConfiguration.RELEASE
+    host_profile_path: Path | None = None
+    compiler_label: str | None = None
+    library_configuration_label: Annotated[str, Field(min_length=1)]
+    dependency_sources: NativeDependencySourceOptions = Field(
+        default_factory=NativeDependencySourceOptions
+    )
+    openssl_linkage: ConanDependencyLinkage = ConanDependencyLinkage.DEFAULT
+
+    @model_validator(mode="after")
+    def validate_linkage_dependencies(self) -> ConanRecipeArtifactStageOptions:
+        if (
+            self.openssl_linkage is not ConanDependencyLinkage.DEFAULT
+            and self.dependency_sources.openssl_source is not DependencySource.CONAN
+        ):
+            msg = "--openssl-linkage requires --openssl-source conan."
+            raise ValueError(msg)
+        return self
+
+
 class ConanLockfileUpdateOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
