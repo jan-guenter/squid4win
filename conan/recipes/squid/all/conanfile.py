@@ -6,8 +6,10 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from conan import ConanFile
 from conan.errors import ConanException, ConanInvalidConfiguration
@@ -36,6 +38,7 @@ WINDOWS_TOOL_REQUIRES = (
 COMMON_CONFIGURE_ARGS = (
     "--without-netfilter-conntrack",
 )
+CONFIG_LOG_FILENAME = "config.log"
 WINDOWS_CONFIGURE_CACHE: dict[str, str] = {
     "ac_cv_sizeof_void_p": "8",
     "ac_cv_c_int8_t": "yes",
@@ -87,6 +90,23 @@ PLATFORM_LIST_OPTION_DEFAULTS: dict[str, dict[str, str | None]] = {
         "external_acl_helpers": "SQL_session,delayer,wbinfo_group",
     },
 }
+
+
+@dataclass(frozen=True)
+class AutotoolsBuildContext:
+    source_root: Path
+    build_root: Path
+    install_root: Path
+    config_site_path: Path
+    bootstrap_marker_path: Path
+    generated_header_path: Path
+    confdefs_copy_path: Path
+    config_log_path: Path
+    generated_scripts: tuple[Path, ...]
+    configure_argument_text: str
+    source_root_shell: str
+    build_root_shell: str
+    bootstrap_marker_path_shell: str
 
 
 class SquidConan(ConanFile):
@@ -231,60 +251,12 @@ class SquidConan(ConanFile):
         self._build_linux()
 
     def _build_windows(self) -> None:
-        source_root = Path(self.source_folder)
-        build_root = Path(self.build_folder)
-        install_root = build_root / "package"
-        config_site_path = build_root / "config.site"
-        bootstrap_marker_path = build_root / "bootstrap-ran"
-        generated_header_path = build_root / "include" / "autoconf.h"
-        confdefs_copy_path = build_root / "confdefs.generated.h"
-        config_log_path = build_root / "config.log"
+        context = self._prepare_autotools_build_context()
         msys2_env_directory = WINDOWS_MSYS2_ENV_DIRECTORY
         msys2_env_name = msys2_env_directory.upper()
         msys2_prefix_path = f"/{msys2_env_directory}"
         pkg_config_binary_path = f"/{msys2_env_directory}/bin/pkg-config"
-        build_env_script = Path(self.generators_folder) / "conanbuild.sh"
-        autotools_deps_script = Path(self.generators_folder) / "conanautotoolsdeps.sh"
-        autotools_script = Path(self.generators_folder) / "conanautotoolstoolchain.sh"
-
-        shutil.rmtree(install_root, ignore_errors=True)
-        bootstrap_marker_path.unlink(missing_ok=True)
-        build_root.mkdir(parents=True, exist_ok=True)
-
-        configure_cache_lines = self._configure_cache_lines()
-        if configure_cache_lines:
-            save(
-                self,
-                os.fspath(config_site_path),
-                "\n".join(configure_cache_lines) + "\n",
-                encoding="ascii",
-            )
-
-        host_triplet = self._platform_host_triplet()
-        configure_arguments = self._deduplicate(
-            [
-                f"--prefix={self._shell_path(install_root)}",
-                f"--build={host_triplet}",
-                f"--host={host_triplet}",
-                *COMMON_CONFIGURE_ARGS,
-                *self._recipe_configure_args(),
-            ]
-        )
-        configure_argument_text = " ".join(
-            self._bash_quote(argument) for argument in configure_arguments
-        )
-        source_root_shell = self._shell_path(source_root)
-        build_root_shell = self._shell_path(build_root)
-        bootstrap_marker_path_shell = self._shell_path(bootstrap_marker_path)
-
-        mingw_package_root = self._dependency_package_root("mingw-builds")
-        if mingw_package_root is None:
-            raise ConanException(
-                "The mingw-builds tool requirement is not available to the recipe."
-            )
-        msys2_package_root = self._dependency_package_root("msys2")
-        if msys2_package_root is None:
-            raise ConanException("The msys2 tool requirement is not available to the recipe.")
+        mingw_package_root, msys2_package_root = self._required_windows_tool_roots()
 
         mingw_bin_root = mingw_package_root / "bin"
         mingw_bin_root_shell = self._shell_path(mingw_bin_root)
@@ -303,12 +275,9 @@ class SquidConan(ConanFile):
             "GCOV": mingw_bin_root / "gcov.exe",
         }
         conan_dependency_roots = self._conan_dependency_package_roots()
-        conan_dependency_bin_roots_shell = self._deduplicate(
-            [
-                self._shell_path(dependency_root / "bin")
-                for dependency_root in conan_dependency_roots.values()
-                if (dependency_root / "bin").is_dir()
-            ]
+        conan_dependency_bin_roots_shell = self._conan_dependency_bin_paths(
+            conan_dependency_roots,
+            path_converter=self._shell_path,
         )
         pkg_config_lib_dir_entries = self._deduplicate(
             [
@@ -320,17 +289,10 @@ class SquidConan(ConanFile):
                 ),
             ]
         )
-        pkg_config_path_entries = []
-        if conan_dependency_roots:
-            pkg_config_path_entries.append(self._native_windows_path(self.generators_folder))
-        for dependency_root in conan_dependency_roots.values():
-            for pkg_config_root in (
-                dependency_root / "lib" / "pkgconfig",
-                dependency_root / "share" / "pkgconfig",
-            ):
-                if pkg_config_root.is_dir():
-                    pkg_config_path_entries.append(self._native_windows_path(pkg_config_root))
-        pkg_config_path_entries = self._deduplicate(pkg_config_path_entries)
+        pkg_config_path_entries = self._conan_pkg_config_path_entries(
+            conan_dependency_roots,
+            path_converter=self._native_windows_path,
+        )
         path_entries = self._deduplicate(
             [
                 *conan_dependency_bin_roots_shell,
@@ -348,11 +310,7 @@ class SquidConan(ConanFile):
             "export CHERE_INVOKING=1",
             "set -o pipefail",
         ]
-        for generated_script in (build_env_script, autotools_deps_script, autotools_script):
-            if generated_script.is_file():
-                bash_common_lines.append(
-                    f"source {self._bash_quote(self._shell_path(generated_script))}"
-                )
+        self._append_generated_script_sources(bash_common_lines, context.generated_scripts)
 
         bash_common_lines.extend(
             (
@@ -379,70 +337,59 @@ class SquidConan(ConanFile):
                 '${PKG_CONFIG_PATH:+;$PKG_CONFIG_PATH}"'
             )
 
-        if config_site_path.is_file():
-            bash_common_lines.append(
-                f"export CONFIG_SITE={self._bash_quote(self._shell_path(config_site_path))}"
-            )
-
-        configure_lines = list(bash_common_lines)
-        configure_lines.extend(
-            (
-                f"mkdir -p {self._bash_quote(build_root_shell)}",
-                f"rm -f {self._bash_quote(bootstrap_marker_path_shell)}",
-                f"cd {self._bash_quote(source_root_shell)}",
-                (
-                    "if [ -f ./bootstrap.sh ] && "
-                    "{ [ ! -x ./configure ] || [ ! -f ./Makefile.in ] "
-                    "|| [ ! -f ./src/Makefile.in ] || [ ! -f ./libltdl/Makefile.in ] "
-                    "|| [ ! -f ./cfgaux/ltmain.sh ] || [ ! -f ./cfgaux/compile ] "
-                    "|| [ ! -f ./cfgaux/config.guess ] || [ ! -f ./cfgaux/config.sub ] "
-                    "|| [ ! -f ./cfgaux/missing ] || [ ! -f ./cfgaux/install-sh ]; }; "
-                    "then ./bootstrap.sh || exit $?; "
-                    f"touch {self._bash_quote(bootstrap_marker_path_shell)}; fi"
-                ),
-                f"cd {self._bash_quote(build_root_shell)}",
-                'echo "Configuring Squid..."',
-                (
-                    f"{self._bash_quote(source_root_shell + '/configure')} "
-                    f"{configure_argument_text} || exit $?"
-                ),
-                "if [ -f confdefs.h ]; then cp confdefs.h confdefs.generated.h; fi",
-            )
-        )
-        self._run_bash(
-            configure_lines,
+        self._configure_with_autotools(
+            bash_common_lines,
+            context,
             "Squid configure failed.",
-            bash_path=self._bash_path(),
         )
 
-        repair_result = self._repair_autoconf_header(
-            generated_header_path, confdefs_copy_path, config_log_path
-        )
-        if repair_result["repaired_macros"]:
-            self.output.info(
-                "Repaired generated autoconf macros: "
-                + ", ".join(repair_result["repaired_macros"])
-            )
-
-        build_lines = list(bash_common_lines)
-        build_lines.extend(
-            (
-                f"cd {self._bash_quote(build_root_shell)}",
-                'echo "Building Squid..."',
-                f"make -j{self._build_jobs()} || exit $?",
-                f"cd {self._bash_quote(build_root_shell)}",
-                'echo "Installing Squid..."',
-                "make install || exit $?",
-            )
-        )
-        self._run_bash(
-            build_lines,
+        self._build_and_install_with_make(
+            bash_common_lines,
+            context,
             "MSYS2 build failed.",
-            bash_path=self._bash_path(),
+            repeat_cd_before_install=True,
         )
-        self._require_squid_executable(install_root)
+        self._require_squid_executable(context.install_root)
 
     def _build_linux(self) -> None:
+        context = self._prepare_autotools_build_context()
+        conan_dependency_roots = self._conan_dependency_package_roots()
+        conan_dependency_bin_roots_shell = self._conan_dependency_bin_paths(
+            conan_dependency_roots,
+            path_converter=self._shell_path,
+        )
+        pkg_config_path_entries = self._conan_pkg_config_path_entries(
+            conan_dependency_roots,
+            path_converter=self._shell_path,
+        )
+
+        bash_common_lines = [
+            "set -o pipefail",
+        ]
+        self._append_generated_script_sources(bash_common_lines, context.generated_scripts)
+        if conan_dependency_bin_roots_shell:
+            bash_common_lines.append(
+                f'export PATH="{":".join([*conan_dependency_bin_roots_shell, "$PATH"])}"'
+            )
+        if pkg_config_path_entries:
+            bash_common_lines.append(
+                f'export PKG_CONFIG_PATH="{":".join(pkg_config_path_entries)}'
+                '${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"'
+            )
+        self._configure_with_autotools(
+            bash_common_lines,
+            context,
+            "Linux configure failed.",
+        )
+
+        self._build_and_install_with_make(
+            bash_common_lines,
+            context,
+            "Linux build failed.",
+        )
+        self._require_squid_executable(context.install_root)
+
+    def _prepare_autotools_build_context(self) -> AutotoolsBuildContext:
         source_root = Path(self.source_folder)
         build_root = Path(self.build_folder)
         install_root = build_root / "package"
@@ -450,10 +397,12 @@ class SquidConan(ConanFile):
         bootstrap_marker_path = build_root / "bootstrap-ran"
         generated_header_path = build_root / "include" / "autoconf.h"
         confdefs_copy_path = build_root / "confdefs.generated.h"
-        config_log_path = build_root / "config.log"
-        build_env_script = Path(self.generators_folder) / "conanbuild.sh"
-        autotools_deps_script = Path(self.generators_folder) / "conanautotoolsdeps.sh"
-        autotools_script = Path(self.generators_folder) / "conanautotoolstoolchain.sh"
+        config_log_path = build_root / CONFIG_LOG_FILENAME
+        generated_scripts = (
+            Path(self.generators_folder) / "conanbuild.sh",
+            Path(self.generators_folder) / "conanautotoolsdeps.sh",
+            Path(self.generators_folder) / "conanautoolstoolchain.sh",
+        )
 
         shutil.rmtree(install_root, ignore_errors=True)
         bootstrap_marker_path.unlink(missing_ok=True)
@@ -481,58 +430,99 @@ class SquidConan(ConanFile):
         configure_argument_text = " ".join(
             self._bash_quote(argument) for argument in configure_arguments
         )
-        source_root_shell = self._shell_path(source_root)
-        build_root_shell = self._shell_path(build_root)
-        bootstrap_marker_path_shell = self._shell_path(bootstrap_marker_path)
+        return AutotoolsBuildContext(
+            source_root=source_root,
+            build_root=build_root,
+            install_root=install_root,
+            config_site_path=config_site_path,
+            bootstrap_marker_path=bootstrap_marker_path,
+            generated_header_path=generated_header_path,
+            confdefs_copy_path=confdefs_copy_path,
+            config_log_path=config_log_path,
+            generated_scripts=generated_scripts,
+            configure_argument_text=configure_argument_text,
+            source_root_shell=self._shell_path(source_root),
+            build_root_shell=self._shell_path(build_root),
+            bootstrap_marker_path_shell=self._shell_path(bootstrap_marker_path),
+        )
 
-        conan_dependency_roots = self._conan_dependency_package_roots()
-        conan_dependency_bin_roots_shell = self._deduplicate(
+    def _required_windows_tool_roots(self) -> tuple[Path, Path]:
+        mingw_package_root = self._dependency_package_root("mingw-builds")
+        if mingw_package_root is None:
+            raise ConanException(
+                "The mingw-builds tool requirement is not available to the recipe."
+            )
+
+        msys2_package_root = self._dependency_package_root("msys2")
+        if msys2_package_root is None:
+            raise ConanException("The msys2 tool requirement is not available to the recipe.")
+
+        return mingw_package_root, msys2_package_root
+
+    def _conan_dependency_bin_paths(
+        self,
+        dependency_roots: dict[str, Path],
+        *,
+        path_converter: Callable[[Path], str],
+    ) -> list[str]:
+        return self._deduplicate(
             [
-                self._shell_path(dependency_root / "bin")
-                for dependency_root in conan_dependency_roots.values()
+                path_converter(dependency_root / "bin")
+                for dependency_root in dependency_roots.values()
                 if (dependency_root / "bin").is_dir()
             ]
         )
-        pkg_config_path_entries = []
-        if conan_dependency_roots:
-            pkg_config_path_entries.append(self._shell_path(self.generators_folder))
-        for dependency_root in conan_dependency_roots.values():
+
+    def _conan_pkg_config_path_entries(
+        self,
+        dependency_roots: dict[str, Path],
+        *,
+        path_converter: Callable[[Path], str],
+    ) -> list[str]:
+        pkg_config_path_entries: list[str] = []
+        if dependency_roots:
+            pkg_config_path_entries.append(path_converter(Path(self.generators_folder)))
+        for dependency_root in dependency_roots.values():
             for pkg_config_root in (
                 dependency_root / "lib" / "pkgconfig",
                 dependency_root / "share" / "pkgconfig",
             ):
                 if pkg_config_root.is_dir():
-                    pkg_config_path_entries.append(self._shell_path(pkg_config_root))
-        pkg_config_path_entries = self._deduplicate(pkg_config_path_entries)
+                    pkg_config_path_entries.append(path_converter(pkg_config_root))
+        return self._deduplicate(pkg_config_path_entries)
 
-        bash_common_lines = [
-            "set -o pipefail",
-        ]
-        for generated_script in (build_env_script, autotools_deps_script, autotools_script):
+    def _append_generated_script_sources(
+        self,
+        lines: list[str],
+        generated_scripts: Iterable[Path],
+    ) -> None:
+        for generated_script in generated_scripts:
             if generated_script.is_file():
-                bash_common_lines.append(
-                    f"source {self._bash_quote(self._shell_path(generated_script))}"
-                )
-        if conan_dependency_bin_roots_shell:
-            bash_common_lines.append(
-                f'export PATH="{":".join([*conan_dependency_bin_roots_shell, "$PATH"])}"'
-            )
-        if pkg_config_path_entries:
-            bash_common_lines.append(
-                f'export PKG_CONFIG_PATH="{":".join(pkg_config_path_entries)}'
-                '${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"'
-            )
+                lines.append(f"source {self._bash_quote(self._shell_path(generated_script))}")
+
+    def _append_config_site_export(
+        self,
+        lines: list[str],
+        config_site_path: Path,
+    ) -> None:
         if config_site_path.is_file():
-            bash_common_lines.append(
+            lines.append(
                 f"export CONFIG_SITE={self._bash_quote(self._shell_path(config_site_path))}"
             )
 
+    def _configure_with_autotools(
+        self,
+        bash_common_lines: list[str],
+        context: AutotoolsBuildContext,
+        failure_message: str,
+    ) -> None:
         configure_lines = list(bash_common_lines)
+        self._append_config_site_export(configure_lines, context.config_site_path)
         configure_lines.extend(
             (
-                f"mkdir -p {self._bash_quote(build_root_shell)}",
-                f"rm -f {self._bash_quote(bootstrap_marker_path_shell)}",
-                f"cd {self._bash_quote(source_root_shell)}",
+                f"mkdir -p {self._bash_quote(context.build_root_shell)}",
+                f"rm -f {self._bash_quote(context.bootstrap_marker_path_shell)}",
+                f"cd {self._bash_quote(context.source_root_shell)}",
                 (
                     "if [ -f ./bootstrap.sh ] && "
                     "{ [ ! -x ./configure ] || [ ! -f ./Makefile.in ] "
@@ -541,48 +531,67 @@ class SquidConan(ConanFile):
                     "|| [ ! -f ./cfgaux/config.guess ] || [ ! -f ./cfgaux/config.sub ] "
                     "|| [ ! -f ./cfgaux/missing ] || [ ! -f ./cfgaux/install-sh ]; }; "
                     "then ./bootstrap.sh || exit $?; "
-                    f"touch {self._bash_quote(bootstrap_marker_path_shell)}; fi"
+                    f"touch {self._bash_quote(context.bootstrap_marker_path_shell)}; fi"
                 ),
-                f"cd {self._bash_quote(build_root_shell)}",
+                f"cd {self._bash_quote(context.build_root_shell)}",
                 'echo "Configuring Squid..."',
                 (
-                    f"{self._bash_quote(source_root_shell + '/configure')} "
-                    f"{configure_argument_text} || exit $?"
+                    f"{self._bash_quote(context.source_root_shell + '/configure')} "
+                    f"{context.configure_argument_text} || exit $?"
                 ),
                 "if [ -f confdefs.h ]; then cp confdefs.h confdefs.generated.h; fi",
             )
         )
         self._run_bash(
             configure_lines,
-            "Linux configure failed.",
+            failure_message,
             bash_path=self._bash_path(),
         )
-
-        repair_result = self._repair_autoconf_header(
-            generated_header_path, confdefs_copy_path, config_log_path
-        )
-        if repair_result["repaired_macros"]:
-            self.output.info(
-                "Repaired generated autoconf macros: "
-                + ", ".join(repair_result["repaired_macros"])
+        self._log_autoconf_repair_result(
+            self._repair_autoconf_header(
+                context.generated_header_path,
+                context.confdefs_copy_path,
+                context.config_log_path,
             )
+        )
 
+    def _build_and_install_with_make(
+        self,
+        bash_common_lines: list[str],
+        context: AutotoolsBuildContext,
+        failure_message: str,
+        *,
+        repeat_cd_before_install: bool = False,
+    ) -> None:
         build_lines = list(bash_common_lines)
         build_lines.extend(
             (
-                f"cd {self._bash_quote(build_root_shell)}",
+                f"cd {self._bash_quote(context.build_root_shell)}",
                 'echo "Building Squid..."',
                 f"make -j{self._build_jobs()} || exit $?",
+            )
+        )
+        if repeat_cd_before_install:
+            build_lines.append(f"cd {self._bash_quote(context.build_root_shell)}")
+        build_lines.extend(
+            (
                 'echo "Installing Squid..."',
                 "make install || exit $?",
             )
         )
         self._run_bash(
             build_lines,
-            "Linux build failed.",
+            failure_message,
             bash_path=self._bash_path(),
         )
-        self._require_squid_executable(install_root)
+
+    def _log_autoconf_repair_result(self, repair_result: dict[str, object]) -> None:
+        repaired_macros = list(cast(list[str], repair_result["repaired_macros"]))
+        if repaired_macros:
+            self.output.info(
+                "Repaired generated autoconf macros: "
+                + ", ".join(repaired_macros)
+            )
 
     def package(self) -> None:
         install_root = Path(self.build_folder) / "package"
@@ -1115,7 +1124,7 @@ class SquidConan(ConanFile):
 
         if config_log_path.is_file():
             config_log_lines = load(self, os.fspath(config_log_path)).splitlines()
-            return "config.log", [
+            return CONFIG_LOG_FILENAME, [
                 re.sub(r"^\s*\|\s?", "", line) for line in config_log_lines
             ]
 
