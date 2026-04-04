@@ -316,7 +316,7 @@ def _add_dependency_source_arguments(parser: argparse.ArgumentParser) -> None:
             default=DependencySource.SYSTEM.value,
             help=(
                 f"Select whether {dependency_name} comes from Conan requirements "
-                "or system/MSYS2 packages."
+                "or system packages (MSYS2 on Windows)."
             ),
         )
 
