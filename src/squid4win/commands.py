@@ -299,7 +299,14 @@ def _recipe_host_option_arguments(
             openssl_shared = openssl_linkage.as_shared_option()
             if openssl_shared is None:
                 openssl_shared = True
-            arguments.extend(["-o:h", f"openssl/*:shared={openssl_shared}"])
+            arguments.extend(
+                [
+                    "-o:h",
+                    f"openssl/*:shared={openssl_shared}",
+                    "-o:h",
+                    "openssl/*:no_dgram=True",
+                ]
+            )
             continue
 
         arguments.extend(["-o:h", f"{dependency_name}/*:shared=False"])

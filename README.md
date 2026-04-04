@@ -97,10 +97,13 @@ On Windows, the Conan-managed `libxml2` path currently forces `libxml2`'s
 optional `iconv` feature off because the current Conan Center `libiconv/1.17`
 recipe does not build reliably under MinGW/UCRT.
 
-On Windows, the Conan-managed `openssl` path currently injects a MinGW-specific
-Conan build workaround for OpenSSL 3.6.x so the dependency still compiles under
-the validated `mingw-builds` toolchain during the `conan-mixed` and
-`conan-static` validation profiles.
+On Windows, the Conan-managed `openssl` path currently injects MinGW-specific
+Conan workarounds for OpenSSL 3.6.x so the dependency still compiles under the
+validated `mingw-builds` toolchain during the `conan-mixed` and
+`conan-static` validation profiles. Those temporary workarounds currently
+force `openssl/*:no_dgram=True` and add the extra compiler inputs needed for
+the upstream `wcslen`, `_alloca`, and `in_pktinfo.ipi_spec_dst` MinGW/UCRT
+failures.
 
 When any of those switches select `conan` and no explicit `--lockfile-path` is
 provided, the Python automation uses a build-local lockfile under `build\`

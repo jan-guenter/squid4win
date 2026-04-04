@@ -90,27 +90,46 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes \
-            autoconf \
-            automake \
-            bison \
-            clang-18 \
-            flex \
-            gcc-13 \
-            g++-13 \
-            libpcre2-dev \
-            libssl-dev \
-            libtool \
-            libxml2-dev \
-            llvm-18 \
-            m4 \
-            make \
-            perl \
-            pkg-config \
+          common_packages=(
+            autoconf
+            automake
+            bison
+            flex
+            libpcre2-dev
+            libssl-dev
+            libtool
+            libxml2-dev
+            m4
+            make
+            perl
+            pkg-config
             zlib1g-dev
+          )
 
-      - name: Detect default Conan build profile
-        run: uv run conan profile detect --force
+          compiler_label="${{ inputs.compiler_label }}"
+          profile_name="${{ inputs.profile_name }}"
+          toolchain_packages=()
+
+          case "${compiler_label,,}:${profile_name,,}" in
+            *clang*:*|*:*clang*)
+              toolchain_packages=(
+                clang-18
+                llvm-18
+              )
+              ;;
+            *gcc*:*|*g++*:*|*:*gcc*|*:*g++*)
+              toolchain_packages=(
+                gcc-13
+                g++-13
+              )
+              ;;
+            *)
+              echo "Unsupported compiler selection: compiler_label='${compiler_label}', profile_name='${profile_name}'" >&2
+              exit 1
+              ;;
+          esac
+
+          sudo apt-get install --yes "${common_packages[@]}" "${toolchain_packages[@]}"
 
       - name: Validate Squid recipe with Python automation
         run: |
