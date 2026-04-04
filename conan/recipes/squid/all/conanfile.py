@@ -243,10 +243,6 @@ class SquidConan(ConanFile):
         msys2_env_name = msys2_env_directory.upper()
         msys2_prefix_path = f"/{msys2_env_directory}"
         pkg_config_binary_path = f"/{msys2_env_directory}/bin/pkg-config"
-        pkg_config_lib_dir = (
-            f"/{msys2_env_directory}/lib/pkgconfig"
-            f":/{msys2_env_directory}/share/pkgconfig"
-        )
         build_env_script = Path(self.generators_folder) / "conanbuild.sh"
         autotools_deps_script = Path(self.generators_folder) / "conanautotoolsdeps.sh"
         autotools_script = Path(self.generators_folder) / "conanautotoolstoolchain.sh"
@@ -286,9 +282,13 @@ class SquidConan(ConanFile):
             raise ConanException(
                 "The mingw-builds tool requirement is not available to the recipe."
             )
+        msys2_package_root = self._dependency_package_root("msys2")
+        if msys2_package_root is None:
+            raise ConanException("The msys2 tool requirement is not available to the recipe.")
 
         mingw_bin_root = mingw_package_root / "bin"
         mingw_bin_root_shell = self._shell_path(mingw_bin_root)
+        msys2_root = msys2_package_root / "bin" / "msys64"
         mingw_tool_paths = {
             "CC": mingw_bin_root / "gcc.exe",
             "CXX": mingw_bin_root / "g++.exe",
@@ -310,16 +310,26 @@ class SquidConan(ConanFile):
                 if (dependency_root / "bin").is_dir()
             ]
         )
+        pkg_config_lib_dir_entries = self._deduplicate(
+            [
+                self._native_windows_path(
+                    msys2_root / msys2_env_directory / "lib" / "pkgconfig"
+                ),
+                self._native_windows_path(
+                    msys2_root / msys2_env_directory / "share" / "pkgconfig"
+                ),
+            ]
+        )
         pkg_config_path_entries = []
         if conan_dependency_roots:
-            pkg_config_path_entries.append(self._shell_path(self.generators_folder))
+            pkg_config_path_entries.append(self._native_windows_path(self.generators_folder))
         for dependency_root in conan_dependency_roots.values():
             for pkg_config_root in (
                 dependency_root / "lib" / "pkgconfig",
                 dependency_root / "share" / "pkgconfig",
             ):
                 if pkg_config_root.is_dir():
-                    pkg_config_path_entries.append(self._shell_path(pkg_config_root))
+                    pkg_config_path_entries.append(self._native_windows_path(pkg_config_root))
         pkg_config_path_entries = self._deduplicate(pkg_config_path_entries)
         path_entries = self._deduplicate(
             [
@@ -360,12 +370,13 @@ class SquidConan(ConanFile):
             f"export PKG_CONFIG={self._bash_quote(pkg_config_binary_path)}"
         )
         bash_common_lines.append(
-            f"export PKG_CONFIG_LIBDIR={self._bash_quote(pkg_config_lib_dir)}"
+            "export PKG_CONFIG_LIBDIR="
+            f'{self._bash_quote(";".join(pkg_config_lib_dir_entries))}'
         )
         if pkg_config_path_entries:
             bash_common_lines.append(
-                f'export PKG_CONFIG_PATH="{":".join(pkg_config_path_entries)}'
-                '${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"'
+                f'export PKG_CONFIG_PATH="{";".join(pkg_config_path_entries)}'
+                '${PKG_CONFIG_PATH:+;$PKG_CONFIG_PATH}"'
             )
 
         if config_site_path.is_file():
@@ -766,6 +777,10 @@ class SquidConan(ConanFile):
     def _shell_path(self, path: os.PathLike[str] | str) -> str:
         if self._is_windows():
             return self._to_msys_path(path)
+        return os.path.abspath(os.fspath(path)).replace("\\", "/")
+
+    @staticmethod
+    def _native_windows_path(path: os.PathLike[str] | str) -> str:
         return os.path.abspath(os.fspath(path)).replace("\\", "/")
 
     def _recipe_configure_args(self) -> list[str]:
