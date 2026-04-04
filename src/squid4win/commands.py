@@ -1274,7 +1274,7 @@ def _harvest_runtime_notice_bundle(
             notice_id=notice_id,
             selected_dependency_options=selected_dependency_options,
         )
-        dependency_name, dependency_root, dependency_ref = _resolved_runtime_notice_dependency(
+        _, dependency_root, dependency_ref = _resolved_runtime_notice_dependency(
             notice_entry,
             notice_id=notice_id,
             selected_source=selected_source,
