@@ -348,7 +348,7 @@ def _windows_openssl_conan_host_option_arguments(
 
 def _windows_openssl_conan_conf_arguments() -> list[str]:
     # OpenSSL's MinGW build currently needs the earlier wchar/_alloca workaround
-    # and an explicit Windows platform define so internal/e_os.h pulls in windows.h
+    # and an explicit _WIN32 define so e_os2.h/e_os.h take the same Windows path
     # before dso_win32.c reaches tlhelp32.h.
     return [
         "-c:h",
@@ -356,7 +356,7 @@ def _windows_openssl_conan_conf_arguments() -> list[str]:
         "-c:h",
         (
             'openssl/*:tools.build:defines=['
-            '"OPENSSL_SYS_WIN32",'
+            '"_WIN32",'
             '"_alloca=__builtin_alloca"'
             "]"
         ),
