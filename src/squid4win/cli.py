@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from squid4win.commands import (
     run_bundle_package,
     run_conan_lockfile_update,
+    run_conan_recipe_artifact_staging,
     run_conan_recipe_validation,
     run_service_runner_validation,
     run_smoke_test,
@@ -21,6 +22,7 @@ from squid4win.models import (
     BundlePackageOptions,
     ConanDependencyLinkage,
     ConanLockfileUpdateOptions,
+    ConanRecipeArtifactStageOptions,
     ConanRecipeValidationOptions,
     DependencySource,
     NativeDependencySourceOptions,
@@ -150,6 +152,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_dependency_source_arguments(conan_recipe_validate)
     conan_recipe_validate.set_defaults(handler=_handle_conan_recipe_validate)
+
+    conan_recipe_stage_artifacts = subparsers.add_parser(
+        "conan-recipe-stage-artifacts",
+        help="Stage the latest Conan recipe validation cache outputs under artifacts/.",
+    )
+    _add_common_command_arguments(conan_recipe_stage_artifacts)
+    conan_recipe_stage_artifacts.add_argument(
+        "--configuration",
+        choices=("Debug", "Release"),
+        default="Release",
+    )
+    conan_recipe_stage_artifacts.add_argument("--artifact-root", type=Path)
+    conan_recipe_stage_artifacts.add_argument("--host-profile-path", type=Path)
+    conan_recipe_stage_artifacts.add_argument("--compiler-label")
+    conan_recipe_stage_artifacts.add_argument(
+        "--library-configuration-label",
+        required=True,
+    )
+    conan_recipe_stage_artifacts.add_argument(
+        "--openssl-linkage",
+        choices=tuple(linkage.value for linkage in ConanDependencyLinkage),
+        default=ConanDependencyLinkage.DEFAULT.value,
+        help=(
+            "Record the Conan OpenSSL package linkage used by the validated dependency "
+            "profile."
+        ),
+    )
+    _add_dependency_source_arguments(conan_recipe_stage_artifacts)
+    conan_recipe_stage_artifacts.set_defaults(handler=_handle_conan_recipe_stage_artifacts)
 
     bundle_package = subparsers.add_parser(
         "bundle-package",
@@ -391,6 +422,20 @@ def _handle_conan_recipe_validate(args: argparse.Namespace, runner: PlanRunner) 
         openssl_linkage=ConanDependencyLinkage(args.openssl_linkage),
     )
     return run_conan_recipe_validation(options, runner, execute=args.execute)
+
+
+def _handle_conan_recipe_stage_artifacts(args: argparse.Namespace, runner: PlanRunner) -> int:
+    options = ConanRecipeArtifactStageOptions(
+        repository_root=args.repository_root,
+        artifact_root=args.artifact_root,
+        configuration=args.configuration,
+        host_profile_path=args.host_profile_path,
+        compiler_label=args.compiler_label,
+        library_configuration_label=args.library_configuration_label,
+        dependency_sources=_dependency_sources_from_args(args),
+        openssl_linkage=ConanDependencyLinkage(args.openssl_linkage),
+    )
+    return run_conan_recipe_artifact_staging(options, runner, execute=args.execute)
 
 
 def _handle_bundle_package(args: argparse.Namespace, runner: PlanRunner) -> int:

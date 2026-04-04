@@ -87,6 +87,8 @@ jobs:
             ${{ runner.os }}-conan-
 
       - name: Validate Squid recipe with Python automation
+        id: validate_recipe
+        continue-on-error: true
         run: |
           uv run squid4win-automation conan-recipe-validate `
             --execute `
@@ -99,3 +101,32 @@ jobs:
             --pcre2-source ${{ inputs.pcre2_source }} `
             --zlib-source ${{ inputs.zlib_source }} `
             --openssl-linkage ${{ inputs.openssl_linkage }}
+
+      - name: Stage Conan validation artifacts
+        if: ${{ always() }}
+        run: |
+          uv run squid4win-automation conan-recipe-stage-artifacts `
+            --execute `
+            --repository-root $PWD.Path `
+            --configuration ${{ inputs.build_type }} `
+            --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
+            --library-configuration-label "${{ inputs.library_configuration_label }}" `
+            --openssl-source ${{ inputs.openssl_source }} `
+            --libxml2-source ${{ inputs.libxml2_source }} `
+            --pcre2-source ${{ inputs.pcre2_source }} `
+            --zlib-source ${{ inputs.zlib_source }} `
+            --openssl-linkage ${{ inputs.openssl_linkage }}
+
+      - name: Upload Conan validation artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: conan-validation-windows-${{ inputs.library_configuration_label }}-${{ inputs.build_type }}
+          path: artifacts\conan-recipe-validation\**
+          if-no-files-found: error
+
+      - name: Fail when validation failed
+        if: ${{ steps.validate_recipe.outcome != 'success' }}
+        run: |
+          Write-Error "Squid recipe validation failed. Review the uploaded Conan validation artifact."
+          exit 1

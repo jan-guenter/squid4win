@@ -109,6 +109,13 @@ When any of those switches select `conan` and no explicit `--lockfile-path` is
 provided, the Python automation uses a build-local lockfile under `build\`
 instead of rewriting the committed default lockfile.
 
+On Windows, when a selected Conan dependency emits shared runtime DLLs, the
+Python staging path now copies those DLLs from the Conan package bins into
+`build\install\<configuration>` next to the staged executables. The
+`bundle-package` path then mirrors that staged tree into `artifacts\install-root`,
+so the portable payload and MSI payload inherit the same Conan-built runtime
+DLL adjacency.
+
 Some checked-in `scripts\*.ps1` files still remain for installer-time behavior,
 optional signing, and historical update fallbacks. Keep them narrow and do not
 extend them as the long-term orchestration model.
