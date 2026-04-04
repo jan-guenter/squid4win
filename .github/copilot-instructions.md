@@ -42,6 +42,10 @@ Repo-specific directives:
 - Keep staged native notice harvesting synchronized between the Python
   automation's Python metadata, the Squid recipe options, and any direct tray
   release assets that ship.
+- Keep Conan-sourced Windows runtime DLLs staged from the selected Conan
+  package bins into `build\install\...` so `bundle-package` mirrors them into
+  `artifacts\install-root`, and keep the runtime notice manifest aligned when
+  shared Conan dependencies add DLLs.
 - Treat `.agents\design\*.md` as project memory. If an accepted design changes,
   update the ADR and preserve alternatives/history sections.
 - Treat `skills\` as the canonical home for repo-owned skills.

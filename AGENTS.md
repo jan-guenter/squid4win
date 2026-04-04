@@ -27,6 +27,10 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   `openssl`, `libxml2`, `pcre2`, and `zlib` either from Conan requirements or
   from MSYS2/system packages through recipe options; the default remains the
   MSYS2/system path for the current validated build.
+- When a selected Conan dependency emits Windows runtime DLLs, the Python
+  staging path copies those DLLs from the Conan package bins into
+  `build\install\...` alongside the Squid executables so `bundle-package`
+  mirrors the same runtime DLL set into `artifacts\install-root`.
 - Python 3.14 + `uv` now owns the repo-level build, stage, smoke-test, and
   package entry points.
 - Repository linting is centered on `.mega-linter.yml` plus

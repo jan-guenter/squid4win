@@ -999,6 +999,72 @@ def _append_dependency_runtime_bin_directories(
             )
 
 
+def _dependency_runtime_dll_paths(dependency_root: Path) -> tuple[Path, ...]:
+    dependency_bin_root = dependency_root / "bin"
+    if not dependency_bin_root.is_dir():
+        return ()
+
+    return tuple(
+        candidate
+        for candidate in sorted(
+            dependency_bin_root.glob("*.dll"),
+            key=lambda path: path.name.lower(),
+        )
+        if candidate.is_file()
+    )
+
+
+def _conan_runtime_dll_paths_by_dependency(
+    build_settings: dict[str, Any],
+    dependency_roots: dict[str, Path],
+    *,
+    dependency_sources: NativeDependencySourceOptions,
+) -> dict[str, tuple[Path, ...]]:
+    runtime_dll_paths: dict[str, tuple[Path, ...]] = {}
+    for dependency_name, selected_source in _selected_dependency_sources(
+        build_settings,
+        dependency_sources,
+    ).items():
+        if selected_source != "conan":
+            continue
+
+        dependency_root = dependency_roots.get(dependency_name)
+        if dependency_root is None:
+            msg = f"Unable to locate the Conan dependency root for '{dependency_name}'."
+            raise FileNotFoundError(msg)
+
+        dependency_runtime_dlls = _dependency_runtime_dll_paths(dependency_root)
+        if dependency_runtime_dlls:
+            runtime_dll_paths[dependency_name] = dependency_runtime_dlls
+
+    return runtime_dll_paths
+
+
+def _runtime_dll_source_overrides(
+    conan_runtime_dll_paths_by_dependency: dict[str, tuple[Path, ...]],
+) -> dict[str, Path]:
+    source_overrides: dict[str, Path] = {}
+    for dependency_name, runtime_dll_paths in conan_runtime_dll_paths_by_dependency.items():
+        for runtime_dll_path in runtime_dll_paths:
+            runtime_dll_key = os.path.normcase(runtime_dll_path.name)
+            existing_source_path = source_overrides.get(runtime_dll_key)
+            if (
+                existing_source_path is not None
+                and os.path.normcase(os.fspath(existing_source_path))
+                != os.path.normcase(os.fspath(runtime_dll_path))
+            ):
+                msg = (
+                    "Multiple Conan runtime dependencies export the same DLL name "
+                    f"'{runtime_dll_path.name}' ('{existing_source_path}' and "
+                    f"'{runtime_dll_path}') while bundling '{dependency_name}'."
+                )
+                raise RuntimeError(msg)
+
+            source_overrides[runtime_dll_key] = runtime_dll_path
+
+    return source_overrides
+
+
 def _native_executable_directories(bundle_root: Path) -> list[Path]:
     executable_directories = sorted(
         {executable_path.parent for executable_path in bundle_root.rglob("*.exe")},
@@ -1032,25 +1098,47 @@ def _bundle_native_runtime_dlls(
     build_settings: dict[str, Any],
     dependency_roots: dict[str, Path],
     *,
+    dependency_sources: NativeDependencySourceOptions,
     msys2_env_directory: str,
-) -> list[str]:
-    runtime_dlls = _string_list(build_settings.get("runtime_dlls", []))
+) -> tuple[list[str], dict[str, tuple[Path, ...]]]:
+    conan_runtime_dll_paths_by_dependency = _conan_runtime_dll_paths_by_dependency(
+        build_settings,
+        dependency_roots,
+        dependency_sources=dependency_sources,
+    )
+    runtime_dlls = _deduplicate(
+        [
+            *_string_list(build_settings.get("runtime_dlls", [])),
+            *(
+                runtime_dll_path.name
+                for runtime_dll_paths in conan_runtime_dll_paths_by_dependency.values()
+                for runtime_dll_path in runtime_dll_paths
+            ),
+        ]
+    )
     if not runtime_dlls:
-        msg = "Windows build metadata must declare runtime_dlls for the staged bundle."
+        msg = "Unable to resolve any Windows runtime DLLs for the staged bundle."
         raise ValueError(msg)
 
     runtime_dll_sources = _runtime_dll_source_directories(
         dependency_roots,
         msys2_env_directory=msys2_env_directory,
     )
+    runtime_dll_source_overrides = _runtime_dll_source_overrides(
+        conan_runtime_dll_paths_by_dependency
+    )
     executable_directories = _native_executable_directories(bundle_root)
     copied_runtime_dlls: list[str] = []
     missing_runtime_dlls: list[str] = []
     for runtime_dll in runtime_dlls:
-        runtime_dll_source_path = _runtime_dll_source_path(
-            runtime_dll,
-            runtime_dll_sources,
+        runtime_dll_source_path = runtime_dll_source_overrides.get(
+            os.path.normcase(runtime_dll),
         )
+        if runtime_dll_source_path is None:
+            runtime_dll_source_path = _runtime_dll_source_path(
+                runtime_dll,
+                runtime_dll_sources,
+            )
         if runtime_dll_source_path is None:
             missing_runtime_dlls.append(runtime_dll)
             continue
@@ -1070,7 +1158,7 @@ def _bundle_native_runtime_dlls(
         )
         raise FileNotFoundError(msg)
 
-    return copied_runtime_dlls
+    return copied_runtime_dlls, conan_runtime_dll_paths_by_dependency
 
 
 def _runtime_dll_source_path(runtime_dll: str, runtime_dll_sources: list[Path]) -> Path | None:
@@ -1150,6 +1238,87 @@ def _copy_runtime_notice_files(
         raise RuntimeError(msg)
 
     return copied_notice_files
+
+
+def _default_conan_runtime_notice_artifact(
+    dependency_name: str,
+    dependency_root: Path,
+) -> dict[str, list[str]]:
+    license_directories = [
+        os.fspath(candidate.relative_to(dependency_root))
+        for candidate in (dependency_root / "licenses", dependency_root / "license")
+        if candidate.is_dir()
+    ]
+    if license_directories:
+        return {"license_directories": license_directories}
+
+    license_files = [
+        os.fspath(candidate.relative_to(dependency_root))
+        for candidate in sorted(dependency_root.glob("*"), key=lambda path: path.name.lower())
+        if candidate.is_file()
+        and candidate.name.upper().startswith(("LICENSE", "LICENCE", "COPYING", "NOTICE"))
+    ]
+    if license_files:
+        return {"license_files": license_files}
+
+    msg = (
+        "Unable to locate license files for Conan runtime dependency "
+        f"'{dependency_name}' under '{dependency_root}'."
+    )
+    raise FileNotFoundError(msg)
+
+
+def _harvest_additional_conan_runtime_notice_entries(
+    bundle_root: Path,
+    notice_root: Path,
+    *,
+    conan_runtime_dll_paths_by_dependency: dict[str, tuple[Path, ...]],
+    declared_runtime_dlls: set[str],
+    dependency_roots: dict[str, Path],
+    dependency_refs: dict[str, str],
+) -> list[dict[str, Any]]:
+    harvested_notice_entries: list[dict[str, Any]] = []
+    for dependency_name, runtime_dll_paths in sorted(conan_runtime_dll_paths_by_dependency.items()):
+        uncovered_runtime_dlls = [
+            runtime_dll_path.name
+            for runtime_dll_path in runtime_dll_paths
+            if runtime_dll_path.name not in declared_runtime_dlls
+        ]
+        if not uncovered_runtime_dlls:
+            continue
+
+        dependency_root = dependency_roots.get(dependency_name)
+        if dependency_root is None:
+            msg = f"Unable to locate dependency '{dependency_name}' for fallback notice entry."
+            raise FileNotFoundError(msg)
+
+        dependency_ref = dependency_refs.get(dependency_name, dependency_name)
+        notice_id = f"{dependency_name}-conan-runtime"
+        copied_notice_files = _copy_runtime_notice_files(
+            bundle_root,
+            notice_root / notice_id,
+            dependency_root,
+            notice_id=notice_id,
+            notice_entry=_default_conan_runtime_notice_artifact(
+                dependency_name,
+                dependency_root,
+            ),
+        )
+        harvested_notice_entries.append(
+            {
+                "id": notice_id,
+                "name": dependency_name,
+                "package": dependency_name,
+                "source_dependency": dependency_ref,
+                "license": "",
+                "project_url": "",
+                "dlls": uncovered_runtime_dlls,
+                "notice_files": copied_notice_files,
+            }
+        )
+        declared_runtime_dlls.update(uncovered_runtime_dlls)
+
+    return harvested_notice_entries
 
 
 def _validate_runtime_notice_coverage(
@@ -1261,6 +1430,7 @@ def _harvest_runtime_notice_bundle(
     bundle_root: Path,
     build_settings: dict[str, Any],
     bundled_runtime_dlls: list[str],
+    conan_runtime_dll_paths_by_dependency: dict[str, tuple[Path, ...]],
     dependency_roots: dict[str, Path],
     dependency_refs: dict[str, str],
     *,
@@ -1328,6 +1498,16 @@ def _harvest_runtime_notice_bundle(
         )
         declared_runtime_dlls.update(runtime_dlls)
 
+    harvested_notice_entries.extend(
+        _harvest_additional_conan_runtime_notice_entries(
+            bundle_root,
+            notice_root,
+            conan_runtime_dll_paths_by_dependency=conan_runtime_dll_paths_by_dependency,
+            declared_runtime_dlls=declared_runtime_dlls,
+            dependency_roots=dependency_roots,
+            dependency_refs=dependency_refs,
+        )
+    )
     _validate_runtime_notice_coverage(bundled_runtime_dlls, declared_runtime_dlls)
     return harvested_notice_entries
 
@@ -1641,6 +1821,7 @@ def _materialize_staged_squid_bundle(
         _copy_directory_contents(tray_bin_root, stage_root)
 
     bundled_runtime_dlls: list[str] = []
+    conan_runtime_dll_paths_by_dependency: dict[str, tuple[Path, ...]] = {}
     runtime_notice_packages: list[dict[str, Any]] = []
     dependency_refs: dict[str, str] = {}
     dependency_roots: dict[str, Path] = {}
@@ -1655,16 +1836,18 @@ def _materialize_staged_squid_bundle(
             ),
             dependency_sources=options.dependency_sources,
         )
-        bundled_runtime_dlls = _bundle_native_runtime_dlls(
+        bundled_runtime_dlls, conan_runtime_dll_paths_by_dependency = _bundle_native_runtime_dlls(
             stage_root,
             build_settings,
             dependency_roots,
+            dependency_sources=options.dependency_sources,
             msys2_env_directory=msys2_env_directory,
         )
         runtime_notice_packages = _harvest_runtime_notice_bundle(
             stage_root,
             build_settings,
             bundled_runtime_dlls,
+            conan_runtime_dll_paths_by_dependency,
             dependency_roots,
             dependency_refs,
             dependency_sources=options.dependency_sources,
