@@ -326,6 +326,9 @@ def _windows_recipe_conf_arguments(
 ) -> list[str]:
     arguments: list[str] = []
 
+    if any(source == "conan" for source in selected_dependency_sources.values()):
+        arguments.extend(_windows_mingw_compiler_conf_arguments())
+
     if selected_dependency_sources.get("openssl") == "conan":
         arguments.extend(_windows_openssl_conan_conf_arguments())
 
@@ -343,6 +346,20 @@ def _windows_openssl_conan_host_option_arguments(
         "openssl/*:no_dgram=True",
         "-o:h",
         "openssl/*:no_apps=True",
+    ]
+
+
+def _windows_mingw_compiler_conf_arguments() -> list[str]:
+    # Dependency recipes like OpenSSL otherwise resolve bare gcc/g++ to the
+    # MSYS/Cygwin toolchain instead of the Conan-provided MinGW toolchain.
+    return [
+        "-c:h",
+        (
+            'tools.build:compiler_executables={'
+            '"c":"x86_64-w64-mingw32-gcc",'
+            '"cpp":"x86_64-w64-mingw32-g++"'
+            "}"
+        ),
     ]
 
 
