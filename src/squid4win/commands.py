@@ -292,26 +292,35 @@ def _recipe_host_option_arguments(
             ["-o:h", f"&:{option_name}={selected_dependency_sources[dependency_name]}"]
         )
 
-        if selected_dependency_sources[dependency_name] != "conan":
-            continue
-
-        if dependency_name == "openssl":
-            openssl_shared = openssl_linkage.as_shared_option()
-            if openssl_shared is None:
-                openssl_shared = True
+        if selected_dependency_sources[dependency_name] == "conan":
             arguments.extend(
-                [
-                    "-o:h",
-                    f"openssl/*:shared={openssl_shared}",
-                    "-o:h",
-                    "openssl/*:no_dgram=True",
-                ]
+                _conan_dependency_host_option_arguments(
+                    dependency_name,
+                    openssl_linkage=openssl_linkage,
+                )
             )
-            continue
-
-        arguments.extend(["-o:h", f"{dependency_name}/*:shared=False"])
 
     return arguments
+
+
+def _conan_dependency_host_option_arguments(
+    dependency_name: str,
+    *,
+    openssl_linkage: ConanDependencyLinkage,
+) -> list[str]:
+    if dependency_name != "openssl":
+        return ["-o:h", f"{dependency_name}/*:shared=False"]
+
+    openssl_shared = openssl_linkage.as_shared_option()
+    if openssl_shared is None:
+        openssl_shared = True
+
+    return [
+        "-o:h",
+        f"openssl/*:shared={openssl_shared}",
+        "-o:h",
+        "openssl/*:no_dgram=True",
+    ]
 
 
 def _windows_recipe_conf_arguments(
@@ -320,18 +329,26 @@ def _windows_recipe_conf_arguments(
     arguments: list[str] = []
 
     if selected_dependency_sources.get("openssl") == "conan":
-        # Current Conan Center OpenSSL 3.6.x MinGW builds fail in apps/lib/win32_init.c
-        # unless wchar.h provides wcslen() and _alloca resolves to GCC's builtin.
-        arguments.extend(
-            [
-                "-c:h",
-                'openssl/*:tools.build:cflags=["-include","wchar.h"]',
-                "-c:h",
-                'openssl/*:tools.build:defines=["_alloca=__builtin_alloca"]',
-            ]
-        )
+        arguments.extend(_windows_openssl_conan_conf_arguments())
 
     return arguments
+
+
+def _windows_openssl_conan_conf_arguments() -> list[str]:
+    # OpenSSL's MinGW build currently needs the earlier wchar/_alloca workaround
+    # and an explicit Windows platform define so internal/e_os.h pulls in windows.h
+    # before dso_win32.c reaches tlhelp32.h.
+    return [
+        "-c:h",
+        'openssl/*:tools.build:cflags=["-include","wchar.h"]',
+        "-c:h",
+        (
+            'openssl/*:tools.build:defines=['
+            '"OPENSSL_SYS_WIN32",'
+            '"_alloca=__builtin_alloca"'
+            "]"
+        ),
+    ]
 
 
 def _uses_default_dependency_sources(
@@ -757,37 +774,78 @@ def _runtime_dll_source_directories(
     source_directories: list[Path] = []
     seen_directories: set[str] = set()
 
-    mingw_root = dependency_roots.get("mingw-builds")
-    if mingw_root is not None:
-        _append_existing_directory(source_directories, seen_directories, mingw_root / "bin")
-
-    msys2_root = dependency_roots.get("msys2")
-    if msys2_root is not None:
-        _append_existing_directory(
-            source_directories,
-            seen_directories,
-            msys2_root / "bin" / "msys64" / msys2_env_directory / "bin",
-        )
-        _append_existing_directory(
-            source_directories,
-            seen_directories,
-            msys2_root / "bin" / "msys64" / "usr" / "bin",
-        )
-
-    for dependency_name, dependency_root in dependency_roots.items():
-        if dependency_name in {"mingw-builds", "msys2"}:
-            continue
-        _append_existing_directory(
-            source_directories,
-            seen_directories,
-            dependency_root / "bin",
-        )
+    _append_windows_runtime_tool_directories(
+        source_directories,
+        seen_directories,
+        dependency_roots,
+        msys2_env_directory=msys2_env_directory,
+    )
+    _append_dependency_runtime_bin_directories(
+        source_directories,
+        seen_directories,
+        dependency_roots,
+    )
 
     if not source_directories:
         msg = "Unable to locate runtime DLL source directories from the Conan dependency graph."
         raise FileNotFoundError(msg)
 
     return source_directories
+
+
+def _append_windows_runtime_tool_directories(
+    source_directories: list[Path],
+    seen_directories: set[str],
+    dependency_roots: dict[str, Path],
+    *,
+    msys2_env_directory: str,
+) -> None:
+    mingw_root = dependency_roots.get("mingw-builds")
+    if mingw_root is not None:
+        _append_existing_directory(source_directories, seen_directories, mingw_root / "bin")
+
+    _append_msys2_runtime_directories(
+        source_directories,
+        seen_directories,
+        dependency_roots.get("msys2"),
+        msys2_env_directory=msys2_env_directory,
+    )
+
+
+def _append_msys2_runtime_directories(
+    source_directories: list[Path],
+    seen_directories: set[str],
+    msys2_root: Path | None,
+    *,
+    msys2_env_directory: str,
+) -> None:
+    if msys2_root is None:
+        return
+
+    _append_existing_directory(
+        source_directories,
+        seen_directories,
+        msys2_root / "bin" / "msys64" / msys2_env_directory / "bin",
+    )
+    _append_existing_directory(
+        source_directories,
+        seen_directories,
+        msys2_root / "bin" / "msys64" / "usr" / "bin",
+    )
+
+
+def _append_dependency_runtime_bin_directories(
+    source_directories: list[Path],
+    seen_directories: set[str],
+    dependency_roots: dict[str, Path],
+) -> None:
+    for dependency_name, dependency_root in dependency_roots.items():
+        if dependency_name not in {"mingw-builds", "msys2"}:
+            _append_existing_directory(
+                source_directories,
+                seen_directories,
+                dependency_root / "bin",
+            )
 
 
 def _native_executable_directories(bundle_root: Path) -> list[Path]:
