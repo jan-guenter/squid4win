@@ -364,12 +364,10 @@ def _windows_mingw_compiler_conf_arguments() -> list[str]:
 
 
 def _windows_openssl_conan_conf_arguments() -> list[str]:
-    # OpenSSL's MinGW build currently needs the earlier wchar/_alloca workaround
-    # and explicit Windows+MinGW defines so e_os2.h/e_os.h and sha.h take
-    # compatible branches before dso_win32.c reaches tlhelp32.h.
+    # OpenSSL's MinGW build still needs explicit Windows+MinGW defines so
+    # e_os2.h/e_os.h and sha.h take compatible branches before dso_win32.c
+    # reaches tlhelp32.h.
     return [
-        "-c:h",
-        'openssl/*:tools.build:cflags=["-include","wchar.h"]',
         "-c:h",
         (
             'openssl/*:tools.build:defines=['
