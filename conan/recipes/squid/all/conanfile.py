@@ -7,9 +7,8 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 from conan import ConanFile
 from conan.errors import ConanException, ConanInvalidConfiguration
@@ -92,8 +91,7 @@ PLATFORM_LIST_OPTION_DEFAULTS: dict[str, dict[str, str | None]] = {
 }
 
 
-@dataclass(frozen=True)
-class AutotoolsBuildContext:
+class AutotoolsBuildContext(NamedTuple):
     source_root: Path
     build_root: Path
     install_root: Path
