@@ -64,7 +64,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     squid_build = subparsers.add_parser(
         "squid-build",
-        help="Plan or run the root Conan Squid build with native Python orchestration.",
+        help=(
+            "Plan or run the CCI-style Squid recipe build from "
+            "conan\\recipes\\squid\\all with native Python orchestration."
+        ),
     )
     _add_common_command_arguments(squid_build)
     squid_build.add_argument("--configuration", choices=("Debug", "Release"), default="Release")
