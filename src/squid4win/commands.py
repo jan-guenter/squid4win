@@ -57,6 +57,9 @@ _UTC_ZERO_OFFSET = "+00:00"
 _CONAN_VALIDATION_LOG_FILENAMES = frozenset(
     {"config.log", "config.status", "config.cache", "CMakeOutput.log", "CMakeError.log"}
 )
+_CONAN_VALIDATION_BUILD_METADATA_FILENAMES = frozenset(
+    {"conaninfo.txt", "conanbuild.sh", "conanbuild.bat"}
+)
 _CONAN_VALIDATION_PACKAGE_DIRECTORIES = (
     "bin",
     "sbin",
@@ -2411,30 +2414,46 @@ def _artifact_token(*segments: str) -> str:
 
 
 def _latest_tree_modification_time(path: Path) -> float:
-    try:
-        latest_mtime = path.stat().st_mtime
-    except OSError:
-        return 0.0
-
-    pending = deque([path])
-    while pending:
-        current = pending.popleft()
+    candidate_paths = [
+        path,
+        path / "b",
+        path / "d",
+        path / "d" / "metadata",
+        path / "p",
+    ]
+    for child_root in (path / "b", path / "p"):
         try:
-            with os.scandir(current) as entries:
-                for entry in entries:
-                    try:
-                        candidate_mtime = entry.stat(follow_symlinks=False).st_mtime
-                    except OSError:
-                        continue
-
-                    if candidate_mtime > latest_mtime:
-                        latest_mtime = candidate_mtime
-                    if entry.is_dir(follow_symlinks=False):
-                        pending.append(Path(entry.path))
+            candidate_paths.extend(child_root.iterdir())
         except OSError:
             continue
 
+    candidate_paths.extend(
+        (path / "b" / filename) for filename in _CONAN_VALIDATION_BUILD_METADATA_FILENAMES
+    )
+
+    latest_mtime = 0.0
+    for candidate_path in candidate_paths:
+        try:
+            candidate_mtime = candidate_path.stat().st_mtime
+        except OSError:
+            continue
+        if candidate_mtime > latest_mtime:
+            latest_mtime = candidate_mtime
     return latest_mtime
+
+
+def _validation_log_paths(build_root: Path) -> list[Path]:
+    if not build_root.is_dir():
+        return []
+
+    target_filenames = set(_CONAN_VALIDATION_LOG_FILENAMES)
+    matching_logs: list[Path] = []
+    for current_root, _, filenames in os.walk(build_root):
+        current_root_path = Path(current_root)
+        for filename in filenames:
+            if filename in target_filenames:
+                matching_logs.append(current_root_path / filename)
+    return sorted(matching_logs)
 
 
 def _latest_squid_validation_cache_root(conan_home: Path) -> Path | None:
@@ -2493,16 +2512,9 @@ def _stage_validation_package_artifacts(
 
 def _stage_validation_log_files(cache_root: Path, staging_root: Path) -> list[str]:
     build_root = cache_root / "b"
-    if not build_root.is_dir():
-        return []
-
     copied_logs: list[str] = []
     logs_root = staging_root / "logs"
-    for source_path in sorted(
-        candidate
-        for candidate in build_root.rglob("*")
-        if candidate.is_file() and candidate.name in _CONAN_VALIDATION_LOG_FILENAMES
-    ):
+    for source_path in _validation_log_paths(build_root):
         destination_path = logs_root / source_path.relative_to(build_root)
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, destination_path)
@@ -2524,9 +2536,11 @@ def _stage_validation_cache_artifacts(
 
     build_metadata_root = staging_root / "build-metadata"
     for source_path, destination_path in (
-        (cache_root / "b" / "conaninfo.txt", build_metadata_root / "conaninfo.txt"),
-        (cache_root / "b" / "conanbuild.sh", build_metadata_root / "conanbuild.sh"),
-        (cache_root / "b" / "conanbuild.bat", build_metadata_root / "conanbuild.bat"),
+        (
+            cache_root / "b" / filename,
+            build_metadata_root / filename,
+        )
+        for filename in _CONAN_VALIDATION_BUILD_METADATA_FILENAMES
     ):
         if _copy_if_file(source_path, destination_path):
             staged_entries.append(_relative_summary_path(destination_path, staging_root))
