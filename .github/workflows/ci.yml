@@ -3,9 +3,7 @@ name: CI
 on:
   pull_request:
     paths:
-      - '.github/workflows/ci.yml'
-      - '.github/workflows/conan-validate-recipe.yml'
-      - '.github/workflows/conan-validate-recipe-windows.yml'
+      - '.github/workflows/**'
       - '.github/linters/**'
       - '.mega-linter.yml'
       - 'Directory.Build.props'
@@ -22,9 +20,7 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/ci.yml'
-      - '.github/workflows/conan-validate-recipe.yml'
-      - '.github/workflows/conan-validate-recipe-windows.yml'
+      - '.github/workflows/**'
       - '.github/linters/**'
       - '.mega-linter.yml'
       - 'Directory.Build.props'

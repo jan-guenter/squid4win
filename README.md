@@ -10,7 +10,7 @@ The repository is being reset toward the target state defined in ADR `0006`:
 - one self-contained native Squid Conan recipe under
   `conan\recipes\squid\all\` owns Squid source retrieval, patch application,
   and the validated native MSYS2 + MinGW-w64 build; direct `cl.exe` and
-  `clang-cl` support are not current target-state goals
+  `clang-cl` support is not a current target-state goal
 - Python 3.14 + `uv` owns repo-level stage assembly, runtime DLL adjacency,
   notice harvesting, smoke testing, MSI/portable packaging, and release-helper
   orchestration
