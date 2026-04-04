@@ -139,10 +139,14 @@ jobs:
       - name: Validate installed service lifecycle
         run: uv run squid4win-automation service-runner-validation --execute --configuration Release
 
-      - name: Upload runner validation artifacts
-        if: ${{ failure() }}
+      - name: Upload runner build and validation artifacts
+        if: ${{ always() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: service-runner-validation
-          path: artifacts\service-validation\**
-          if-no-files-found: ignore
+          path: |
+            build\tray\release\**
+            build\install\release\**
+            build\conan\msys2-mingw-x64-release\build\**\config.log
+            artifacts\service-validation\**
+          if-no-files-found: warn
