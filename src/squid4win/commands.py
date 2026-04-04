@@ -318,8 +318,6 @@ def _conan_dependency_host_option_arguments(
     return [
         "-o:h",
         f"openssl/*:shared={openssl_shared}",
-        "-o:h",
-        "openssl/*:no_dgram=True",
     ]
 
 
@@ -332,6 +330,20 @@ def _windows_recipe_conf_arguments(
         arguments.extend(_windows_openssl_conan_conf_arguments())
 
     return arguments
+
+
+def _windows_openssl_conan_host_option_arguments(
+    selected_dependency_sources: dict[str, str],
+) -> list[str]:
+    if selected_dependency_sources.get("openssl") != "conan":
+        return []
+
+    return [
+        "-o:h",
+        "openssl/*:no_dgram=True",
+        "-o:h",
+        "openssl/*:no_apps=True",
+    ]
 
 
 def _windows_openssl_conan_conf_arguments() -> list[str]:
@@ -487,6 +499,7 @@ def _recipe_option_arguments(
             openssl_linkage=openssl_linkage,
         )
     )
+    arguments.extend(_windows_openssl_conan_host_option_arguments(selected_dependency_sources))
     arguments.extend(_windows_recipe_conf_arguments(selected_dependency_sources))
     return arguments
 
