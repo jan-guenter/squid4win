@@ -53,9 +53,20 @@ _DETECT_CONAN_PROFILE_DESCRIPTION = (
     "Detect the Conan default profile for the repo-local CONAN_HOME."
 )
 _CONAN_CLI_UNAVAILABLE_MESSAGE = "The conan CLI is not available on PATH. Run uv sync first."
+_UTC_ZERO_OFFSET = "+00:00"
 _CONAN_VALIDATION_LOG_FILENAMES = frozenset(
     {"config.log", "config.status", "config.cache", "CMakeOutput.log", "CMakeError.log"}
 )
+_CONAN_VALIDATION_PACKAGE_DIRECTORIES = (
+    "bin",
+    "sbin",
+    "lib",
+    "libexec",
+    "etc",
+    "share",
+    "licenses",
+)
+_CONAN_VALIDATION_PACKAGE_FILE_SUFFIXES = frozenset({".json", ".txt"})
 _SUPPORTED_DEPENDENCY_SOURCES = frozenset({"system", "conan"})
 _WINDOWS_MSYS2_ENV_DIRECTORY = "mingw64"
 _WINDOWS_MSYS2_BASE_PACKAGES = [
@@ -577,6 +588,10 @@ def _detect_conan_profile_invocation(base_environment: dict[str, str]) -> Proces
 def _require_conan_cli() -> None:
     if shutil.which("conan") is None:
         raise FileNotFoundError(_CONAN_CLI_UNAVAILABLE_MESSAGE)
+
+
+def _utc_now_z() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds").replace(_UTC_ZERO_OFFSET, "Z")
 
 
 def _description_suffix(options: SquidBuildOptions) -> str:
@@ -1681,7 +1696,7 @@ def _write_source_manifest(
     tray_package_root: Path | None,
 ) -> None:
     source_manifest: dict[str, Any] = {
-        "generated_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "generated_at": _utc_now_z(),
         "configuration": configuration_label,
         "squid": {
             "version": str(metadata["version"]),
@@ -2236,9 +2251,7 @@ def _harvest_tray_notice_manifest(publish_root: Path, package_root: Path) -> Pat
     manifest_path.write_text(
         json.dumps(
             {
-                "generated_at": datetime.now(UTC)
-                .isoformat(timespec="seconds")
-                .replace("+00:00", "Z"),
+                "generated_at": _utc_now_z(),
                 "packages": third_party_packages,
             },
             indent=2,
@@ -2398,19 +2411,29 @@ def _artifact_token(*segments: str) -> str:
 
 
 def _latest_tree_modification_time(path: Path) -> float:
-    latest_mtime = 0.0
     try:
         latest_mtime = path.stat().st_mtime
     except OSError:
-        return latest_mtime
+        return 0.0
 
-    for candidate in path.rglob("*"):
+    pending = deque([path])
+    while pending:
+        current = pending.popleft()
         try:
-            candidate_mtime = candidate.stat().st_mtime
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        candidate_mtime = entry.stat(follow_symlinks=False).st_mtime
+                    except OSError:
+                        continue
+
+                    if candidate_mtime > latest_mtime:
+                        latest_mtime = candidate_mtime
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
         except OSError:
             continue
-        if candidate_mtime > latest_mtime:
-            latest_mtime = candidate_mtime
+
     return latest_mtime
 
 
@@ -2435,6 +2458,39 @@ def _copy_if_file(source: Path, destination: Path) -> bool:
     return True
 
 
+def _stage_validation_package_artifacts(
+    package_source_root: Path,
+    staging_root: Path,
+) -> list[str]:
+    if not package_source_root.is_dir():
+        return []
+
+    package_destination_root = staging_root / "package"
+    staged_entries: list[str] = []
+    for directory_name in _CONAN_VALIDATION_PACKAGE_DIRECTORIES:
+        source_directory = package_source_root / directory_name
+        if not source_directory.is_dir():
+            continue
+
+        destination_directory = package_destination_root / directory_name
+        shutil.copytree(source_directory, destination_directory, dirs_exist_ok=True)
+        staged_entries.append(_relative_summary_path(destination_directory, staging_root))
+
+    for source_path in sorted(package_source_root.iterdir(), key=lambda path: path.name.lower()):
+        if (
+            not source_path.is_file()
+            or source_path.suffix.lower() not in _CONAN_VALIDATION_PACKAGE_FILE_SUFFIXES
+        ):
+            continue
+
+        destination_path = package_destination_root / source_path.name
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination_path)
+        staged_entries.append(_relative_summary_path(destination_path, staging_root))
+
+    return staged_entries
+
+
 def _stage_validation_log_files(cache_root: Path, staging_root: Path) -> list[str]:
     build_root = cache_root / "b"
     if not build_root.is_dir():
@@ -2452,6 +2508,75 @@ def _stage_validation_log_files(cache_root: Path, staging_root: Path) -> list[st
         shutil.copy2(source_path, destination_path)
         copied_logs.append(_relative_summary_path(destination_path, staging_root))
     return copied_logs
+
+
+def _stage_validation_cache_artifacts(
+    cache_root: Path,
+    staging_root: Path,
+) -> tuple[list[str], list[str]]:
+    staged_entries = _stage_validation_package_artifacts(cache_root / "p", staging_root)
+
+    metadata_source_root = cache_root / "d" / "metadata"
+    if metadata_source_root.is_dir():
+        metadata_destination_root = staging_root / "cache-metadata"
+        shutil.copytree(metadata_source_root, metadata_destination_root, dirs_exist_ok=True)
+        staged_entries.append(_relative_summary_path(metadata_destination_root, staging_root))
+
+    build_metadata_root = staging_root / "build-metadata"
+    for source_path, destination_path in (
+        (cache_root / "b" / "conaninfo.txt", build_metadata_root / "conaninfo.txt"),
+        (cache_root / "b" / "conanbuild.sh", build_metadata_root / "conanbuild.sh"),
+        (cache_root / "b" / "conanbuild.bat", build_metadata_root / "conanbuild.bat"),
+    ):
+        if _copy_if_file(source_path, destination_path):
+            staged_entries.append(_relative_summary_path(destination_path, staging_root))
+
+    copied_logs = _stage_validation_log_files(cache_root, staging_root)
+    staged_entries.extend(copied_logs)
+    return staged_entries, copied_logs
+
+
+def _write_validation_artifact_metadata(
+    staging_root: Path,
+    *,
+    platform_label: str,
+    compiler_label: str,
+    resolved_host_profile_path: Path,
+    options: ConanRecipeArtifactStageOptions,
+    paths: RepositoryPaths,
+    conan_home: Path,
+    cache_root: Path | None,
+    staged_entries: list[str],
+) -> Path:
+    metadata_path = staging_root / "validation-artifact-metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "generated_at": _utc_now_z(),
+                "platform": platform_label,
+                "compiler_label": compiler_label,
+                "host_profile_path": _relative_summary_path(
+                    resolved_host_profile_path,
+                    paths.repository_root,
+                ),
+                "library_configuration_label": options.library_configuration_label,
+                "configuration": options.configuration.value,
+                "dependency_sources": options.dependency_sources.as_option_values(),
+                "openssl_linkage": options.openssl_linkage.value,
+                "conan_home": _relative_summary_path(conan_home, paths.repository_root),
+                "selected_cache_root": (
+                    None
+                    if cache_root is None
+                    else _relative_summary_path(cache_root, conan_home)
+                ),
+                "staged_entries": sorted(set(staged_entries)),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return metadata_path
 
 
 def build_conan_recipe_validation_plan(
@@ -4033,65 +4158,23 @@ def run_conan_recipe_artifact_staging(
     _remove_tree(staging_root)
     staging_root.mkdir(parents=True, exist_ok=True)
 
-    staged_entries: list[str] = []
-    copied_logs: list[str] = []
     if cache_root is not None:
-        package_source_root = cache_root / "p"
-        if package_source_root.is_dir():
-            package_destination_root = staging_root / "package"
-            shutil.copytree(package_source_root, package_destination_root, dirs_exist_ok=True)
-            staged_entries.append(_relative_summary_path(package_destination_root, staging_root))
-
-        metadata_source_root = cache_root / "d" / "metadata"
-        if metadata_source_root.is_dir():
-            metadata_destination_root = staging_root / "cache-metadata"
-            shutil.copytree(metadata_source_root, metadata_destination_root, dirs_exist_ok=True)
-            staged_entries.append(_relative_summary_path(metadata_destination_root, staging_root))
-
-        build_metadata_root = staging_root / "build-metadata"
-        for source_path, destination_path in (
-            (cache_root / "b" / "conaninfo.txt", build_metadata_root / "conaninfo.txt"),
-            (cache_root / "b" / "conanbuild.sh", build_metadata_root / "conanbuild.sh"),
-            (cache_root / "b" / "conanbuild.bat", build_metadata_root / "conanbuild.bat"),
-        ):
-            if _copy_if_file(source_path, destination_path):
-                staged_entries.append(_relative_summary_path(destination_path, staging_root))
-
-        copied_logs = _stage_validation_log_files(cache_root, staging_root)
-        staged_entries.extend(copied_logs)
+        staged_entries, copied_logs = _stage_validation_cache_artifacts(cache_root, staging_root)
     else:
         logger.warning("No Squid Conan validation cache root was found under %s.", conan_home)
+        staged_entries = []
+        copied_logs = []
 
-    metadata_path = staging_root / "validation-artifact-metadata.json"
-    metadata_path.write_text(
-        json.dumps(
-            {
-                "generated_at": datetime.now(UTC).isoformat(timespec="seconds").replace(
-                    "+00:00",
-                    "Z",
-                ),
-                "platform": platform_label,
-                "compiler_label": options.compiler_label,
-                "host_profile_path": _relative_summary_path(
-                    resolved_host_profile_path,
-                    paths.repository_root,
-                ),
-                "library_configuration_label": options.library_configuration_label,
-                "configuration": options.configuration.value,
-                "dependency_sources": options.dependency_sources.as_option_values(),
-                "openssl_linkage": options.openssl_linkage.value,
-                "conan_home": _relative_summary_path(conan_home, paths.repository_root),
-                "selected_cache_root": (
-                    None
-                    if cache_root is None
-                    else _relative_summary_path(cache_root, conan_home)
-                ),
-                "staged_entries": sorted(set(staged_entries)),
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    metadata_path = _write_validation_artifact_metadata(
+        staging_root,
+        platform_label=platform_label,
+        compiler_label=compiler_label,
+        resolved_host_profile_path=resolved_host_profile_path,
+        options=options,
+        paths=paths,
+        conan_home=conan_home,
+        cache_root=cache_root,
+        staged_entries=staged_entries,
     )
 
     append_step_summary(
