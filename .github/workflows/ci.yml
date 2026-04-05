@@ -4,10 +4,12 @@ on:
   pull_request:
     paths:
       - '.github/workflows/**'
-      - '.github/linters/**'
       - '.editorconfig'
       - '.markdownlint-cli2.jsonc'
+      - '.markdownlint.json'
+      - '.markdownlintignore'
       - '.mega-linter.yml'
+      - '.yamllint.yml'
       - 'Directory.Build.props'
       - 'scripts/PSScriptAnalyzerSettings.psd1'
       - 'pyproject.toml'
@@ -19,15 +21,18 @@ on:
       - 'conan/**'
       - 'packaging/**'
       - 'scripts/**'
+      - 'skills/**'
   push:
     branches:
       - main
     paths:
       - '.github/workflows/**'
-      - '.github/linters/**'
       - '.editorconfig'
       - '.markdownlint-cli2.jsonc'
+      - '.markdownlint.json'
+      - '.markdownlintignore'
       - '.mega-linter.yml'
+      - '.yamllint.yml'
       - 'Directory.Build.props'
       - 'scripts/PSScriptAnalyzerSettings.psd1'
       - 'pyproject.toml'
@@ -39,6 +44,7 @@ on:
       - 'conan/**'
       - 'packaging/**'
       - 'scripts/**'
+      - 'skills/**'
   workflow_dispatch:
 
 permissions:
