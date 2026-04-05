@@ -33,9 +33,12 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   mirrors the same runtime DLL set into `artifacts\install-root`.
 - Python 3.14 + `uv` now owns the repo-level build, stage, smoke-test, and
   package entry points.
-- Repository linting is centered on `.mega-linter.yml` plus
-  `.github\linters\`; `ty` remains a companion Python type-check step outside
-  MegaLinter.
+- Repository linting is centered on `.mega-linter.yml` plus root-level
+  first-party linter config files; `ty` and `skill-frontmatter-lint` remain
+  companion Python checks outside MegaLinter.
+- PR validation workflows now publish markdown job summaries plus sticky PR
+  comments through dedicated report jobs that also serve as the aggregated
+  GitHub checks for those workflows.
 - PowerShell remains allowed for MSI custom actions and install-time helper
   logic, not as the long-term repo orchestration layer.
 - The installed service helper now runs `squid.exe -k parse`, `squid.exe -z`,
@@ -116,9 +119,14 @@ here.
 - Keep markdown guidance centralized. Use markdownlint,
   `skills\gfm\SKILL.md`, `.mega-linter.yml`, and the repo-owned markdown audit
   direction instead of scattered local rules.
-- Keep MegaLinter rule files under `.github\linters\` when new first-party lint
-  configuration is required.
+- Keep first-party linter config files in the repository root when the
+  underlying tool can discover them there by default, and keep
+  `.mega-linter.yml` aligned with that layout.
 - Treat `skills\` as the canonical home for repo-owned custom skills.
+- Keep repo-owned `SKILL.md` frontmatter compatible with the repository's
+  `skill-frontmatter-lint` command: require `name`, `description`, and
+  `skill_api_version: 1`, and keep optional keys within the current
+  Copilot/Agent Skills/Claude-compatible set documented in `skills\README.md`.
 - Treat `.agents\skills\` as externally synced skills plus mirror directories
   backed by symlinked files into `skills\`. Do not disturb unrelated
   skill-vendoring changes.

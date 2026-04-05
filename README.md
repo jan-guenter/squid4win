@@ -126,9 +126,15 @@ Some checked-in `scripts\*.ps1` files still remain for installer-time behavior,
 optional signing, and historical update fallbacks. Keep them narrow and do not
 extend them as the long-term orchestration model.
 
-CI linting is now centered on MegaLinter via `.mega-linter.yml` and
-`.github\linters\`, with `ty` kept as a companion Python type-check step
-because MegaLinter does not currently expose a `ty` descriptor.
+CI linting is now centered on MegaLinter via `.mega-linter.yml` and the
+root-level linter config files that the underlying tools discover by default,
+with `ty` kept as a companion Python type-check step and
+`skill-frontmatter-lint` kept as a companion repo-owned skill validator because
+MegaLinter does not currently expose descriptors for either `ty` or the
+repo's Copilot-compatible skill frontmatter contract.
+PR-focused validation workflows now also publish human-readable markdown job
+summaries and sticky PR comments, with dedicated report jobs that surface the
+aggregated workflow status as native GitHub checks.
 
 The installed service helper validates generated configs with
 `squid.exe -k parse`, initializes the cache hierarchy with `squid.exe -z`, and

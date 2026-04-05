@@ -54,6 +54,7 @@ from squid4win.package_managers import (
     run_publish_winget,
 )
 from squid4win.runner import PlanExecutionError, PlanRunner
+from squid4win.skill_frontmatter import lint_repo_owned_skills
 from squid4win.upstream import GitHubReleaseClient
 from squid4win.utils.actions import context as github_actions_context
 from squid4win.version_helper import TargetUpstreamRelease, UpstreamVersionManager
@@ -1129,6 +1130,36 @@ def upstream_version(
 
     manager = UpstreamVersionManager(options, logger=logger)
     manager.synchronize(release, execute=runtime.execute)
+
+
+@app.command(
+    "skill-frontmatter-lint",
+    help=(
+        "Validate repo-owned skill SKILL.md frontmatter against the repo's "
+        "Copilot-compatible contract."
+    ),
+)
+def skill_frontmatter_lint(
+    repository_root: RepositoryRootOption = None,
+    verbose: VerboseOption = 0,
+    quiet: QuietOption = 0,
+    skills_root: Annotated[Path | None, typer.Option("--skills-root")] = None,
+) -> None:
+    configure_logging(level_name_from_verbosity(verbose=verbose, quiet=quiet), force=True)
+    logger = get_logger("squid4win.skills")
+    _log_github_context(logger)
+
+    result = lint_repo_owned_skills(repository_root=repository_root, skills_root=skills_root)
+    if result.issues:
+        for issue in result.issues:
+            logger.error("%s", issue)
+        raise typer.Exit(1)
+
+    logger.info(
+        "Validated %d repo-owned skill(s) under %s.",
+        len(result.validated_skills),
+        result.skills_root,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

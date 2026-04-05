@@ -13,8 +13,8 @@ in a repository.
 
 - designing or refactoring `.mega-linter.yml`
 - choosing and scoping MegaLinter descriptors
-- creating or organizing linter-specific rule files under
-  `.github/linters/`
+- creating or organizing root-level linter config files that the underlying
+  tools discover by default
 - integrating MegaLinter into GitHub Actions or another CI system
 - documenting local `mega-linter-runner` usage
 - deciding when to keep a companion linter outside MegaLinter
@@ -31,8 +31,8 @@ in a repository.
 - Keep MegaLinter configuration in the repository root at
   `.mega-linter.yml` unless the host tooling requires an explicit
   alternate path.
-- Keep linter-specific rule files in a predictable location such as
-  `.github/linters/`.
+- Prefer root-level linter config files when the underlying tool supports
+  default discovery there.
 - Prefer an explicit `ENABLE_LINTERS` list when stability matters so the
   lint surface does not change just because a new file type appears.
 - Adopt additional linters in low-noise, reviewable increments.
@@ -40,6 +40,10 @@ in a repository.
   acceptable equivalent for an existing required tool.
 - Upload `megalinter-reports` and `mega-linter.log` as CI artifacts on
   success and failure.
+- When MegaLinter is part of PR validation, make GitHub PR decoration explicit
+  and pair it with a workflow-native markdown summary or report job so the
+  overall lint surface stays readable even when companion checks remain outside
+  MegaLinter.
 - If the repository pins GitHub Actions by commit SHA, pin MegaLinter the
   same way.
 - Remember that local `mega-linter-runner` usage can inherit the current
@@ -113,6 +117,8 @@ EXCLUDED_DIRECTORIES:
   continue-on-error: true
   uses: oxsecurity/megalinter@v9
   env:
+    ENABLE_GITHUB_COMMENT: true
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     VALIDATE_ALL_CODEBASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 - name: Upload MegaLinter reports

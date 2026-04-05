@@ -33,6 +33,8 @@ symlinked files that expose these repo-owned skills to Copilot.
 - Externally synced skills: add them with
   `npx skills add -a github-copilot -y <repo> --skill <skill>`. That updates
   `.agents\skills\` and `skills-lock.json`; do not move them into `skills\`.
+- Repo-owned skill frontmatter is validated by
+  `uv run squid4win-automation skill-frontmatter-lint`.
 - Repo-owned skills: create them under `skills\<skill-name>\`, create the
   matching `.agents\skills\<skill-name>\` mirror directory, and symlink the
   files inside it back to the canonical files under `skills\`.
@@ -43,5 +45,11 @@ symlinked files that expose these repo-owned skills to Copilot.
   Windows checkouts.
 - The common mirror target for a repo-owned skill file is
   `../../../skills/<skill-name>/<file-name>`.
+- For this repository, keep repo-owned `SKILL.md` frontmatter on the current
+  Copilot-compatible contract: required keys are `name`, `description`, and
+  `skill_api_version: 1`. Optional keys should stay within the current
+  supported set: `license`, `compatibility`, `metadata`, `allowed-tools`,
+  `argument-hint`, `disable-model-invocation`, `user-invocable`, `model`,
+  `effort`, `context`, `agent`, `hooks`, `paths`, and `shell`.
 - Update this README whenever a repo-owned skill is added, removed, renamed,
   or materially re-described.

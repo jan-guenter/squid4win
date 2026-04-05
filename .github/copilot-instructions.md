@@ -59,9 +59,13 @@ Repo-specific directives:
 - Keep markdown policy centralized in `skills\gfm\SKILL.md`, markdown audits,
   `.mega-linter.yml`, and markdownlint; do not create competing local markdown
   rules.
-- Keep MegaLinter rule files under `.github\linters\` and preserve `ty` as the
+- Keep first-party linter config files in the repository root when the
+  underlying tool discovers them there by default, and preserve `ty` as the
   companion Python type-check step until the repo intentionally adopts a
   MegaLinter-native replacement.
+- Keep PR-facing validation workflows posting human-readable markdown job
+  summaries and sticky PR comments through dedicated report jobs rather than
+  ad-hoc duplicated comment scripts.
 - Local target-state validation now includes the Python-owned `squid-build`,
   `smoke-test`, and `bundle-package` path.
 - Do not claim clean-host installer behavior or installed-service plus tray
