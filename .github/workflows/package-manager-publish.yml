@@ -159,7 +159,7 @@ jobs:
       - name: Publish winget manifest
         id: publish
         env:
-           GH_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
         run: |
            uv run squid4win-automation publish-winget `
              --repository-root $PWD.Path `
@@ -265,7 +265,7 @@ jobs:
       - name: Publish Chocolatey package
         id: publish
         env:
-           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
            uv run squid4win-automation publish-chocolatey `
              --repository-root $PWD.Path `
@@ -362,7 +362,7 @@ jobs:
       - name: Publish Scoop manifest
         id: publish
         env:
-           GH_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
         run: |
            uv run squid4win-automation publish-scoop `
              --repository-root $PWD.Path `
