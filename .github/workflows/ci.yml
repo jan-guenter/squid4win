@@ -195,7 +195,10 @@ jobs:
               'failure' { '❌ `failure`'; break }
               'cancelled' { '🚫 `cancelled`'; break }
               'skipped' { '⏭️ `skipped`'; break }
-              default { "❔ `$(if ($Outcome) { $Outcome } else { 'unknown' })`" }
+              default {
+                $display = if ([string]::IsNullOrWhiteSpace($Outcome)) { 'unknown' } else { $Outcome }
+                "❔ $display"
+              }
             }
           }
           $summaryLines = @(
@@ -465,7 +468,10 @@ jobs:
               'failure' { '❌ `failure`'; break }
               'cancelled' { '🚫 `cancelled`'; break }
               'skipped' { '⏭️ `skipped`'; break }
-              default { "❔ `$(if ($Outcome) { $Outcome } else { 'unknown' })`" }
+              default {
+                $display = if ([string]::IsNullOrWhiteSpace($Outcome)) { 'unknown' } else { $Outcome }
+                "❔ $display"
+              }
             }
           }
           $summaryLines = @(
@@ -496,6 +502,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      pull-requests: write
     steps:
       - name: Build CI report
         id: report
