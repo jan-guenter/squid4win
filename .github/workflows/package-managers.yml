@@ -160,16 +160,15 @@ jobs:
       - name: Generate package manager metadata
         id: manifests
         run: |
-          $downloadRoot = Join-Path $PWD.Path 'artifacts\downloads'
-          uv run squid4win-automation package-manager-export `
-            --repository-root $PWD.Path `
-            --version '${{ steps.release.outputs.version }}' `
-            --tag '${{ steps.release.outputs.tag }}' `
-            --repository '${{ steps.release.outputs.repository }}' `
-            --msi-path (Join-Path $downloadRoot 'squid4win.msi') `
-            --portable-zip-path (Join-Path $downloadRoot 'squid4win-portable.zip') `
-            --output-root (Join-Path $PWD.Path 'artifacts\package-managers') `
-            --execute
+           $downloadRoot = Join-Path $PWD.Path 'artifacts\downloads'
+           uv run squid4win-automation package-manager-export `
+             --repository-root $PWD.Path `
+             --version '${{ steps.release.outputs.version }}' `
+             --tag '${{ steps.release.outputs.tag }}' `
+             --repository '${{ steps.release.outputs.repository }}' `
+             --msi-path (Join-Path $downloadRoot 'squid4win.msi') `
+             --portable-zip-path (Join-Path $downloadRoot 'squid4win-portable.zip') `
+             --output-root (Join-Path $PWD.Path 'artifacts\package-managers')
 
       - name: Upload package manager artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7

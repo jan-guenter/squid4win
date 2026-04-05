@@ -56,8 +56,7 @@ jobs:
             'squid4win-automation',
             'upstream-version',
             '--repository-root',
-            $PWD.Path,
-            '--execute'
+            $PWD.Path
           )
           if ($env:REQUESTED_MAJOR_VERSION) {
             $arguments += @('--major-version', $env:REQUESTED_MAJOR_VERSION)
@@ -84,7 +83,7 @@ jobs:
             - use this scheduled workflow because Dependabot does not manage Conan package graphs or raw upstream Squid release pins
 
             ## Validation
-            - refreshed release metadata with `uv run squid4win-automation upstream-version --execute`
+            - refreshed release metadata with `uv run squid4win-automation upstream-version`
           labels: |
             dependencies
             upstream-squid

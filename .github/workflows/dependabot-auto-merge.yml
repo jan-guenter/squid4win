@@ -23,7 +23,9 @@ jobs:
           script: |
             const allowed = [
               '.github/workflows/',
-              '.github/linters/',
+              '.markdownlint.json',
+              '.markdownlintignore',
+              '.yamllint.yml',
               '.mega-linter.yml',
               '.github/dependabot.yml',
               '.markdownlint-cli2.jsonc',

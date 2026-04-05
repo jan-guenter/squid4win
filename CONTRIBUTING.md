@@ -76,7 +76,7 @@ improvements when they stay within the current repository contracts.
   recipes.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
-  `uv run squid4win-automation upstream-version --execute` for that update flow;
+  `uv run squid4win-automation upstream-version` for that update flow;
   keep `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when
   the Python automation environment is unavailable.
 - Preserve artifact names `squid4win.msi` and `squid4win-portable.zip` unless
@@ -94,6 +94,11 @@ improvements when they stay within the current repository contracts.
 ## Preparing a change
 
 Try to keep each pull request focused on one concern.
+
+The Python CLI now executes commands by default. Use `--dry-run` for preview
+runs, use repeated `-v` or `-q` flags to tune log detail, and keep the guided
+no-args selector reserved for interactive TTY sessions instead of CI or other
+scripted contexts.
 
 If your change affects contributor-facing behavior, update the matching docs in
 the same pull request. Typical pairings are:

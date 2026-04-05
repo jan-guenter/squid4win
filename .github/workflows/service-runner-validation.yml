@@ -128,22 +128,24 @@ jobs:
             ${{ runner.os }}-conan-
 
       - name: Build native Squid bundle
+        id: build_bundle
         run: |
-          uv run squid4win-automation squid-build `
-            --repository-root $PWD.Path `
-            --configuration Release `
-            --lockfile-path 'conan\lockfiles\msys2-mingw-x64-release.lock' `
-            --refresh-lockfile `
-            --with-tray `
-            --with-runtime-dlls `
-            --with-packaging-support `
-            --execute
+           uv run squid4win-automation squid-build `
+             --repository-root $PWD.Path `
+             --configuration Release `
+             --lockfile-path 'conan\lockfiles\msys2-mingw-x64-release.lock' `
+             --refresh-lockfile `
+             --with-tray `
+             --with-runtime-dlls `
+             --with-packaging-support
 
       - name: Smoke test Squid
-        run: uv run squid4win-automation smoke-test --execute --configuration Release --require-notices
+        id: smoke_test
+        run: uv run squid4win-automation smoke-test --configuration Release --require-notices
 
       - name: Validate installed service lifecycle
-        run: uv run squid4win-automation service-runner-validation --execute --configuration Release
+        id: service_validation
+        run: uv run squid4win-automation service-runner-validation --configuration Release
 
       - name: Upload runner build and validation artifacts
         if: ${{ always() }}
@@ -156,3 +158,123 @@ jobs:
             build\conan\msys2-mingw-x64-release\build\**\config.log
             artifacts\service-validation\**
           if-no-files-found: warn
+
+      - name: Summarize installed service validation
+        if: ${{ always() }}
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+          function Format-Result([string]$Outcome) {
+            switch ($Outcome) {
+              'success' { '✅ `success`'; break }
+              'failure' { '❌ `failure`'; break }
+              'cancelled' { '🚫 `cancelled`'; break }
+              'skipped' { '⏭️ `skipped`'; break }
+              default {
+                $display = if ([string]::IsNullOrWhiteSpace($Outcome)) { 'unknown' } else { $Outcome }
+                "❔ $display"
+              }
+            }
+          }
+          $summaryLines = @(
+            '## Installed service validation summary',
+            '',
+            '| Check | Result |',
+            '| --- | --- |',
+            ('| Build native Squid bundle | {0} |' -f (Format-Result '${{ steps.build_bundle.outcome }}')),
+            ('| Smoke test Squid | {0} |' -f (Format-Result '${{ steps.smoke_test.outcome }}')),
+            ('| Validate installed service lifecycle | {0} |' -f (Format-Result '${{ steps.service_validation.outcome }}')),
+            '',
+            '- Artifact: `service-runner-validation`'
+          )
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  report-validation:
+    name: Report service validation results
+    if: ${{ always() }}
+    needs:
+      - validate-windows-recipe
+      - validate-installed-service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Build service validation report
+        id: report
+        shell: bash
+        env:
+          VALIDATE_WINDOWS_RESULT: ${{ needs.validate-windows-recipe.result }}
+          VALIDATE_SERVICE_RESULT: ${{ needs.validate-installed-service.result }}
+        run: |
+          mkdir -p reports
+
+          format_result() {
+            case "$1" in
+              success) printf "✅ \`success\`" ;;
+              failure) printf "❌ \`failure\`" ;;
+              cancelled) printf "🚫 \`cancelled\`" ;;
+              skipped) printf "⏭️ \`skipped\`" ;;
+              *) printf "❔ \`%s\`" "${1:-unknown}" ;;
+            esac
+          }
+
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          report_path="reports/service-runner-validation-report.md"
+          cat > "$report_path" <<EOF
+          <!-- squid4win:service-runner-validation-report -->
+          ## Service runner validation report
+
+          | Job | Result | Details |
+          | --- | --- | --- |
+          | Validate Windows recipe | $(format_result "$VALIDATE_WINDOWS_RESULT") | Artifacts \`conan-validation-windows-*\` |
+          | Validate installed service | $(format_result "$VALIDATE_SERVICE_RESULT") | Artifact \`service-runner-validation\` |
+
+          - Workflow run: [${{ github.workflow }} #${{ github.run_number }}]($run_url)
+          - This report job is the GitHub check for the aggregated service validation summary.
+          EOF
+
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            cat "$report_path" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "report_path=$report_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upsert service validation PR comment
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          REPORT_PATH: ${{ steps.report.outputs.report_path }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- squid4win:service-runner-validation-report -->';
+            const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            const issue_number = context.payload.pull_request.number;
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user?.type === 'Bot' && comment.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });

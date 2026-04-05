@@ -37,9 +37,12 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   mirrors the same runtime DLL set into `artifacts\install-root`.
 - Python 3.14 + `uv` now owns the repo-level build, stage, smoke-test, and
   package entry points.
-- Repository linting is centered on `.mega-linter.yml` plus
-  `.github\linters\`; `ty` remains a companion Python type-check step outside
-  MegaLinter.
+- Repository linting is centered on `.mega-linter.yml` plus root-level
+  first-party linter config files; `ty` and `skill-frontmatter-lint` remain
+  companion Python checks outside MegaLinter.
+- PR validation workflows now publish markdown job summaries plus sticky PR
+  comments through dedicated report jobs that also serve as the aggregated
+  GitHub checks for those workflows.
 - PowerShell remains allowed for MSI custom actions and install-time helper
   logic, not as the long-term repo orchestration layer.
 - The installed service helper now runs `squid.exe -k parse`, `squid.exe -z`,
@@ -84,7 +87,7 @@ here.
   when contributor guidance changes.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
-  `uv run squid4win-automation upstream-version --execute`; keep
+  `uv run squid4win-automation upstream-version`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
 - Keep `CONAN_HOME` repo-local at `.\.conan2`.
@@ -96,6 +99,9 @@ here.
 - Treat `uv run squid4win-automation ...` as the supported repo-level surface
   for Squid builds, tray builds, bundle packaging, validation, metadata
   updates, and Conan lockfile refresh.
+- Python CLI commands execute by default; use `--dry-run` to preview work, and
+  use repeated `-v`/`-q` flags to adjust log detail. Keep the guided no-args
+  selector limited to real TTYs outside CI.
 - Keep the Python CLI flags and Squid recipe options aligned for dependency
   source selection: `--openssl-source`, `--libxml2-source`, `--pcre2-source`,
   and `--zlib-source` should continue to map directly to the recipe's
@@ -120,9 +126,14 @@ here.
 - Keep markdown guidance centralized. Use markdownlint,
   `skills\gfm\SKILL.md`, `.mega-linter.yml`, and the repo-owned markdown audit
   direction instead of scattered local rules.
-- Keep MegaLinter rule files under `.github\linters\` when new first-party lint
-  configuration is required.
+- Keep first-party linter config files in the repository root when the
+  underlying tool can discover them there by default, and keep
+  `.mega-linter.yml` aligned with that layout.
 - Treat `skills\` as the canonical home for repo-owned custom skills.
+- Keep repo-owned `SKILL.md` frontmatter compatible with the repository's
+  `skill-frontmatter-lint` command: require `name`, `description`, and
+  `skill_api_version: 1`, and keep optional keys within the current
+  Copilot/Agent Skills/Claude-compatible set documented in `skills\README.md`.
 - Treat `.agents\skills\` as externally synced skills plus mirror directories
   backed by symlinked files into `skills\`. Do not disturb unrelated
   skill-vendoring changes.

@@ -90,11 +90,10 @@ jobs:
         id: validate_recipe
         continue-on-error: true
         run: |
-          uv run squid4win-automation conan-recipe-validate `
-            --execute `
-            --repository-root $PWD.Path `
-            --configuration ${{ inputs.build_type }} `
-            --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
+           uv run squid4win-automation conan-recipe-validate `
+             --repository-root $PWD.Path `
+             --configuration ${{ inputs.build_type }} `
+             --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
             --build-profile default `
             --openssl-source ${{ inputs.openssl_source }} `
             --libxml2-source ${{ inputs.libxml2_source }} `
@@ -105,11 +104,10 @@ jobs:
       - name: Stage Conan validation artifacts
         if: ${{ always() }}
         run: |
-          uv run squid4win-automation conan-recipe-stage-artifacts `
-            --execute `
-            --repository-root $PWD.Path `
-            --configuration ${{ inputs.build_type }} `
-            --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
+           uv run squid4win-automation conan-recipe-stage-artifacts `
+             --repository-root $PWD.Path `
+             --configuration ${{ inputs.build_type }} `
+             --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
             --library-configuration-label "${{ inputs.library_configuration_label }}" `
             --openssl-source ${{ inputs.openssl_source }} `
             --libxml2-source ${{ inputs.libxml2_source }} `
@@ -124,6 +122,38 @@ jobs:
           name: conan-validation-windows-${{ inputs.library_configuration_label }}-${{ inputs.build_type }}
           path: artifacts\conan-recipe-validation\**
           if-no-files-found: error
+
+      - name: Summarize Conan recipe validation
+        if: ${{ always() }}
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+          function Format-Result([string]$Outcome) {
+            switch ($Outcome) {
+              'success' { '✅ `success`'; break }
+              'failure' { '❌ `failure`'; break }
+              'cancelled' { '🚫 `cancelled`'; break }
+              'skipped' { '⏭️ `skipped`'; break }
+              default {
+                $display = if ([string]::IsNullOrWhiteSpace($Outcome)) { 'unknown' } else { $Outcome }
+                "❔ $display"
+              }
+            }
+          }
+          $summaryLines = @(
+            '## Conan recipe validation summary',
+            '',
+            '| Field | Value |',
+            '| --- | --- |',
+            '| Platform | Windows |',
+            ('| Profile | `{0}` |' -f '${{ inputs.profile_name }}'),
+            ('| Build type | `{0}` |' -f '${{ inputs.build_type }}'),
+            ('| Library configuration | `{0}` |' -f '${{ inputs.library_configuration_label }}'),
+            ('| Validation step | {0} |' -f (Format-Result '${{ steps.validate_recipe.outcome }}')),
+            ('| Artifact | `{0}` |' -f 'conan-validation-windows-${{ inputs.library_configuration_label }}-${{ inputs.build_type }}')
+          )
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Fail when validation failed
         if: ${{ steps.validate_recipe.outcome != 'success' }}

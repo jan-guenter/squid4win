@@ -57,6 +57,11 @@ class NativeDependencySourceOptions(BaseModel):
         }
 
 
+def default_make_jobs() -> int:
+    cpu_count = os.process_cpu_count() or os.cpu_count() or 1
+    return max(1, min(cpu_count, 1024))
+
+
 def _string_from_env(name: str) -> str | None:
     value = os.getenv(name)
     if value is None:
@@ -443,12 +448,7 @@ class SquidBuildLayout(BaseModel):
                 / "package"
             ),
             conan_generators_root=(
-                build_root
-                / "conan"
-                / profile_stem
-                / "build"
-                / conan_configuration_label
-                / "conan"
+                build_root / "conan" / profile_stem / "build" / conan_configuration_label / "conan"
             ),
             repo_lockfile_path=repository_root / "conan" / "lockfiles" / f"{profile_stem}.lock",
             build_lock_path=build_root / "locks" / f"{profile_stem}.lock",
@@ -606,7 +606,7 @@ class SquidBuildOptions(BaseModel):
     build_profile: str = "default"
     lockfile_path: Path | None = None
     additional_configure_args: tuple[str, ...] = ()
-    make_jobs: Annotated[int, Field(ge=1, le=1024)] = 1
+    make_jobs: Annotated[int, Field(ge=1, le=1024)] = Field(default_factory=default_make_jobs)
     bootstrap_only: bool = False
     refresh_lockfile: bool = False
     clean: bool = False

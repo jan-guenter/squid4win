@@ -1,0 +1,1 @@
+..//..//..//skills//rich//SKILL.md

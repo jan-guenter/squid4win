@@ -136,7 +136,6 @@ jobs:
         continue-on-error: true
         run: |
           uv run squid4win-automation conan-recipe-validate \
-            --execute \
             --repository-root "$GITHUB_WORKSPACE" \
             --configuration "${{ inputs.build_type }}" \
             --host-profile-path "conan/profiles/${{ inputs.profile_name }}" \
@@ -151,7 +150,6 @@ jobs:
         if: ${{ always() }}
         run: |
           uv run squid4win-automation conan-recipe-stage-artifacts \
-            --execute \
             --repository-root "$GITHUB_WORKSPACE" \
             --configuration "${{ inputs.build_type }}" \
             --host-profile-path "conan/profiles/${{ inputs.profile_name }}" \
@@ -170,6 +168,38 @@ jobs:
           name: conan-validation-linux-${{ inputs.compiler_label }}-${{ inputs.library_configuration_label }}-${{ inputs.build_type }}
           path: artifacts/conan-recipe-validation/**
           if-no-files-found: error
+
+      - name: Summarize Conan recipe validation
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            exit 0
+          fi
+
+          format_result() {
+            case "$1" in
+              success) printf "✅ \`success\`" ;;
+              failure) printf "❌ \`failure\`" ;;
+              cancelled) printf "🚫 \`cancelled\`" ;;
+              skipped) printf "⏭️ \`skipped\`" ;;
+              *) printf "❔ \`%s\`" "${1:-unknown}" ;;
+            esac
+          }
+
+          {
+            echo "## Conan recipe validation summary"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Platform | Linux |"
+            echo "| Compiler | \`${{ inputs.compiler_label }}\` |"
+            echo "| Profile | \`${{ inputs.profile_name }}\` |"
+            echo "| Build type | \`${{ inputs.build_type }}\` |"
+            echo "| Library configuration | \`${{ inputs.library_configuration_label }}\` |"
+            echo "| Validation step | $(format_result \"${{ steps.validate_recipe.outcome }}\") |"
+            echo "| Artifact | \`conan-validation-linux-${{ inputs.compiler_label }}-${{ inputs.library_configuration_label }}-${{ inputs.build_type }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail when validation failed
         if: ${{ steps.validate_recipe.outcome != 'success' }}
