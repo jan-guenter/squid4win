@@ -34,6 +34,7 @@ on:
 permissions:
   contents: read
   issues: write
+  pull-requests: write
 
 concurrency:
   group: service-runner-validation-${{ github.workflow }}-${{ github.ref }}
@@ -172,7 +173,10 @@ jobs:
               'failure' { '❌ `failure`'; break }
               'cancelled' { '🚫 `cancelled`'; break }
               'skipped' { '⏭️ `skipped`'; break }
-              default { "❔ `$(if ($Outcome) { $Outcome } else { 'unknown' })`" }
+              default {
+                $display = if ([string]::IsNullOrWhiteSpace($Outcome)) { 'unknown' } else { $Outcome }
+                "❔ $display"
+              }
             }
           }
           $summaryLines = @(
@@ -198,6 +202,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      pull-requests: write
     steps:
       - name: Build service validation report
         id: report

@@ -9,6 +9,7 @@ from squid4win.utils.actions import annotation_level_from_logging, format_annota
 _DEFAULT_FORMAT: Final[str] = "%(levelname)s %(name)s: %(message)s"
 _LEVEL_NAMES: Final[tuple[str, ...]] = ("NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _DEFAULT_LEVEL_INDEX: Final[int] = 2
+_MINIMUM_VERBOSITY_INDEX: Final[int] = 1
 
 
 def is_github_actions() -> bool:
@@ -60,7 +61,10 @@ def level_name_from_verbosity(*, verbose: int = 0, quiet: int = 0) -> str:
     normalized_verbose = max(verbose, 0)
     normalized_quiet = max(quiet, 0)
     index = min(
-        max(_DEFAULT_LEVEL_INDEX + normalized_quiet - normalized_verbose, 0),
+        max(
+            _DEFAULT_LEVEL_INDEX + normalized_quiet - normalized_verbose,
+            _MINIMUM_VERBOSITY_INDEX,
+        ),
         len(_LEVEL_NAMES) - 1,
     )
     return _LEVEL_NAMES[index]

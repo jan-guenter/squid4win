@@ -106,7 +106,7 @@ VerboseOption = Annotated[
         "-v",
         "--verbose",
         count=True,
-        help="Increase logging verbosity. Repeat up to twice for additional detail.",
+        help="Increase logging verbosity. Repeatable; output clamps at DEBUG.",
     ),
 ]
 QuietOption = Annotated[
@@ -118,6 +118,31 @@ QuietOption = Annotated[
         help="Reduce logging verbosity. Repeat for WARNING, ERROR, then CRITICAL output.",
     ),
 ]
+ConfigurationOption = Annotated[BuildConfiguration, typer.Option("--configuration")]
+BuildRootOption = Annotated[Path | None, typer.Option("--build-root")]
+MetadataPathOption = Annotated[Path | None, typer.Option("--metadata-path")]
+HostProfilePathOption = Annotated[Path | None, typer.Option("--host-profile-path")]
+BuildProfileOption = Annotated[str, typer.Option("--build-profile")]
+LockfilePathOption = Annotated[Path | None, typer.Option("--lockfile-path")]
+ArtifactRootOption = Annotated[Path | None, typer.Option("--artifact-root")]
+CompilerLabelOption = Annotated[str | None, typer.Option("--compiler-label")]
+OpenSSLLinkageOption = Annotated[
+    ConanDependencyLinkage,
+    typer.Option("--openssl-linkage"),
+]
+WithTrayOption = Annotated[bool, typer.Option("--with-tray", is_flag=True)]
+WithRuntimeDllsOption = Annotated[
+    bool,
+    typer.Option("--with-runtime-dlls", is_flag=True),
+]
+WithPackagingSupportOption = Annotated[
+    bool,
+    typer.Option("--with-packaging-support", is_flag=True),
+]
+OpenSSLSourceOption = Annotated[DependencySource, typer.Option("--openssl-source")]
+Libxml2SourceOption = Annotated[DependencySource, typer.Option("--libxml2-source")]
+Pcre2SourceOption = Annotated[DependencySource, typer.Option("--pcre2-source")]
+ZlibSourceOption = Annotated[DependencySource, typer.Option("--zlib-source")]
 
 
 @dataclass(frozen=True)
@@ -423,14 +448,12 @@ def squid_build(
     execute_compat: ExecuteCompatOption = False,
     verbose: VerboseOption = 0,
     quiet: QuietOption = 0,
-    configuration: Annotated[
-        BuildConfiguration, typer.Option("--configuration")
-    ] = BuildConfiguration.RELEASE,
-    build_root: Annotated[Path | None, typer.Option("--build-root")] = None,
-    metadata_path: Annotated[Path | None, typer.Option("--metadata-path")] = None,
-    host_profile_path: Annotated[Path | None, typer.Option("--host-profile-path")] = None,
-    build_profile: Annotated[str, typer.Option("--build-profile")] = "default",
-    lockfile_path: Annotated[Path | None, typer.Option("--lockfile-path")] = None,
+    configuration: ConfigurationOption = BuildConfiguration.RELEASE,
+    build_root: BuildRootOption = None,
+    metadata_path: MetadataPathOption = None,
+    host_profile_path: HostProfilePathOption = None,
+    build_profile: BuildProfileOption = "default",
+    lockfile_path: LockfilePathOption = None,
     additional_configure_arg: Annotated[
         list[str] | None,
         typer.Option("--additional-configure-arg"),
@@ -447,24 +470,13 @@ def squid_build(
     bootstrap_only: Annotated[bool, typer.Option("--bootstrap-only", is_flag=True)] = False,
     refresh_lockfile: Annotated[bool, typer.Option("--refresh-lockfile", is_flag=True)] = False,
     clean: Annotated[bool, typer.Option("--clean", is_flag=True)] = False,
-    with_tray: Annotated[bool, typer.Option("--with-tray", is_flag=True)] = False,
-    with_runtime_dlls: Annotated[bool, typer.Option("--with-runtime-dlls", is_flag=True)] = False,
-    with_packaging_support: Annotated[
-        bool,
-        typer.Option("--with-packaging-support", is_flag=True),
-    ] = False,
-    openssl_source: Annotated[
-        DependencySource, typer.Option("--openssl-source")
-    ] = DependencySource.SYSTEM,
-    libxml2_source: Annotated[
-        DependencySource, typer.Option("--libxml2-source")
-    ] = DependencySource.SYSTEM,
-    pcre2_source: Annotated[
-        DependencySource, typer.Option("--pcre2-source")
-    ] = DependencySource.SYSTEM,
-    zlib_source: Annotated[
-        DependencySource, typer.Option("--zlib-source")
-    ] = DependencySource.SYSTEM,
+    with_tray: WithTrayOption = False,
+    with_runtime_dlls: WithRuntimeDllsOption = False,
+    with_packaging_support: WithPackagingSupportOption = False,
+    openssl_source: OpenSSLSourceOption = DependencySource.SYSTEM,
+    libxml2_source: Libxml2SourceOption = DependencySource.SYSTEM,
+    pcre2_source: Pcre2SourceOption = DependencySource.SYSTEM,
+    zlib_source: ZlibSourceOption = DependencySource.SYSTEM,
 ) -> None:
     runtime = _build_runtime(
         verbose=verbose,
@@ -508,9 +520,7 @@ def tray_build(
     execute_compat: ExecuteCompatOption = False,
     verbose: VerboseOption = 0,
     quiet: QuietOption = 0,
-    configuration: Annotated[
-        BuildConfiguration, typer.Option("--configuration")
-    ] = BuildConfiguration.RELEASE,
+    configuration: ConfigurationOption = BuildConfiguration.RELEASE,
     publish_root: Annotated[Path | None, typer.Option("--publish-root")] = None,
     package_root: Annotated[
         Path | None,
@@ -542,31 +552,18 @@ def conan_lockfile_update(
     execute_compat: ExecuteCompatOption = False,
     verbose: VerboseOption = 0,
     quiet: QuietOption = 0,
-    configuration: Annotated[
-        BuildConfiguration, typer.Option("--configuration")
-    ] = BuildConfiguration.RELEASE,
-    build_root: Annotated[Path | None, typer.Option("--build-root")] = None,
-    host_profile_path: Annotated[Path | None, typer.Option("--host-profile-path")] = None,
-    build_profile: Annotated[str, typer.Option("--build-profile")] = "default",
-    lockfile_path: Annotated[Path | None, typer.Option("--lockfile-path")] = None,
-    with_tray: Annotated[bool, typer.Option("--with-tray", is_flag=True)] = False,
-    with_runtime_dlls: Annotated[bool, typer.Option("--with-runtime-dlls", is_flag=True)] = False,
-    with_packaging_support: Annotated[
-        bool,
-        typer.Option("--with-packaging-support", is_flag=True),
-    ] = False,
-    openssl_source: Annotated[
-        DependencySource, typer.Option("--openssl-source")
-    ] = DependencySource.SYSTEM,
-    libxml2_source: Annotated[
-        DependencySource, typer.Option("--libxml2-source")
-    ] = DependencySource.SYSTEM,
-    pcre2_source: Annotated[
-        DependencySource, typer.Option("--pcre2-source")
-    ] = DependencySource.SYSTEM,
-    zlib_source: Annotated[
-        DependencySource, typer.Option("--zlib-source")
-    ] = DependencySource.SYSTEM,
+    configuration: ConfigurationOption = BuildConfiguration.RELEASE,
+    build_root: BuildRootOption = None,
+    host_profile_path: HostProfilePathOption = None,
+    build_profile: BuildProfileOption = "default",
+    lockfile_path: LockfilePathOption = None,
+    with_tray: WithTrayOption = False,
+    with_runtime_dlls: WithRuntimeDllsOption = False,
+    with_packaging_support: WithPackagingSupportOption = False,
+    openssl_source: OpenSSLSourceOption = DependencySource.SYSTEM,
+    libxml2_source: Libxml2SourceOption = DependencySource.SYSTEM,
+    pcre2_source: Pcre2SourceOption = DependencySource.SYSTEM,
+    zlib_source: ZlibSourceOption = DependencySource.SYSTEM,
 ) -> None:
     runtime = _build_runtime(
         verbose=verbose,
@@ -604,27 +601,14 @@ def conan_recipe_validate(
     execute_compat: ExecuteCompatOption = False,
     verbose: VerboseOption = 0,
     quiet: QuietOption = 0,
-    configuration: Annotated[
-        BuildConfiguration, typer.Option("--configuration")
-    ] = BuildConfiguration.RELEASE,
-    host_profile_path: Annotated[Path | None, typer.Option("--host-profile-path")] = None,
-    build_profile: Annotated[str, typer.Option("--build-profile")] = "default",
-    openssl_linkage: Annotated[
-        ConanDependencyLinkage,
-        typer.Option("--openssl-linkage"),
-    ] = ConanDependencyLinkage.DEFAULT,
-    openssl_source: Annotated[
-        DependencySource, typer.Option("--openssl-source")
-    ] = DependencySource.SYSTEM,
-    libxml2_source: Annotated[
-        DependencySource, typer.Option("--libxml2-source")
-    ] = DependencySource.SYSTEM,
-    pcre2_source: Annotated[
-        DependencySource, typer.Option("--pcre2-source")
-    ] = DependencySource.SYSTEM,
-    zlib_source: Annotated[
-        DependencySource, typer.Option("--zlib-source")
-    ] = DependencySource.SYSTEM,
+    configuration: ConfigurationOption = BuildConfiguration.RELEASE,
+    host_profile_path: HostProfilePathOption = None,
+    build_profile: BuildProfileOption = "default",
+    openssl_linkage: OpenSSLLinkageOption = ConanDependencyLinkage.DEFAULT,
+    openssl_source: OpenSSLSourceOption = DependencySource.SYSTEM,
+    libxml2_source: Libxml2SourceOption = DependencySource.SYSTEM,
+    pcre2_source: Pcre2SourceOption = DependencySource.SYSTEM,
+    zlib_source: ZlibSourceOption = DependencySource.SYSTEM,
 ) -> None:
     runtime = _build_runtime(
         verbose=verbose,
@@ -662,28 +646,15 @@ def conan_recipe_stage_artifacts(
     execute_compat: ExecuteCompatOption = False,
     verbose: VerboseOption = 0,
     quiet: QuietOption = 0,
-    configuration: Annotated[
-        BuildConfiguration, typer.Option("--configuration")
-    ] = BuildConfiguration.RELEASE,
-    artifact_root: Annotated[Path | None, typer.Option("--artifact-root")] = None,
-    host_profile_path: Annotated[Path | None, typer.Option("--host-profile-path")] = None,
-    compiler_label: Annotated[str | None, typer.Option("--compiler-label")] = None,
-    openssl_linkage: Annotated[
-        ConanDependencyLinkage,
-        typer.Option("--openssl-linkage"),
-    ] = ConanDependencyLinkage.DEFAULT,
-    openssl_source: Annotated[
-        DependencySource, typer.Option("--openssl-source")
-    ] = DependencySource.SYSTEM,
-    libxml2_source: Annotated[
-        DependencySource, typer.Option("--libxml2-source")
-    ] = DependencySource.SYSTEM,
-    pcre2_source: Annotated[
-        DependencySource, typer.Option("--pcre2-source")
-    ] = DependencySource.SYSTEM,
-    zlib_source: Annotated[
-        DependencySource, typer.Option("--zlib-source")
-    ] = DependencySource.SYSTEM,
+    configuration: ConfigurationOption = BuildConfiguration.RELEASE,
+    artifact_root: ArtifactRootOption = None,
+    host_profile_path: HostProfilePathOption = None,
+    compiler_label: CompilerLabelOption = None,
+    openssl_linkage: OpenSSLLinkageOption = ConanDependencyLinkage.DEFAULT,
+    openssl_source: OpenSSLSourceOption = DependencySource.SYSTEM,
+    libxml2_source: Libxml2SourceOption = DependencySource.SYSTEM,
+    pcre2_source: Pcre2SourceOption = DependencySource.SYSTEM,
+    zlib_source: ZlibSourceOption = DependencySource.SYSTEM,
 ) -> None:
     runtime = _build_runtime(
         verbose=verbose,
@@ -721,12 +692,10 @@ def bundle_package(
     execute_compat: ExecuteCompatOption = False,
     verbose: VerboseOption = 0,
     quiet: QuietOption = 0,
-    configuration: Annotated[
-        BuildConfiguration, typer.Option("--configuration")
-    ] = BuildConfiguration.RELEASE,
-    build_root: Annotated[Path | None, typer.Option("--build-root")] = None,
+    configuration: ConfigurationOption = BuildConfiguration.RELEASE,
+    build_root: BuildRootOption = None,
     squid_stage_root: Annotated[Path | None, typer.Option("--squid-stage-root")] = None,
-    artifact_root: Annotated[Path | None, typer.Option("--artifact-root")] = None,
+    artifact_root: ArtifactRootOption = None,
     installer_project_path: Annotated[Path | None, typer.Option("--installer-project-path")] = None,
     create_portable_zip: Annotated[
         bool, typer.Option("--create-portable-zip", is_flag=True)
@@ -738,18 +707,10 @@ def bundle_package(
     product_version: Annotated[str | None, typer.Option("--product-version")] = None,
     service_name: Annotated[str, typer.Option("--service-name")] = "Squid4Win",
     sign_msi: Annotated[bool, typer.Option("--sign-msi", is_flag=True)] = False,
-    openssl_source: Annotated[
-        DependencySource, typer.Option("--openssl-source")
-    ] = DependencySource.SYSTEM,
-    libxml2_source: Annotated[
-        DependencySource, typer.Option("--libxml2-source")
-    ] = DependencySource.SYSTEM,
-    pcre2_source: Annotated[
-        DependencySource, typer.Option("--pcre2-source")
-    ] = DependencySource.SYSTEM,
-    zlib_source: Annotated[
-        DependencySource, typer.Option("--zlib-source")
-    ] = DependencySource.SYSTEM,
+    openssl_source: OpenSSLSourceOption = DependencySource.SYSTEM,
+    libxml2_source: Libxml2SourceOption = DependencySource.SYSTEM,
+    pcre2_source: Pcre2SourceOption = DependencySource.SYSTEM,
+    zlib_source: ZlibSourceOption = DependencySource.SYSTEM,
 ) -> None:
     runtime = _build_runtime(
         verbose=verbose,
@@ -792,12 +753,10 @@ def smoke_test(
     execute_compat: ExecuteCompatOption = False,
     verbose: VerboseOption = 0,
     quiet: QuietOption = 0,
-    configuration: Annotated[
-        BuildConfiguration, typer.Option("--configuration")
-    ] = BuildConfiguration.RELEASE,
-    build_root: Annotated[Path | None, typer.Option("--build-root")] = None,
+    configuration: ConfigurationOption = BuildConfiguration.RELEASE,
+    build_root: BuildRootOption = None,
     squid_stage_root: Annotated[Path | None, typer.Option("--squid-stage-root")] = None,
-    metadata_path: Annotated[Path | None, typer.Option("--metadata-path")] = None,
+    metadata_path: MetadataPathOption = None,
     binary_path: Annotated[Path | None, typer.Option("--binary-path")] = None,
     require_notices: Annotated[bool, typer.Option("--require-notices", is_flag=True)] = False,
 ) -> None:
@@ -829,11 +788,9 @@ def service_runner_validation(
     execute_compat: ExecuteCompatOption = False,
     verbose: VerboseOption = 0,
     quiet: QuietOption = 0,
-    configuration: Annotated[
-        BuildConfiguration, typer.Option("--configuration")
-    ] = BuildConfiguration.RELEASE,
-    build_root: Annotated[Path | None, typer.Option("--build-root")] = None,
-    artifact_root: Annotated[Path | None, typer.Option("--artifact-root")] = None,
+    configuration: ConfigurationOption = BuildConfiguration.RELEASE,
+    build_root: BuildRootOption = None,
+    artifact_root: ArtifactRootOption = None,
     service_name: Annotated[str | None, typer.Option("--service-name")] = None,
     service_name_prefix: Annotated[str, typer.Option("--service-name-prefix")] = "Squid4WinRunner",
     install_root: Annotated[Path | None, typer.Option("--install-root")] = None,
@@ -845,18 +802,10 @@ def service_runner_validation(
         bool,
         typer.Option("--allow-non-runner-execution", is_flag=True),
     ] = False,
-    openssl_source: Annotated[
-        DependencySource, typer.Option("--openssl-source")
-    ] = DependencySource.SYSTEM,
-    libxml2_source: Annotated[
-        DependencySource, typer.Option("--libxml2-source")
-    ] = DependencySource.SYSTEM,
-    pcre2_source: Annotated[
-        DependencySource, typer.Option("--pcre2-source")
-    ] = DependencySource.SYSTEM,
-    zlib_source: Annotated[
-        DependencySource, typer.Option("--zlib-source")
-    ] = DependencySource.SYSTEM,
+    openssl_source: OpenSSLSourceOption = DependencySource.SYSTEM,
+    libxml2_source: Libxml2SourceOption = DependencySource.SYSTEM,
+    pcre2_source: Pcre2SourceOption = DependencySource.SYSTEM,
+    zlib_source: ZlibSourceOption = DependencySource.SYSTEM,
 ) -> None:
     runtime = _build_runtime(
         verbose=verbose,
