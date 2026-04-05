@@ -215,11 +215,11 @@ jobs:
 
           format_result() {
             case "$1" in
-              success) printf '✅ `success`' ;;
-              failure) printf '❌ `failure`' ;;
-              cancelled) printf '🚫 `cancelled`' ;;
-              skipped) printf '⏭️ `skipped`' ;;
-              *) printf '❔ `%s`' "${1:-unknown}" ;;
+              success) printf "✅ \`success\`" ;;
+              failure) printf "❌ \`failure\`" ;;
+              cancelled) printf "🚫 \`cancelled\`" ;;
+              skipped) printf "⏭️ \`skipped\`" ;;
+              *) printf "❔ \`%s\`" "${1:-unknown}" ;;
             esac
           }
 
