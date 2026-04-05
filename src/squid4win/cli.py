@@ -286,10 +286,42 @@ def _interactive_display_value(param: click.Parameter, overrides: dict[str, obje
     return str(default)
 
 
+def _interactive_count_default(current_value: str) -> int | None:
+    if current_value.startswith("<"):
+        return None
+
+    try:
+        return int(current_value)
+    except ValueError:
+        return None
+
+
+def _interactive_count_value(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
 def _prompt_for_param(param: click.Parameter, current_value: str) -> object | None:
     label = _primary_option_name(param)
     if isinstance(param, click.Option) and param.hidden:
         return None
+
+    if isinstance(param, click.Option) and bool(getattr(param, "count", False)):
+        prompted_count = IntPrompt.ask(
+            f"Occurrences for {label} (0 to clear)",
+            default=_interactive_count_default(current_value),
+        )
+        if prompted_count is None:
+            return None
+        return prompted_count if prompted_count >= 0 else 0
 
     if isinstance(param, click.Option) and param.is_flag:
         default = current_value.lower() in {"true", "1", "yes"}
@@ -331,6 +363,11 @@ def _render_interactive_args(command: click.Command, overrides: dict[str, object
 
         option_name = _primary_option_name(param)
         value = overrides[param.name]
+        if bool(getattr(param, "count", False)):
+            count = max(0, _interactive_count_value(value))
+            args.extend(option_name for _ in range(count))
+            continue
+
         if param.is_flag:
             if value:
                 args.append(option_name)
