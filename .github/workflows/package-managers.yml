@@ -157,9 +157,9 @@ jobs:
             --pattern 'squid4win-portable.zip' `
             --dir $downloadRoot
 
-       - name: Generate package manager metadata
-         id: manifests
-         run: |
+      - name: Generate package manager metadata
+        id: manifests
+        run: |
            $downloadRoot = Join-Path $PWD.Path 'artifacts\downloads'
            uv run squid4win-automation package-manager-export `
              --repository-root $PWD.Path `

@@ -139,8 +139,8 @@ jobs:
           }
           & uv @arguments
 
-       - name: Smoke test Squid
-         run: uv run squid4win-automation smoke-test --configuration Release --require-notices
+      - name: Smoke test Squid
+        run: uv run squid4win-automation smoke-test --configuration Release --require-notices
 
       - name: Detect MSI packaging inputs
         id: packaging
