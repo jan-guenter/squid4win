@@ -7,7 +7,7 @@ applyTo: "**"
 Use this checklist when a change updates the pinned upstream Squid release or
 the automation around that update flow.
 
-- Prefer `uv run squid4win-automation upstream-version --execute` over
+- Prefer `uv run squid4win-automation upstream-version` over
   hand-editing version files. Keep `scripts\Update-SquidVersion.ps1` only as a
   transitional fallback when the Python automation environment is unavailable.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and

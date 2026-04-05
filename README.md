@@ -30,9 +30,9 @@ The repository is being reset toward the target state defined in ADR `0006`:
 
 The current cited local validation for the reset architecture is:
 
-- local `uv run squid4win-automation squid-build --execute --with-tray --with-runtime-dlls --with-packaging-support`
-- local `uv run squid4win-automation smoke-test --execute --configuration Release --require-notices`
-- local `uv run squid4win-automation bundle-package --execute --configuration Release --create-portable-zip`
+- local `uv run squid4win-automation squid-build --with-tray --with-runtime-dlls --with-packaging-support`
+- local `uv run squid4win-automation smoke-test --configuration Release --require-notices`
+- local `uv run squid4win-automation bundle-package --configuration Release --create-portable-zip`
 - generated local artifacts at `artifacts\squid4win-portable.zip` and
   `artifacts\squid4win.msi`
 
@@ -58,7 +58,7 @@ The repository should not yet claim:
 - Keep `CONAN_HOME` repo-local at `.\.conan2`.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
-  `uv run squid4win-automation upstream-version --execute`; keep
+  `uv run squid4win-automation upstream-version`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
 - Preserve artifact names `squid4win.msi` and `squid4win-portable.zip` unless
@@ -78,6 +78,12 @@ The repository should not yet claim:
 The supported repo-level entry points for Squid builds, tray builds, bundle
 packaging, validation, metadata updates, and Conan lockfile refresh now live under
 `uv run squid4win-automation ...`.
+
+Those commands now execute by default. Use `--dry-run` to preview the planned
+work without side effects, and use repeated `-v` or `-q` flags to adjust log
+detail. When no command is supplied on a real TTY outside CI, the CLI offers a
+guided prompt flow; CI and other non-interactive environments continue to get
+plain help and script-friendly output.
 
 The CCI-style Squid recipe at `conan\recipes\squid\all\conanfile.py` can now
 source `openssl`, `libxml2`, `pcre2`, and `zlib` either from Conan requirements

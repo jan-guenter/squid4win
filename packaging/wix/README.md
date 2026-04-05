@@ -21,10 +21,10 @@ Windows layout:
 - the staged payload intentionally omits a machine-specific `etc\squid.conf`
   and the first install materializes it from
   `packaging\defaults\squid.conf.template` if the file is not already present
-- `uv run squid4win-automation bundle-package --service-name ... --execute`
+- `uv run squid4win-automation bundle-package --service-name ...`
   is the supported repo-level entry point for building the MSI from the staged
   payload, while
-  `uv run squid4win-automation service-runner-validation --execute`
+  `uv run squid4win-automation service-runner-validation`
   is the supported isolated Windows-runner path for installing temporary MSI
   instances with unique service names; Squid's upstream `-n` contract requires
   that override to stay alphanumeric and no longer than 32 characters
@@ -45,6 +45,10 @@ Windows layout:
   `WixQuietExec` command line
 - the staged payload already includes the harvested third-party notice bundle
   under `licenses\third-party\` before WiX harvests the file tree
+
+These Python entry points execute by default. Use `--dry-run` when you need to
+preview the staging or validation plan without invoking WiX or installer
+lifecycle actions.
 
 ## Validation still pending
 

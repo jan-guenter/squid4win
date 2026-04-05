@@ -309,7 +309,7 @@ class UpstreamVersionManager:
             )
         else:
             self._logger.info(
-                "Dry-run only. Re-run with --execute to write the updated metadata files."
+                "Dry-run only. Re-run without --dry-run to write the updated metadata files."
             )
 
         result = VersionSyncResult(

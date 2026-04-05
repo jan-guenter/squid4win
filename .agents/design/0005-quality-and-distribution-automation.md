@@ -120,17 +120,19 @@ The automation baseline is:
 
 - Keep the Sonar scope in `sonar-project.properties`.
 - Keep
-  `uv run squid4win-automation service-runner-validation --execute`
+  `uv run squid4win-automation service-runner-validation`
   responsible for generating a unique temporary service name, staging an
   isolated validation root, invoking the MSI, and cleaning up leftover runner
    state.
 - Keep `.github\workflows\service-runner-validation.yml` responsible for the
   isolated Windows runner lifecycle validation path.
+- Keep the Python CLI on execute-by-default semantics so workflow and local
+  validation commands preview with `--dry-run` instead of requiring `--execute`.
 - Keep `.markdownlint-cli2.jsonc` as the baseline markdown lint
   configuration, and align `skills\gfm\SKILL.md` plus any repo-owned
   markdown audit helper with it.
 - Keep feed metadata generation in
-  `uv run squid4win-automation package-manager-export --execute`, backed by the
+  `uv run squid4win-automation package-manager-export`, backed by the
   Python automation package.
 - Keep `scripts\Invoke-AuthenticodeSigning.ps1` responsible for optional
   Authenticode signing when a certificate path or base64-encoded PFX secret is

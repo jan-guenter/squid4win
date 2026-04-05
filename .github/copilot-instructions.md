@@ -36,9 +36,12 @@ Repo-specific directives:
 - Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
-  `uv run squid4win-automation upstream-version --execute`; keep
+  `uv run squid4win-automation upstream-version`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
+- The Python CLI executes commands by default. Use `--dry-run` for previews and
+  repeated `-v`/`-q` flags for log detail, and keep the guided no-args flow
+  limited to real TTY sessions outside CI.
 - Keep staged native notice harvesting synchronized between the Python
   automation's Python metadata, the Squid recipe options, and any direct tray
   release assets that ship.

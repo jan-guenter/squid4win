@@ -278,8 +278,7 @@ def _resolve_export_context(options: PackageManagerExportOptions) -> PackageMana
     package_url = options.package_url or f"https://github.com/{options.repository}"
     msi_url = options.msi_url or f"{package_url}/releases/download/{tag}/squid4win.msi"
     portable_zip_url = (
-        options.portable_zip_url
-        or f"{package_url}/releases/download/{tag}/squid4win-portable.zip"
+        options.portable_zip_url or f"{package_url}/releases/download/{tag}/squid4win-portable.zip"
     )
     winget_root = output_root / "winget" / options.version
     chocolatey_root = output_root / "chocolatey"
@@ -346,7 +345,9 @@ def run_package_manager_export(
     logger.info("Portable zip SHA256: %s", result.portable_zip_sha256)
 
     if not execute:
-        logger.info("Dry run only; package manager metadata files were not written.")
+        logger.info(
+            "Dry-run only. Re-run without --dry-run to write package manager metadata files."
+        )
         return 0
 
     winget_documents = _render_winget_documents(context, msi_sha256=result.msi_sha256)
@@ -870,7 +871,9 @@ def run_publish_winget(
         options.target_repository,
     )
     if not execute:
-        logger.info("Dry run only; winget publication was not executed.")
+        logger.info(
+            "Dry-run only. Re-run without --dry-run to execute the winget publication flow."
+        )
         return 0
 
     result = _submit_github_pull_request(
@@ -927,7 +930,7 @@ def run_publish_scoop(
         options.target_repository,
     )
     if not execute:
-        logger.info("Dry run only; Scoop publication was not executed.")
+        logger.info("Dry-run only. Re-run without --dry-run to execute the Scoop publication flow.")
         return 0
 
     result = _submit_github_pull_request(
@@ -985,7 +988,9 @@ def run_publish_chocolatey(
     logger.info("Push source: %s", options.push_source)
     logger.info("Query source: %s", options.query_source)
     if not execute:
-        logger.info("Dry run only; Chocolatey publication was not executed.")
+        logger.info(
+            "Dry-run only. Re-run without --dry-run to execute the Chocolatey publication flow."
+        )
         return 0
 
     choco_api_key = os.getenv("CHOCO_API_KEY", "").strip()
