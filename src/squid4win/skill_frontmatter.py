@@ -36,7 +36,7 @@ _SUPPORTED_FRONTMATTER_FIELDS = (
 
 
 class SkillFrontmatter(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: str
     description: str
