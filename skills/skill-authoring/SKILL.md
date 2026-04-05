@@ -32,6 +32,10 @@ repo-owned Copilot skill.
   symlink.
 - Prefer repo-relative symlink targets such as
   `../../../skills/<skill-name>/SKILL.md`.
+- Keep repo-owned `SKILL.md` frontmatter compatible with
+  `uv run squid4win-automation skill-frontmatter-lint`: require `name`,
+  `description`, and `skill_api_version: 1`, and keep optional keys within the
+  repo's supported Copilot/Agent Skills/Claude-compatible set.
 - Update `skills\README.md` whenever a repo-owned skill is added, renamed,
   removed, or materially re-described.
 

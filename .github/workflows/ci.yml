@@ -43,6 +43,9 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
+  statuses: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -56,6 +59,10 @@ jobs:
   lint:
     name: Lint automation
     runs-on: ubuntu-latest
+    outputs:
+      megalinter_outcome: ${{ steps.megalinter.outcome }}
+      ty_outcome: ${{ steps.ty.outcome }}
+      skill_frontmatter_outcome: ${{ steps.skill_frontmatter.outcome }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -67,6 +74,8 @@ jobs:
         continue-on-error: true
         uses: oxsecurity/megalinter@8fbdead70d1409964ab3d5afa885e18ee85388bb # v9.4.0
         env:
+          ENABLE_GITHUB_COMMENT: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATE_ALL_CODEBASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Upload MegaLinter reports
@@ -105,8 +114,44 @@ jobs:
         continue-on-error: true
         run: uv run ty check src
 
+      - name: Run skill frontmatter lint
+        id: skill_frontmatter
+        continue-on-error: true
+        run: uv run squid4win-automation skill-frontmatter-lint
+
+      - name: Summarize lint results
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            exit 0
+          fi
+
+          format_result() {
+            case "$1" in
+              success) printf '✅ `success`' ;;
+              failure) printf '❌ `failure`' ;;
+              cancelled) printf '🚫 `cancelled`' ;;
+              skipped) printf '⏭️ `skipped`' ;;
+              *) printf '❔ `%s`' "$1" ;;
+            esac
+          }
+
+          {
+            echo "## Lint automation summary"
+            echo
+            echo "| Check | Result |"
+            echo "| --- | --- |"
+            echo "| MegaLinter | $(format_result '${{ steps.megalinter.outcome }}') |"
+            echo "| ty | $(format_result '${{ steps.ty.outcome }}') |"
+            echo "| skill-frontmatter-lint | $(format_result '${{ steps.skill_frontmatter.outcome }}') |"
+            echo
+            echo "- Artifact: \`megalinter-reports\`"
+            echo "- MegaLinter PR decoration is explicitly enabled for GitHub pull requests."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Fail on lint findings
-        if: ${{ steps.megalinter.outcome != 'success' || steps.ty.outcome != 'success' }}
+        if: ${{ steps.megalinter.outcome != 'success' || steps.ty.outcome != 'success' || steps.skill_frontmatter.outcome != 'success' }}
         shell: bash
         run: |
           if [[ "${{ steps.megalinter.outcome }}" != "success" ]]; then
@@ -114,6 +159,9 @@ jobs:
           fi
           if [[ "${{ steps.ty.outcome }}" != "success" ]]; then
             echo "::error::ty reported blocking findings."
+          fi
+          if [[ "${{ steps.skill_frontmatter.outcome }}" != "success" ]]; then
+            echo "::error::Skill frontmatter lint reported blocking findings."
           fi
           exit 1
 
@@ -155,6 +203,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Build tray package
+        id: build_tray
         run: |
           uv run squid4win-automation tray-build `
             --repository-root $PWD.Path `
@@ -167,6 +216,32 @@ jobs:
           name: squid-tray-build
           path: build\tray\release\**
           if-no-files-found: warn
+
+      - name: Summarize tray build
+        if: ${{ always() }}
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+          function Format-Result([string]$Outcome) {
+            switch ($Outcome) {
+              'success' { '✅ `success`'; break }
+              'failure' { '❌ `failure`'; break }
+              'cancelled' { '🚫 `cancelled`'; break }
+              'skipped' { '⏭️ `skipped`'; break }
+              default { "❔ `$(if ($Outcome) { $Outcome } else { 'unknown' })`" }
+            }
+          }
+          $summaryLines = @(
+            '## Tray build summary',
+            '',
+            '| Check | Result |',
+            '| --- | --- |',
+            ('| Build tray package | {0} |' -f (Format-Result '${{ steps.build_tray.outcome }}')),
+            '',
+            '- Artifact: `squid-tray-build`'
+          )
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   validate-linux-recipe:
     name: Validate Linux recipe (${{ matrix.compiler_label }}, ${{ matrix.library_configuration_label }})
@@ -329,6 +404,7 @@ jobs:
             ${{ runner.os }}-conan-
 
       - name: Build native Squid bundle
+        id: build_bundle
         run: |
           uv run squid4win-automation squid-build `
             --repository-root $PWD.Path `
@@ -340,6 +416,7 @@ jobs:
             --with-packaging-support
 
       - name: Smoke test Squid
+        id: smoke_test
         run: uv run squid4win-automation smoke-test --configuration Release --require-notices
 
       - name: Summarize SonarCloud scanner mode
@@ -359,6 +436,7 @@ jobs:
           $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Run SonarQube scan for pull requests
+        id: sonar_scan_pr
         if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && github.event_name == 'pull_request' }}
         uses: SonarSource/sonarqube-scan-action@299e4b793aaa83bf2aba7c9c14bedbb485688ec4 # v7
         env:
@@ -375,6 +453,7 @@ jobs:
             -Dsonar.python.version=3.14
 
       - name: Run SonarQube scan for branches
+        id: sonar_scan_branch
         if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && github.event_name != 'pull_request' }}
         uses: SonarSource/sonarqube-scan-action@299e4b793aaa83bf2aba7c9c14bedbb485688ec4 # v7
         env:
@@ -389,6 +468,7 @@ jobs:
             -Dsonar.python.version=3.14
 
       - name: Check SonarQube quality gate
+        id: sonar_quality_gate
         if: ${{ vars.SONAR_CI_SCAN_ENABLED == 'true' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') }}
         uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
         timeout-minutes: 10
@@ -406,3 +486,134 @@ jobs:
             build\install\release\**
             build\conan\msys2-mingw-x64-release\build\**\config.log
           if-no-files-found: warn
+
+      - name: Summarize native build validation
+        if: ${{ always() }}
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+          function Format-Result([string]$Outcome) {
+            switch ($Outcome) {
+              'success' { '✅ `success`'; break }
+              'failure' { '❌ `failure`'; break }
+              'cancelled' { '🚫 `cancelled`'; break }
+              'skipped' { '⏭️ `skipped`'; break }
+              default { "❔ `$(if ($Outcome) { $Outcome } else { 'unknown' })`" }
+            }
+          }
+          $summaryLines = @(
+            '## Native build validation summary',
+            '',
+            '| Check | Result |',
+            '| --- | --- |',
+            ('| Build native Squid bundle | {0} |' -f (Format-Result '${{ steps.build_bundle.outcome }}')),
+            ('| Smoke test Squid | {0} |' -f (Format-Result '${{ steps.smoke_test.outcome }}')),
+            ('| SonarQube scan (pull request) | {0} |' -f (Format-Result '${{ steps.sonar_scan_pr.outcome }}')),
+            ('| SonarQube scan (branch) | {0} |' -f (Format-Result '${{ steps.sonar_scan_branch.outcome }}')),
+            ('| SonarQube quality gate | {0} |' -f (Format-Result '${{ steps.sonar_quality_gate.outcome }}')),
+            '',
+            '- Artifact: `squid-msys2-build`'
+          )
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  report-ci:
+    name: Report CI results
+    if: ${{ always() }}
+    needs:
+      - lint
+      - build-tray
+      - validate-linux-recipe
+      - validate-windows-recipe
+      - build-msys2
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Build CI report
+        id: report
+        shell: bash
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          BUILD_TRAY_RESULT: ${{ needs.build-tray.result }}
+          VALIDATE_LINUX_RESULT: ${{ needs.validate-linux-recipe.result }}
+          VALIDATE_WINDOWS_RESULT: ${{ needs.validate-windows-recipe.result }}
+          BUILD_MSYS2_RESULT: ${{ needs.build-msys2.result }}
+          MEGALINTER_OUTCOME: ${{ needs.lint.outputs.megalinter_outcome }}
+          TY_OUTCOME: ${{ needs.lint.outputs.ty_outcome }}
+          SKILL_FRONTMATTER_OUTCOME: ${{ needs.lint.outputs.skill_frontmatter_outcome }}
+        run: |
+          mkdir -p reports
+
+          format_result() {
+            case "$1" in
+              success) printf '✅ `success`' ;;
+              failure) printf '❌ `failure`' ;;
+              cancelled) printf '🚫 `cancelled`' ;;
+              skipped) printf '⏭️ `skipped`' ;;
+              *) printf '❔ `%s`' "${1:-unknown}" ;;
+            esac
+          }
+
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          report_path="reports/ci-report.md"
+          cat > "$report_path" <<EOF
+          <!-- squid4win:ci-report -->
+          ## CI validation report
+
+          | Job | Result | Details |
+          | --- | --- | --- |
+          | Lint automation | $(format_result "$LINT_RESULT") | MegaLinter=$(format_result "$MEGALINTER_OUTCOME"), ty=$(format_result "$TY_OUTCOME"), skill-frontmatter-lint=$(format_result "$SKILL_FRONTMATTER_OUTCOME"); artifact \`megalinter-reports\` |
+          | Build tray app | $(format_result "$BUILD_TRAY_RESULT") | Artifact \`squid-tray-build\` |
+          | Validate Linux recipe | $(format_result "$VALIDATE_LINUX_RESULT") | Artifacts \`conan-validation-linux-*\` |
+          | Validate Windows recipe | $(format_result "$VALIDATE_WINDOWS_RESULT") | Artifacts \`conan-validation-windows-*\` |
+          | Build MSYS2/MinGW-w64 | $(format_result "$BUILD_MSYS2_RESULT") | Artifact \`squid-msys2-build\` |
+
+          - Workflow run: [${{ github.workflow }} #${{ github.run_number }}]($run_url)
+          - MegaLinter PR decoration is explicitly enabled on pull requests.
+          - This report job is the GitHub check for the aggregated CI summary.
+          EOF
+
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            cat "$report_path" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "report_path=$report_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upsert CI PR comment
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          REPORT_PATH: ${{ steps.report.outputs.report_path }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- squid4win:ci-report -->';
+            const body = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+            const issue_number = context.payload.pull_request.number;
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user?.type === 'Bot' && comment.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });

@@ -123,6 +123,35 @@ jobs:
           path: artifacts\conan-recipe-validation\**
           if-no-files-found: error
 
+      - name: Summarize Conan recipe validation
+        if: ${{ always() }}
+        run: |
+          if (-not $env:GITHUB_STEP_SUMMARY) {
+            exit 0
+          }
+          function Format-Result([string]$Outcome) {
+            switch ($Outcome) {
+              'success' { '✅ `success`'; break }
+              'failure' { '❌ `failure`'; break }
+              'cancelled' { '🚫 `cancelled`'; break }
+              'skipped' { '⏭️ `skipped`'; break }
+              default { "❔ `$(if ($Outcome) { $Outcome } else { 'unknown' })`" }
+            }
+          }
+          $summaryLines = @(
+            '## Conan recipe validation summary',
+            '',
+            '| Field | Value |',
+            '| --- | --- |',
+            '| Platform | Windows |',
+            ('| Profile | `{0}` |' -f '${{ inputs.profile_name }}'),
+            ('| Build type | `{0}` |' -f '${{ inputs.build_type }}'),
+            ('| Library configuration | `{0}` |' -f '${{ inputs.library_configuration_label }}'),
+            ('| Validation step | {0} |' -f (Format-Result '${{ steps.validate_recipe.outcome }}')),
+            ('| Artifact | `{0}` |' -f 'conan-validation-windows-${{ inputs.library_configuration_label }}-${{ inputs.build_type }}')
+          )
+          $summaryLines -join [Environment]::NewLine | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Fail when validation failed
         if: ${{ steps.validate_recipe.outcome != 'success' }}
         run: |
