@@ -389,7 +389,7 @@ def _windows_mingw_compiler_conf_arguments() -> list[str]:
     return [
         "-c:h",
         (
-            'tools.build:compiler_executables={'
+            "tools.build:compiler_executables={"
             '"c":"x86_64-w64-mingw32-gcc",'
             '"cpp":"x86_64-w64-mingw32-g++"'
             "}"
@@ -403,13 +403,7 @@ def _windows_openssl_conan_conf_arguments() -> list[str]:
     # reaches tlhelp32.h.
     return [
         "-c:h",
-        (
-            'openssl/*:tools.build:defines=['
-            '"_WIN32",'
-            '"__MINGW32__",'
-            '"_alloca=__builtin_alloca"'
-            "]"
-        ),
+        ('openssl/*:tools.build:defines=["_WIN32","__MINGW32__","_alloca=__builtin_alloca"]'),
     ]
 
 
@@ -723,9 +717,7 @@ def _resolve_bundle_context(options: BundlePackageOptions) -> BundleContext:
         artifact_root=artifact_root,
         installer_project_path=installer_project_path,
     )
-    prerequisite_reasons = tuple(
-        _bundle_prerequisite_reasons(options, bundle_state=bundle_state)
-    )
+    prerequisite_reasons = tuple(_bundle_prerequisite_reasons(options, bundle_state=bundle_state))
     buildable_stage_root = build_root / "install" / options.configuration.value.lower()
     if prerequisite_reasons and squid_stage_root != buildable_stage_root:
         msg = (
@@ -1066,11 +1058,9 @@ def _runtime_dll_source_overrides(
         for runtime_dll_path in runtime_dll_paths:
             runtime_dll_key = os.path.normcase(runtime_dll_path.name)
             existing_source_path = source_overrides.get(runtime_dll_key)
-            if (
-                existing_source_path is not None
-                and os.path.normcase(os.fspath(existing_source_path))
-                != os.path.normcase(os.fspath(runtime_dll_path))
-            ):
+            if existing_source_path is not None and os.path.normcase(
+                os.fspath(existing_source_path)
+            ) != os.path.normcase(os.fspath(runtime_dll_path)):
                 msg = (
                     "Multiple Conan runtime dependencies export the same DLL name "
                     f"'{runtime_dll_path.name}' ('{existing_source_path}' and "
@@ -2278,7 +2268,7 @@ def build_squid_plan(options: SquidBuildOptions) -> AutomationPlan:
         msg = (
             "The standalone Conan recipe no longer accepts ad hoc configure arguments from "
             "the Python CLI. Express Squid feature changes through recipe options or "
-                        "recipe defaults instead."
+            "recipe defaults instead."
         )
         raise ValueError(msg)
 
@@ -2579,9 +2569,7 @@ def _write_validation_artifact_metadata(
                 "openssl_linkage": options.openssl_linkage.value,
                 "conan_home": _relative_summary_path(conan_home, paths.repository_root),
                 "selected_cache_root": (
-                    None
-                    if cache_root is None
-                    else _relative_summary_path(cache_root, conan_home)
+                    None if cache_root is None else _relative_summary_path(cache_root, conan_home)
                 ),
                 "staged_entries": sorted(set(staged_entries)),
             },
@@ -2621,8 +2609,7 @@ def build_conan_recipe_validation_plan(
     return AutomationPlan(
         name="conan-recipe-validate",
         summary=(
-            "Detect the Conan profile and validate the standalone Squid recipe "
-            "with conan create."
+            "Detect the Conan profile and validate the standalone Squid recipe with conan create."
         ),
         repository_root=paths.repository_root,
         commands=(
@@ -2779,7 +2766,7 @@ def run_tray_build(options: TrayBuildOptions, runner: PlanRunner, *, execute: bo
         )
         runner.describe(plan)
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to publish the tray app and harvest notices."
+            "Dry-run only. Re-run without --dry-run to publish the tray app and harvest notices."
         )
 
     if shutil.which("dotnet") is None:
@@ -2855,7 +2842,8 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
             )
         runner.describe(plan)
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to run Conan and the Python-owned staging steps."
+            "Dry-run only. Re-run without --dry-run to run Conan and the Python-owned "
+            "staging steps."
         )
 
     _require_conan_cli()
@@ -3138,7 +3126,7 @@ def run_smoke_test(options: SmokeTestOptions, runner: PlanRunner, *, execute: bo
             squid_stage_root if resolved_binary_path is None else resolved_binary_path,
         )
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to validate the staged Squid bundle."
+            "Dry-run only. Re-run without --dry-run to validate the staged Squid bundle."
         )
 
     release_metadata = _load_json_object(metadata_path)
@@ -3873,7 +3861,7 @@ def run_service_runner_validation(
             service_name,
         )
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to validate the installed service lifecycle."
+            "Dry-run only. Re-run without --dry-run to validate the installed service lifecycle."
         )
 
     _assert_runner_validation_prerequisites(
@@ -4113,7 +4101,7 @@ def run_conan_recipe_validation(
     if not execute:
         runner.describe(plan)
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to validate the Squid recipe with conan create."
+            "Dry-run only. Re-run without --dry-run to validate the Squid recipe with conan create."
         )
 
     _require_conan_cli()
@@ -4163,7 +4151,7 @@ def run_conan_recipe_artifact_staging(
             staging_root,
         )
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to stage the latest Conan validation outputs."
+            "Dry-run only. Re-run without --dry-run to stage the latest Conan validation outputs."
         )
 
     conan_home = Path(os.getenv("CONAN_HOME", os.fspath(paths.conan_home_path)))
@@ -4228,7 +4216,7 @@ def run_conan_lockfile_update(
     if not execute:
         runner.describe(plan)
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to refresh the selected Conan lockfile."
+            "Dry-run only. Re-run without --dry-run to refresh the selected Conan lockfile."
         )
 
     _require_conan_cli()
@@ -4271,7 +4259,7 @@ def run_bundle_package(
         )
         runner.describe(plan)
         return _log_dry_run_footer(
-            "Dry-run only. Re-run with --execute to stage the payload and optional "
+            "Dry-run only. Re-run without --dry-run to stage the payload and optional "
             "installer artifacts."
         )
 

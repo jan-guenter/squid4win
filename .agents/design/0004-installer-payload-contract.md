@@ -80,10 +80,10 @@ The first committed installer contract is:
   dependency graph into each staged native executable directory.
 - The Python automation package copies the corresponding notice artifacts into
   `licenses\third-party\windows-runtime\` for the staged bundle.
-- `uv run squid4win-automation bundle-package --execute` is the supported
-  repo-level entry point that mirrors the Conan-built staged bundle into
-  `artifacts\install-root`, optionally creates the portable zip, and can build
-  the MSI from that staged payload.
+- At the time, `uv run squid4win-automation bundle-package --execute` was the
+  supported repo-level entry point that mirrored the Conan-built staged bundle
+  into `artifacts\install-root`, optionally created the portable zip, and could
+  build the MSI from that staged payload.
 - The staged bundle should carry the installer helper entry point plus any
   helper scripts it imports under `installer\`.
 - That staged bundle should carry `squid.conf.template`,
@@ -94,10 +94,10 @@ The first committed installer contract is:
   point.
 - `packaging\wix\Squid4Win.Installer.wixproj` harvests the staged payload instead
   of hand-maintaining every Squid file in WiX XML.
-- `uv run squid4win-automation tray-build --execute` now publishes the tray app
-  and harvests license and notice files for shipped NuGet package dependencies
-  so the Python automation can merge them into the staged bundle before MSI
-  harvesting.
+- At the time, `uv run squid4win-automation tray-build --execute` published the
+  tray app and harvested license and notice files for shipped NuGet package
+  dependencies so the Python automation could merge them into the staged bundle
+  before MSI harvesting.
 - `scripts\installer\Manage-SquidService.ps1` runs inside the installed payload
   and performs config materialization, `squid.exe -k parse`,
   `squid.exe -z`, then service registration or removal.

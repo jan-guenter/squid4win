@@ -86,15 +86,14 @@ jobs:
             ${{ runner.os }}-${{ inputs.library_configuration_label }}-conan-
             ${{ runner.os }}-conan-
 
-      - name: Validate Squid recipe with Python automation
-        id: validate_recipe
-        continue-on-error: true
-        run: |
-          uv run squid4win-automation conan-recipe-validate `
-            --execute `
-            --repository-root $PWD.Path `
-            --configuration ${{ inputs.build_type }} `
-            --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
+       - name: Validate Squid recipe with Python automation
+         id: validate_recipe
+         continue-on-error: true
+         run: |
+           uv run squid4win-automation conan-recipe-validate `
+             --repository-root $PWD.Path `
+             --configuration ${{ inputs.build_type }} `
+             --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
             --build-profile default `
             --openssl-source ${{ inputs.openssl_source }} `
             --libxml2-source ${{ inputs.libxml2_source }} `
@@ -102,14 +101,13 @@ jobs:
             --zlib-source ${{ inputs.zlib_source }} `
             --openssl-linkage ${{ inputs.openssl_linkage }}
 
-      - name: Stage Conan validation artifacts
-        if: ${{ always() }}
-        run: |
-          uv run squid4win-automation conan-recipe-stage-artifacts `
-            --execute `
-            --repository-root $PWD.Path `
-            --configuration ${{ inputs.build_type }} `
-            --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
+       - name: Stage Conan validation artifacts
+         if: ${{ always() }}
+         run: |
+           uv run squid4win-automation conan-recipe-stage-artifacts `
+             --repository-root $PWD.Path `
+             --configuration ${{ inputs.build_type }} `
+             --host-profile-path "conan\profiles\${{ inputs.profile_name }}" `
             --library-configuration-label "${{ inputs.library_configuration_label }}" `
             --openssl-source ${{ inputs.openssl_source }} `
             --libxml2-source ${{ inputs.libxml2_source }} `

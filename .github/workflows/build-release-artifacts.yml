@@ -128,20 +128,19 @@ jobs:
             $PWD.Path,
             '--configuration',
             'Release',
-            '--lockfile-path',
-            'conan\lockfiles\msys2-mingw-x64-release.lock',
-            '--with-tray',
-            '--with-runtime-dlls',
-            '--with-packaging-support',
-            '--execute'
-          )
+             '--lockfile-path',
+             'conan\lockfiles\msys2-mingw-x64-release.lock',
+             '--with-tray',
+             '--with-runtime-dlls',
+             '--with-packaging-support'
+           )
           if ('${{ inputs.publish_github_release }}' -ne 'true') {
             $arguments += '--refresh-lockfile'
           }
           & uv @arguments
 
-      - name: Smoke test Squid
-        run: uv run squid4win-automation smoke-test --execute --configuration Release --require-notices
+       - name: Smoke test Squid
+         run: uv run squid4win-automation smoke-test --configuration Release --require-notices
 
       - name: Detect MSI packaging inputs
         id: packaging
@@ -189,12 +188,11 @@ jobs:
             $PWD.Path,
             '--configuration',
             'Release',
-            '--require-tray',
-            '--require-notices',
-            '--create-portable-zip',
-            '--sign-payload-files',
-            '--execute'
-          )
+             '--require-tray',
+             '--require-notices',
+             '--create-portable-zip',
+             '--sign-payload-files'
+           )
           $hasWixSources = '${{ steps.packaging.outputs.has_wix_sources }}' -eq 'true'
           if ($hasWixSources) {
             $arguments += '--sign-msi'

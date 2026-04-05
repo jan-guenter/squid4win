@@ -84,7 +84,7 @@ here.
   when contributor guidance changes.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
-  `uv run squid4win-automation upstream-version --execute`; keep
+  `uv run squid4win-automation upstream-version`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
 - Keep `CONAN_HOME` repo-local at `.\.conan2`.
@@ -96,6 +96,9 @@ here.
 - Treat `uv run squid4win-automation ...` as the supported repo-level surface
   for Squid builds, tray builds, bundle packaging, validation, metadata
   updates, and Conan lockfile refresh.
+- Python CLI commands execute by default; use `--dry-run` to preview work, and
+  use repeated `-v`/`-q` flags to adjust log detail. Keep the guided no-args
+  selector limited to real TTYs outside CI.
 - Keep the Python CLI flags and Squid recipe options aligned for dependency
   source selection: `--openssl-source`, `--libxml2-source`, `--pcre2-source`,
   and `--zlib-source` should continue to map directly to the recipe's

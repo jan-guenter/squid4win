@@ -97,9 +97,12 @@ The target architecture is:
   later accepted ADR records a different conclusion.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
-  `uv run squid4win-automation upstream-version --execute`; keep
+  `uv run squid4win-automation upstream-version`; keep
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
+- Keep the Python CLI on execute-by-default semantics with `--dry-run` for
+  previews, repeated `-v`/`-q` flags for log detail, and a guided no-args flow
+  limited to real TTY sessions outside CI.
 - Preserve current artifact names `squid4win.msi` and
   `squid4win-portable.zip` unless downstream package metadata changes too.
 - Keep live feed publication credential-gated.
