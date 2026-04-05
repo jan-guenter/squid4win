@@ -121,8 +121,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-conan-
 
-       - name: Build native Squid bundle
-         run: |
+      - name: Build native Squid bundle
+        run: |
            uv run squid4win-automation squid-build `
              --repository-root $PWD.Path `
              --configuration Release `
@@ -132,11 +132,11 @@ jobs:
              --with-runtime-dlls `
              --with-packaging-support
 
-       - name: Smoke test Squid
-         run: uv run squid4win-automation smoke-test --configuration Release --require-notices
+      - name: Smoke test Squid
+        run: uv run squid4win-automation smoke-test --configuration Release --require-notices
 
-       - name: Validate installed service lifecycle
-         run: uv run squid4win-automation service-runner-validation --configuration Release
+      - name: Validate installed service lifecycle
+        run: uv run squid4win-automation service-runner-validation --configuration Release
 
       - name: Upload runner build and validation artifacts
         if: ${{ always() }}
