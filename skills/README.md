@@ -6,14 +6,27 @@ symlinked files that expose these repo-owned skills to Copilot.
 
 ## Index
 
+- `click` - Click guidance for Python CLI commands, groups, parameters, shell
+  completion, testing, and packaging-aware entry points.
 - `conan2-package-creation` - Conan 2 package-authoring guidance for recipe
-  structure, binary compatibility, `test_package`, editables, and publication.
+  structure, binary compatibility, `test_package`, editables, publication,
+  and review criteria.
 - `conan2-usage` - Conan 2 consumer guidance for installs, profiles,
-  generators, remotes, and reproducible dependency graphs.
+  generators, remotes, lockfiles, and reproducible dependency graphs.
 - `gfm` - GitHub Flavored Markdown guidance for repository files, GitHub
-  rendering, advanced formatting, and Mermaid diagrams.
-- `megalinter` - MegaLinter usage, configuration, local runner, and CI guidance
-  for multi-language repositories.
+  rendering, practical patterns, Mermaid diagrams, and review criteria.
+- `megalinter` - MegaLinter usage, configuration, local runner, CI
+  integration, and review guidance for multi-language repositories.
+- `rich` - Rich guidance for terminal formatting, shared `Console` usage,
+  tables, status output, debugging aids, and readable styling.
+- `shellingham` - Shellingham guidance for detecting the surrounding shell
+  safely, handling `ShellDetectionFailure`, and providing sensible
+  fallbacks.
+- `skill-authoring` - Skill-authoring guidance for lean instructions,
+  realistic evals, with/without-skill baselines, grading, human review, and
+  repo-safe layout practices.
+- `typer` - Typer guidance for type-hinted Python CLIs, subcommands,
+  prompts, testing, completion, and packaging-aware UX.
 
 ## Maintaining this layout
 
@@ -24,7 +37,11 @@ symlinked files that expose these repo-owned skills to Copilot.
   matching `.agents\skills\<skill-name>\` mirror directory, and symlink the
   files inside it back to the canonical files under `skills\`.
 - Keep `.agents\skills\<skill-name>\` as a real directory. Do not replace the
-  skill directory itself with a symlink; that path-type change breaks Copilot
-  PR review automation.
+  skill directory itself with a symlink; that path-type change breaks
+  Copilot PR review automation.
 - Prefer repo-relative symlink targets so the mirrors stay valid on Linux and
   Windows checkouts.
+- The common mirror target for a repo-owned skill file is
+  `../../../skills/<skill-name>/<file-name>`.
+- Update this README whenever a repo-owned skill is added, removed, renamed,
+  or materially re-described.
