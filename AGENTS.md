@@ -27,6 +27,10 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   `openssl`, `libxml2`, `pcre2`, and `zlib` either from Conan requirements or
   from MSYS2/system packages through recipe options; the default remains the
   MSYS2/system path for the current validated build.
+- Direct Microsoft `cl.exe` and `clang-cl` support was investigated but is not
+  part of the current target state; see ADR `0007`. If an LLVM-based Windows
+  follow-up is needed, prefer MSYS2-Clang first because it preserves the
+  MinGW/POSIX runtime model Squid already expects.
 - When a selected Conan dependency emits Windows runtime DLLs, the Python
   staging path copies those DLLs from the Conan package bins into
   `build\install\...` alongside the Squid executables so `bundle-package`
@@ -100,6 +104,9 @@ here.
   When contributors experiment with Conan-sourced native libraries, the Python
   automation should use a build-local lockfile unless an explicit
   `--lockfile-path` says otherwise.
+- Do not introduce direct `cl.exe` or `clang-cl` build paths, profiles, or
+  support claims unless a new ADR explicitly changes that feasibility boundary
+  and the repository has cited validation for the new path.
 - Do not reintroduce tray-app Conan packaging or editable flows as the target
   model; the tray builds directly with `dotnet` from
   `src\tray\Squid4Win.Tray`.

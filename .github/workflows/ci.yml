@@ -2,9 +2,43 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/linters/**'
+      - '.editorconfig'
+      - '.markdownlint-cli2.jsonc'
+      - '.mega-linter.yml'
+      - 'Directory.Build.props'
+      - 'scripts/PSScriptAnalyzerSettings.psd1'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'sonar-project.properties'
+      - 'config/**'
+      - 'src/squid4win/**'
+      - 'src/tray/**'
+      - 'conan/**'
+      - 'packaging/**'
+      - 'scripts/**'
   push:
     branches:
       - main
+    paths:
+      - '.github/workflows/**'
+      - '.github/linters/**'
+      - '.editorconfig'
+      - '.markdownlint-cli2.jsonc'
+      - '.mega-linter.yml'
+      - 'Directory.Build.props'
+      - 'scripts/PSScriptAnalyzerSettings.psd1'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'sonar-project.properties'
+      - 'config/**'
+      - 'src/squid4win/**'
+      - 'src/tray/**'
+      - 'conan/**'
+      - 'packaging/**'
+      - 'scripts/**'
   workflow_dispatch:
 
 permissions:
