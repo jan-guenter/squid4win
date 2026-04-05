@@ -5,12 +5,12 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 import click
 import httpx
 import typer
-from pydantic import ValidationError
+from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, IntPrompt, Prompt
@@ -62,6 +62,7 @@ _DEFAULT_REPOSITORY = "jan-guenter/squid4win"
 _CONSOLE = Console()
 _INTERACTIVE_CANCEL = "cancel"
 _INTERACTIVE_RUN = "run"
+_HTTP_URL_OPTION_ADAPTER = TypeAdapter(AnyHttpUrl)
 
 app = typer.Typer(
     name="squid4win-automation",
@@ -104,7 +105,7 @@ VerboseOption = Annotated[
         "-v",
         "--verbose",
         count=True,
-        help="Increase logging verbosity. Repeat for more detail.",
+        help="Increase logging verbosity. Repeat up to twice for additional detail.",
     ),
 ]
 QuietOption = Annotated[
@@ -113,7 +114,7 @@ QuietOption = Annotated[
         "-q",
         "--quiet",
         count=True,
-        help="Reduce logging verbosity. Repeat for less output.",
+        help="Reduce logging verbosity. Repeat for WARNING, ERROR, then CRITICAL output.",
     ),
 ]
 
@@ -221,6 +222,17 @@ def _dependency_sources(
         pcre2_source=pcre2_source,
         zlib_source=zlib_source,
     )
+
+
+def _validated_http_url_option(*, value: str | None, option_name: str) -> AnyHttpUrl | None:
+    if value is None:
+        return None
+
+    try:
+        return _HTTP_URL_OPTION_ADAPTER.validate_python(value)
+    except ValidationError as error:
+        message = error.errors()[0]["msg"]
+        raise typer.BadParameter(message, param_hint=option_name) from error
 
 
 def _primary_option_name(param: click.Parameter) -> str:
@@ -1083,8 +1095,14 @@ def upstream_version(
         version=version,
         tag=tag,
         published_at=published_at,
-        source_archive=cast(Any, source_archive),
-        source_signature=cast(Any, source_signature),
+        source_archive=_validated_http_url_option(
+            value=source_archive,
+            option_name="--source-archive",
+        ),
+        source_signature=_validated_http_url_option(
+            value=source_signature,
+            option_name="--source-signature",
+        ),
         source_archive_sha256=source_archive_sha256,
     )
 
