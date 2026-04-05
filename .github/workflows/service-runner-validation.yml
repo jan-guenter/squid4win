@@ -33,8 +33,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 concurrency:
   group: service-runner-validation-${{ github.workflow }}-${{ github.ref }}
