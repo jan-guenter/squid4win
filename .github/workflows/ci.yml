@@ -5,8 +5,11 @@ on:
     paths:
       - '.github/workflows/**'
       - '.github/linters/**'
+      - '.editorconfig'
+      - '.markdownlint-cli2.jsonc'
       - '.mega-linter.yml'
       - 'Directory.Build.props'
+      - 'scripts/PSScriptAnalyzerSettings.psd1'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'sonar-project.properties'
@@ -22,8 +25,11 @@ on:
     paths:
       - '.github/workflows/**'
       - '.github/linters/**'
+      - '.editorconfig'
+      - '.markdownlint-cli2.jsonc'
       - '.mega-linter.yml'
       - 'Directory.Build.props'
+      - 'scripts/PSScriptAnalyzerSettings.psd1'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'sonar-project.properties'
