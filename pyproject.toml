@@ -18,7 +18,7 @@ dependencies = [
   "pyyaml>=6.0.2,<7",
   "rich>=14.2.0,<15",
   "shellingham>=1.5.4,<2",
-  "typer>=0.19.2,<0.20",
+  "typer>=0.19.2,<0.25",
 ]
 
 [project.scripts]
