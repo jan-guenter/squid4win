@@ -8,6 +8,7 @@ from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -503,6 +504,8 @@ class BundlePackageState(BaseModel):
     artifact_root: Path
     installer_project_path: Path
     installer_payload_root: Path
+    installer_core_payload_root: Path
+    installer_tray_payload_root: Path
     portable_zip_path: Path
     msi_path: Path
     tray_package_root: Path
@@ -514,6 +517,8 @@ class BundlePackageState(BaseModel):
     staged_notices_path: Path
     staged_service_script_path: Path
     staged_config_template_path: Path
+    staged_html_docs_index_path: Path
+    staged_raw_man_root_path: Path
     tray_package_available: bool
     tray_notice_manifest_available: bool
     staged_tray_available: bool
@@ -543,6 +548,8 @@ class BundlePackageState(BaseModel):
         staged_notices_path = squid_stage_root / "THIRD-PARTY-NOTICES.txt"
         staged_service_script_path = squid_stage_root / "installer" / "svc.ps1"
         staged_config_template_path = squid_stage_root / "etc" / "squid.conf.template"
+        staged_html_docs_index_path = squid_stage_root / "docs" / "html" / "index.html"
+        staged_raw_man_root_path = squid_stage_root / "share" / "man"
 
         return cls(
             repository_root=repository_root,
@@ -553,6 +560,8 @@ class BundlePackageState(BaseModel):
             artifact_root=artifact_root,
             installer_project_path=installer_project_path,
             installer_payload_root=artifact_root / "install-root",
+            installer_core_payload_root=artifact_root / "install-root-core",
+            installer_tray_payload_root=artifact_root / "install-root-tray",
             portable_zip_path=artifact_root / "squid4win-portable.zip",
             msi_path=artifact_root / "squid4win.msi",
             tray_package_root=tray_layout.package_root,
@@ -564,12 +573,17 @@ class BundlePackageState(BaseModel):
             staged_notices_path=staged_notices_path,
             staged_service_script_path=staged_service_script_path,
             staged_config_template_path=staged_config_template_path,
+            staged_html_docs_index_path=staged_html_docs_index_path,
+            staged_raw_man_root_path=staged_raw_man_root_path,
             tray_package_available=tray_layout.packaged_tray_executable_path.is_file(),
             tray_notice_manifest_available=tray_layout.notice_manifest_path.is_file(),
             staged_tray_available=staged_tray_executable_path.is_file(),
             staged_notices_available=staged_notices_path.is_file(),
             packaging_support_available=(
-                staged_service_script_path.is_file() and staged_config_template_path.is_file()
+                staged_service_script_path.is_file()
+                and staged_config_template_path.is_file()
+                and staged_html_docs_index_path.is_file()
+                and not staged_raw_man_root_path.exists()
             ),
         )
 
@@ -813,8 +827,50 @@ class ServiceRunnerValidationResult(BaseModel):
     msi_path: Path | None = None
     service_name: str
     service_command_line: str | None = None
+    validated_http_port: int | None = None
     cleanup_actions: tuple[str, ...]
     cleanup_issues: tuple[str, ...]
+
+
+class ProxyRuntimeValidationOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repository_root: Path | None = None
+    artifact_root: Path | None = None
+    proxy_url: str = "http://127.0.0.1:3128"
+    binary_path: Path | None = None
+    install_root: Path | None = None
+    request_timeout_seconds: Annotated[int, Field(ge=1, le=300)] = 20
+    burst_requests: Annotated[int, Field(ge=8, le=4000)] = 128
+    burst_concurrency: Annotated[int, Field(ge=1, le=256)] = 16
+    include_external: bool = True
+    log_tail_lines: Annotated[int, Field(ge=20, le=2000)] = 200
+
+    @field_validator("proxy_url")
+    @classmethod
+    def validate_proxy_url(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"}:
+            msg = "--proxy-url must use an http or https scheme."
+            raise ValueError(msg)
+        if not parsed.hostname or parsed.port is None:
+            msg = "--proxy-url must include an explicit host and port."
+            raise ValueError(msg)
+        return value
+
+
+class ProxyRuntimeValidationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_root: Path
+    summary_path: Path
+    json_path: Path
+    proxy_url: str
+    target_mode: str
+    scenario_count: int
+    failed_scenarios: int
+    request_count: int
+    failed_requests: int
 
 
 class PackageManagerExportOptions(BaseModel):

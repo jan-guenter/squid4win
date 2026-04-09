@@ -1,0 +1,31 @@
+diff --git a/pristine/squid-7.5/src/main.cc b/patched/squid-7.5/src/main.cc
+--- a/pristine/squid-7.5/src/main.cc
++++ b/patched/squid-7.5/src/main.cc
+@@ -1488,21 +1488,21 @@ SquidMain(int argc, char **argv)
+     // We do it ASAP/here so that we do not need to move this code when we add
+     // earlier hooks to the RegisteredRunner API.
+     RegisterModules();
+ 
+-    const CommandLine cmdLine(argc, argv, shortOpStr, squidOptions);
+-
+-    ConfigureCurrentKid(cmdLine);
+-
+ #if defined(SQUID_MAXFD_LIMIT)
+ 
+     if (SQUID_MAXFD_LIMIT < Squid_MaxFD)
+         Squid_MaxFD = SQUID_MAXFD_LIMIT;
+ 
+ #endif
+ 
+     /* NOP under non-windows */
+     int WIN32_init_err=0;
+     if ((WIN32_init_err = WIN32_Subsystem_Init(&argc, &argv)))
+         return WIN32_init_err;
+ 
++    const CommandLine cmdLine(argc, argv, shortOpStr, squidOptions);
++
++    ConfigureCurrentKid(cmdLine);
++
+     /* call mallopt() before anything else */
+ #if HAVE_MALLOPT
+ #ifdef M_GRAIN

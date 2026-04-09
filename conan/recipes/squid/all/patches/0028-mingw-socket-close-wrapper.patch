@@ -1,0 +1,13 @@
+diff --git a/pristine/squid-7.5/include/squid.h b/patched/squid-7.5/include/squid.h
+--- a/pristine/squid-7.5/include/squid.h
++++ b/patched/squid-7.5/include/squid.h
+@@ -53,7 +53,8 @@
+ #define SQUID_MAXPATHLEN 256
+ 
+ // TODO: determine if this is required. OR if compat/os/mswindows.h works
+-#if _SQUID_WINDOWS_ && defined(__cplusplus)
++#if (_SQUID_WINDOWS_ || _SQUID_MINGW_) && defined(__cplusplus)
++namespace Squid {}
+ /** \cond AUTODOCS-IGNORE */
+ using namespace Squid;
+ /** \endcond */

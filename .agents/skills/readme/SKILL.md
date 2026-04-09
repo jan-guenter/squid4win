@@ -13,6 +13,7 @@ metadata:
   tier: product
   dependencies:
     - council   # validates the draft
+output_contract: "README.md"
 ---
 
 # /readme — Gold-Standard README Generation

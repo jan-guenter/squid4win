@@ -29,10 +29,15 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   MSYS2/system path for the current validated build.
 - When a selected Conan dependency emits Windows runtime DLLs, the Python
   staging path copies those DLLs from the Conan package bins into
-  `build\install\...` alongside the Squid executables so `bundle-package`
-  mirrors the same runtime DLL set into `artifacts\install-root`.
-- Python 3.14 + `uv` now owns the repo-level build, stage, smoke-test, and
-  package entry points.
+  `build\install\...` alongside the Squid executables. Release native `.exe`
+  and `.dll` files in that staged Squid payload are stripped with the
+  Conan-provided `mingw-builds` `strip.exe` before `bundle-package` mirrors the
+  same runtime DLL set into `artifacts\install-root`.
+- When packaging support is enabled, the Python staging path converts the
+  upstream Squid man-page sources into HTML under `docs\html\` and prunes the
+  raw `share\man` tree from the staged Windows payload.
+- Python 3.14 + `uv` now owns the repo-level build, stage,
+  `proxy-runtime-validation`, smoke-test, and package entry points.
 - Repository linting is centered on `.mega-linter.yml` plus root-level
   first-party linter config files; `ty` and `skill-frontmatter-lint` remain
   companion Python checks outside MegaLinter.
@@ -49,14 +54,18 @@ actually drive it. Do not rely on stale templates or earlier assumptions.
   config association is persisted separately for the named service. The helper
   explicitly verifies the registry-backed `ConfigFile` and `CommandLine` values
   so service startup and spawned Squid processes do not fall back to compiled
-  defaults. Because upstream service startup splits the stored `CommandLine` on
-  whitespace without quote support, the install root used for service
-  registration must remain space-free.
+  defaults. On native Windows builds, the stored `CommandLine` must include
+  `-N -f <config>` because Squid does not provide the normal SMP worker-launch
+  path there; without `-N`, the service remains master-only and never binds the
+  configured listeners. Because upstream service startup splits the stored
+  `CommandLine` on whitespace without quote support, the install root used for
+  service registration must remain space-free.
 - WiX v4 MSI authoring and payload staging are already committed.
 - The repository's own code and docs are GPL-2.0-or-later.
 - Current cited local validation covers the Python-owned target-state path:
-  `squid-build`, `smoke-test`, and `bundle-package` now run locally and produce
-  the staged payload, portable zip, and MSI.
+  `squid-build`, `proxy-runtime-validation`, `smoke-test`, and
+  `bundle-package` now run locally and produce the staged payload, runtime
+  validation artifacts, portable zip, and MSI.
 - Clean-host installer and isolated installed-service lifecycle validation are
   still pending after the workflow migration to the Python
   `service-runner-validation` command.
@@ -87,6 +96,9 @@ here.
   `.\scripts\Update-SquidVersion.ps1` only as a transitional fallback when the
   Python automation environment is unavailable.
 - Keep `CONAN_HOME` repo-local at `.\.conan2`.
+- Keep the repo-root `NuGet.config` authoritative for `dotnet` restore; do not
+  rely on user-level package sources, credentials, or disabled feeds when
+  building the tray app or WiX installer.
 - Keep the native Squid build owned by the single CCI-style Squid recipe under
   `conan\recipes\squid\all\conanfile.py`; do not split it back into multiple
   primary Conan recipes.
@@ -114,6 +126,10 @@ here.
 - Treat `service-runner-validation` as an isolated admin-capable Windows runner
   workflow; do not execute it on a shared machine unless the environment is
   explicitly dedicated to that validation.
+- Keep `proxy-runtime-validation` responsible for managed or live proxy runtime
+  checks and artifact generation under `artifacts\proxy-runtime\`; treat public
+  endpoint scenarios as advisory sanity checks rather than deterministic load
+  proofs.
 - Keep docs truthful about committed implementation, cited validation, and
   migration plans.
 - Keep markdown guidance centralized. Use markdownlint,

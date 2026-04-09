@@ -1,0 +1,48 @@
+diff --git a/pristine/squid-7.5/src/dns_internal.cc b/patched/squid-7.5/src/dns_internal.cc
+index fb1eada..11097e9 100644
+--- a/pristine/squid-7.5/src/dns_internal.cc
++++ b/patched/squid-7.5/src/dns_internal.cc
+@@ -49,7 +49,7 @@
+ #include <resolv.h>
+ #endif
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+ #define REG_TCPIP_PARA_INTERFACES "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces"
+ #define REG_TCPIP_PARA "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters"
+ #define REG_VXD_MSTCP "SYSTEM\\CurrentControlSet\\Services\\VxD\\MSTCP"
+@@ -258,7 +258,7 @@ static void idnsAddPathComponent(const char *buf);
+ static void idnsFreeSearchpath(void);
+ static bool idnsParseNameservers(void);
+ static bool idnsParseResolvConf(void);
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+ static bool idnsParseWIN32Registry(void);
+ static void idnsParseWIN32SearchList(const char *);
+ #endif
+@@ -478,7 +478,7 @@ idnsParseResolvConf(void)
+     return result;
+ }
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+ static void
+ idnsParseWIN32SearchList(const char * Separator)
+ {
+@@ -1604,14 +1604,14 @@ Dns::Init(void)
+     if (!nsFound)
+         nsFound = idnsParseResolvConf();
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+     if (!nsFound)
+         nsFound = idnsParseWIN32Registry();
+ #endif
+ 
+     if (!nsFound) {
+         debugs(78, DBG_IMPORTANT, "WARNING: Could not find any nameservers. Trying to use localhost");
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+         debugs(78, DBG_IMPORTANT, "Please check your TCP-IP settings or /etc/resolv.conf file");
+ #else
+         debugs(78, DBG_IMPORTANT, "Please check your /etc/resolv.conf file");

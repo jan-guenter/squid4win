@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import ctypes
+import html
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import time
 import zipfile
@@ -75,6 +77,7 @@ _WINDOWS_MSYS2_ENV_DIRECTORY = "mingw64"
 _WINDOWS_MSYS2_BASE_PACKAGES = [
     "autoconf",
     "automake",
+    "groff",
     "libtool",
     "make",
     "mingw-w64-x86_64-make",
@@ -179,6 +182,7 @@ _WINDOWS_BUILD_SETTINGS: dict[str, Any] = {
     ],
     "runtime_notice_artifacts": _WINDOWS_RUNTIME_NOTICE_ARTIFACTS,
 }
+_SQUID_HTML_DOCS_RELATIVE_ROOT = Path("docs") / "html"
 
 
 @dataclass(frozen=True)
@@ -477,6 +481,81 @@ def _copy_directory_contents(source: Path, destination: Path) -> None:
             shutil.copytree(item, target, dirs_exist_ok=True)
         else:
             shutil.copy2(item, target)
+
+
+def _relative_file_paths(root: Path) -> list[Path]:
+    if not root.is_dir():
+        msg = f"Expected directory '{root}'."
+        raise FileNotFoundError(msg)
+
+    return sorted(
+        (path.relative_to(root) for path in root.rglob("*") if path.is_file()),
+        key=lambda path: path.as_posix().lower(),
+    )
+
+
+def _copy_relative_file_paths(
+    source_root: Path,
+    destination_root: Path,
+    relative_paths: list[Path],
+) -> None:
+    destination_root.mkdir(parents=True, exist_ok=True)
+    for relative_path in relative_paths:
+        source_path = source_root / relative_path
+        if not source_path.is_file():
+            msg = f"Expected installer payload file '{source_path}'."
+            raise FileNotFoundError(msg)
+
+        destination_path = destination_root / relative_path
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination_path)
+
+
+def _copy2_with_retry(
+    source: Path,
+    destination: Path,
+    *,
+    attempts: int = 5,
+    delay_seconds: float = 1.0,
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    last_error: OSError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            shutil.copy2(source, destination)
+            return
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != 32:
+                raise
+            last_error = exc
+            if attempt == attempts:
+                break
+            time.sleep(delay_seconds)
+
+    msg = (
+        f"Unable to copy '{source}' to '{destination}' because the destination remained "
+        f"locked after {attempts} attempts."
+    )
+    if last_error is not None:
+        raise RuntimeError(msg) from last_error
+    raise RuntimeError(msg)
+
+
+def _remove_relative_file_paths(root: Path, relative_paths: list[Path]) -> None:
+    for relative_path in relative_paths:
+        path = root / relative_path
+        if not path.exists():
+            continue
+
+        path.unlink()
+        parent = path.parent
+        while parent != root and parent.exists():
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+
+            parent = parent.parent
 
 
 def _compress_directory_contents(source_root: Path, archive_path: Path) -> None:
@@ -1075,7 +1154,11 @@ def _runtime_dll_source_overrides(
 
 def _native_executable_directories(bundle_root: Path) -> list[Path]:
     executable_directories = sorted(
-        {executable_path.parent for executable_path in bundle_root.rglob("*.exe")},
+        {
+            executable_path.parent
+            for executable_path in bundle_root.rglob("*.exe")
+            if executable_path.name != _TRAY_EXECUTABLE_NAME
+        },
         key=lambda path: os.fspath(path).lower(),
     )
     if not executable_directories:
@@ -1083,6 +1166,63 @@ def _native_executable_directories(bundle_root: Path) -> list[Path]:
         raise FileNotFoundError(msg)
 
     return executable_directories
+
+
+def _native_binary_paths(bundle_root: Path) -> list[Path]:
+    binary_paths: list[Path] = []
+    seen_binary_paths: set[str] = set()
+    for executable_directory in _native_executable_directories(bundle_root):
+        for pattern in ("*.exe", "*.dll"):
+            for binary_path in executable_directory.rglob(pattern):
+                binary_key = os.path.normcase(os.fspath(binary_path.resolve(strict=False)))
+                if binary_key in seen_binary_paths:
+                    continue
+
+                seen_binary_paths.add(binary_key)
+                binary_paths.append(binary_path)
+
+    return sorted(binary_paths, key=lambda path: os.fspath(path).lower())
+
+
+def _windows_strip_executable_path(dependency_roots: dict[str, Path]) -> Path:
+    mingw_root = dependency_roots.get("mingw-builds")
+    if mingw_root is None:
+        msg = "Unable to locate the Conan 'mingw-builds' package root required for strip.exe."
+        raise FileNotFoundError(msg)
+
+    strip_executable = mingw_root / "bin" / "strip.exe"
+    if not strip_executable.is_file():
+        msg = f"Expected strip.exe under '{strip_executable.parent}'."
+        raise FileNotFoundError(msg)
+
+    return strip_executable
+
+
+def _strip_native_windows_release_binaries(bundle_root: Path, *, strip_executable: Path) -> None:
+    binary_paths = _native_binary_paths(bundle_root)
+    total_bytes_before = sum(binary_path.stat().st_size for binary_path in binary_paths)
+    for binary_path in binary_paths:
+        _run_checked_capture(
+            (
+                os.fspath(strip_executable),
+                "--strip-debug",
+                os.fspath(binary_path),
+            ),
+            description=f"strip debug info from '{binary_path.name}'",
+        )
+
+    total_bytes_after = sum(binary_path.stat().st_size for binary_path in binary_paths)
+    saved_bytes = total_bytes_before - total_bytes_after
+    logger = get_logger("squid4win")
+    if saved_bytes > 0:
+        logger.info(
+            "Stripped debug sections from %d staged native file(s), saving %.2f MiB.",
+            len(binary_paths),
+            saved_bytes / (1024 * 1024),
+        )
+        return
+
+    logger.info("No staged native debug sections needed stripping.")
 
 
 def _require_squid_executable(bundle_root: Path) -> Path:
@@ -1761,10 +1901,344 @@ def _ensure_mime_configuration(
     shutil.copy2(mime_source_path, mime_destination_path)
 
 
-def _copy_packaging_support_files(
-    paths: RepositoryPaths,
+def _squid_manual_source_paths(source_root: Path) -> tuple[Path, ...]:
+    po4a_path = source_root / "po4a.conf"
+    if not po4a_path.is_file():
+        msg = f"Unable to locate Squid po4a config under '{source_root}'."
+        raise FileNotFoundError(msg)
+
+    manual_source_paths: list[Path] = []
+    missing_source_entries: list[str] = []
+    for line in po4a_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line.startswith("[type: man] "):
+            continue
+
+        source_relative_path = Path(line.split(" ", 2)[2].split(" $lang:", 1)[0])
+        source_path = source_root / source_relative_path
+        if source_path.is_file():
+            manual_source_paths.append(source_path)
+            continue
+
+        missing_source_entries.append(source_relative_path.as_posix())
+
+    if missing_source_entries:
+        get_logger("squid4win").warning(
+            "Skipping %d Squid manual source entries missing from '%s': %s",
+            len(missing_source_entries),
+            source_root,
+            ", ".join(missing_source_entries),
+        )
+
+    if not manual_source_paths:
+        msg = f"Unable to locate any Squid manual sources under '{source_root}'."
+        raise FileNotFoundError(msg)
+
+    return tuple(manual_source_paths)
+
+
+def _bundle_relative_path_or_default(bundle_root: Path, candidate: Path, *, default: str) -> str:
+    if candidate.exists():
+        return _relative_package_path(candidate, bundle_root)
+
+    return default.replace("\\", "/")
+
+
+def _squid_manual_placeholder_substitutions(bundle_root: Path) -> dict[str, str]:
+    security_file_certgen_path = next(
+        (
+            candidate
+            for candidate in (
+                bundle_root / "libexec" / "security_file_certgen.exe",
+                bundle_root / "libexec" / "security_file_certgen",
+            )
+            if candidate.is_file()
+        ),
+        bundle_root / "libexec" / "security_file_certgen.exe",
+    )
+    return {
+        "@DEFAULT_ERROR_DIR@": _bundle_relative_path_or_default(
+            bundle_root,
+            bundle_root / "share" / "errors" / "templates",
+            default="share/errors/templates",
+        ),
+        "@DEFAULT_MIME_TABLE@": _bundle_relative_path_or_default(
+            bundle_root,
+            bundle_root / "etc" / "mime.conf",
+            default="etc/mime.conf",
+        ),
+        "@DEFAULT_SSL_CRTD@": _bundle_relative_path_or_default(
+            bundle_root,
+            security_file_certgen_path,
+            default="libexec/security_file_certgen.exe",
+        ),
+        "@DEFAULT_SSL_DB_DIR@": _bundle_relative_path_or_default(
+            bundle_root,
+            bundle_root / "var" / "cache" / "ssl_db",
+            default="var/cache/ssl_db",
+        ),
+        "@SYSCONFDIR@": _bundle_relative_path_or_default(
+            bundle_root,
+            bundle_root / "etc",
+            default="etc",
+        ),
+    }
+
+
+def _msys2_tool_directories(
+    dependency_roots: dict[str, Path],
+    *,
+    msys2_env_directory: str,
+) -> list[Path]:
+    msys2_root = dependency_roots.get("msys2")
+    if msys2_root is None:
+        msg = "Unable to locate the Conan 'msys2' package root required for HTML docs."
+        raise FileNotFoundError(msg)
+
+    tool_directories: list[Path] = []
+    seen_directories: set[str] = set()
+    _append_msys2_runtime_directories(
+        tool_directories,
+        seen_directories,
+        msys2_root,
+        msys2_env_directory=msys2_env_directory,
+    )
+    if not tool_directories:
+        msg = f"Unable to locate MSYS2 tool directories under '{msys2_root}'."
+        raise FileNotFoundError(msg)
+
+    return tool_directories
+
+
+def _msys2_tool_executable_path(
+    dependency_roots: dict[str, Path],
+    *,
+    executable_name: str,
+    msys2_env_directory: str,
+) -> Path:
+    executable_filename = (
+        executable_name if executable_name.lower().endswith(".exe") else f"{executable_name}.exe"
+    )
+    for tool_directory in _msys2_tool_directories(
+        dependency_roots,
+        msys2_env_directory=msys2_env_directory,
+    ):
+        candidate = tool_directory / executable_filename
+        if candidate.is_file():
+            return candidate
+
+    msg = (
+        f"Unable to locate '{executable_filename}' under the Conan-managed MSYS2 tool directories."
+    )
+    raise FileNotFoundError(msg)
+
+
+def _msys2_tool_environment(
+    dependency_roots: dict[str, Path],
+    *,
+    msys2_env_directory: str,
+) -> dict[str, str]:
+    tool_directories = _msys2_tool_directories(
+        dependency_roots,
+        msys2_env_directory=msys2_env_directory,
+    )
+    environment = dict(os.environ)
+    path_entries = [os.fspath(directory) for directory in tool_directories]
+    existing_path = environment.get("PATH", "").strip()
+    if existing_path:
+        path_entries.append(existing_path)
+    environment["PATH"] = os.pathsep.join(path_entries)
+    return environment
+
+
+def _manual_html_relative_path(manual_source_path: Path) -> Path:
+    name_parts = manual_source_path.name.split(".")
+    if len(name_parts) >= 3 and name_parts[-1] == "in" and name_parts[-2].isdigit():
+        manual_section = name_parts[-2]
+        manual_name = ".".join(name_parts[:-2])
+    elif len(name_parts) >= 2 and name_parts[-1].isdigit():
+        manual_section = name_parts[-1]
+        manual_name = ".".join(name_parts[:-1])
+    else:
+        manual_section = "8"
+        manual_name = manual_source_path.stem
+
+    return _SQUID_HTML_DOCS_RELATIVE_ROOT / f"man{manual_section}" / f"{manual_name}.html"
+
+
+def _manual_title(manual_source_path: Path, manual_text: str) -> str:
+    match = re.search(
+        r"^\.(?:if !'po4a'hide'\s+)?(?:\.)?TH\s+(\S+)\s+(\S+)",
+        manual_text,
+        flags=re.MULTILINE,
+    )
+    if match is not None:
+        return f"{match.group(1)} ({match.group(2)})"
+
+    html_relative_path = _manual_html_relative_path(manual_source_path)
+    return html_relative_path.stem
+
+
+def _write_squid_html_doc_index(
+    bundle_root: Path,
+    *,
+    manual_entries: list[tuple[str, Path, str]],
+) -> Path:
+    docs_root = bundle_root / _SQUID_HTML_DOCS_RELATIVE_ROOT
+    docs_root.mkdir(parents=True, exist_ok=True)
+
+    config_template_path = _bundle_relative_path_or_default(
+        bundle_root,
+        bundle_root / "etc" / "squid.conf.template",
+        default="etc/squid.conf.template",
+    )
+    generated_config_path = _bundle_relative_path_or_default(
+        bundle_root,
+        bundle_root / "etc" / "squid.conf",
+        default="etc/squid.conf",
+    )
+    manual_links = []
+    for title, relative_html_path, source_relative_path in manual_entries:
+        try:
+            href_path = relative_html_path.relative_to(_SQUID_HTML_DOCS_RELATIVE_ROOT)
+        except ValueError:
+            href_path = relative_html_path
+        manual_links.append(
+            "      <li>"
+            f'<a href="{html.escape(href_path.as_posix())}">{html.escape(title)}</a>'
+            f" <code>{html.escape(source_relative_path)}</code>"
+            "</li>"
+        )
+    index_lines = [
+        "<!DOCTYPE html>",
+        '<html lang="en">',
+        "<head>",
+        '  <meta charset="utf-8">',
+        "  <title>Squid4Win HTML manuals</title>",
+        "  <style>",
+        (
+            "    body { font-family: sans-serif; line-height: 1.5; margin: 2rem auto; "
+            "max-width: 80rem; padding: 0 1rem; }"
+        ),
+        "    code { background: #f5f5f5; padding: 0.1rem 0.25rem; }",
+        "  </style>",
+        "</head>",
+        "<body>",
+        "  <main>",
+        "    <h1>Squid4Win HTML manuals</h1>",
+        "    <p>",
+        "      These pages are rendered from the upstream Squid man-page sources so",
+        "      Windows bundles do not have to ship raw Unix man pages.",
+        "    </p>",
+        "    <ul>",
+        "      <li>",
+        f"        Squid4Win ships <code>{html.escape(config_template_path)}</code> and",
+        f"        materializes <code>{html.escape(generated_config_path)}</code> during",
+        "        install instead of bundling the upstream reference copies",
+        "        <code>squid.conf.default</code> and",
+        "        <code>squid.conf.documented</code>.",
+        "      </li>",
+        "      <li>",
+        '        The online Squid configuration manual remains available at <a href="https://www.squid-cache.org/Doc/config/">https://www.squid-cache.org/Doc/config/</a>.',
+        "      </li>",
+        "    </ul>",
+        "    <h2>Manual pages</h2>",
+        "    <ol>",
+        *manual_links,
+        "    </ol>",
+        "  </main>",
+        "</body>",
+        "</html>",
+    ]
+    index_path = docs_root / "index.html"
+    index_path.write_text("\n".join(index_lines) + "\n", encoding="utf-8")
+    return index_path
+
+
+def _generate_squid_html_docs(
     bundle_root: Path,
     source_root: Path,
+    *,
+    dependency_roots: dict[str, Path],
+    msys2_env_directory: str,
+) -> None:
+    docs_root = bundle_root / _SQUID_HTML_DOCS_RELATIVE_ROOT
+    _remove_tree(docs_root)
+
+    groff_executable = _msys2_tool_executable_path(
+        dependency_roots,
+        executable_name="groff",
+        msys2_env_directory=msys2_env_directory,
+    )
+    tool_environment = _msys2_tool_environment(
+        dependency_roots,
+        msys2_env_directory=msys2_env_directory,
+    )
+    substitutions = _squid_manual_placeholder_substitutions(bundle_root)
+    manual_entries: list[tuple[str, Path, str]] = []
+
+    for manual_source_path in _squid_manual_source_paths(source_root):
+        manual_text = manual_source_path.read_text(encoding="utf-8")
+        for placeholder, replacement in substitutions.items():
+            manual_text = manual_text.replace(placeholder, replacement)
+
+        relative_html_path = _manual_html_relative_path(manual_source_path)
+        html_output_path = bundle_root / relative_html_path
+        html_output_path.parent.mkdir(parents=True, exist_ok=True)
+        completed = subprocess.run(
+            (os.fspath(groff_executable), "-Thtml", "-man"),
+            input=manual_text,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=tool_environment,
+        )
+        combined_output = "\n".join(
+            part.strip()
+            for part in (completed.stdout, completed.stderr)
+            if part is not None and part.strip()
+        )
+        if completed.returncode != 0:
+            msg = (
+                "Rendering Squid manual HTML failed for "
+                f"'{manual_source_path.relative_to(source_root).as_posix()}' with exit "
+                f"code {completed.returncode}."
+            )
+            if combined_output:
+                msg = f"{msg} Output: {combined_output}"
+            raise RuntimeError(msg)
+
+        if not completed.stdout.strip():
+            msg = (
+                "Rendering Squid manual HTML produced no output for "
+                f"'{manual_source_path.relative_to(source_root).as_posix()}'."
+            )
+            if combined_output:
+                msg = f"{msg} Output: {combined_output}"
+            raise RuntimeError(msg)
+
+        html_output_path.write_text(completed.stdout.rstrip() + "\n", encoding="utf-8")
+        manual_entries.append(
+            (
+                _manual_title(manual_source_path, manual_text),
+                relative_html_path,
+                manual_source_path.relative_to(source_root).as_posix(),
+            )
+        )
+
+    manual_entries.sort(key=lambda entry: entry[0].lower())
+    _write_squid_html_doc_index(bundle_root, manual_entries=manual_entries)
+    _remove_tree(bundle_root / "share" / "man")
+    get_logger("squid4win").info(
+        "Generated %d Squid HTML manual file(s) under '%s' and pruned raw man pages.",
+        len(manual_entries),
+        docs_root,
+    )
+
+
+def _sync_repo_packaging_files(
+    paths: RepositoryPaths,
+    bundle_root: Path,
 ) -> tuple[Path, Path, Path]:
     licenses_root = bundle_root / "licenses"
     installer_support_root = bundle_root / "installer"
@@ -1777,16 +2251,41 @@ def _copy_packaging_support_files(
         installer_support_root / "svc.ps1",
     )
     shutil.copy2(
-        paths.scripts_root / "Assert-SquidServiceName.ps1",
-        installer_support_root / "Assert-SquidServiceName.ps1",
-    )
-    shutil.copy2(
         paths.repository_root / "packaging" / "defaults" / "squid.conf.template",
         config_directory / "squid.conf.template",
     )
     (config_directory / "squid.conf").unlink(missing_ok=True)
+    for extra_config_name in (
+        "errorpage.css.default",
+        "mime.conf.default",
+        "squid.conf.default",
+        "squid.conf.documented",
+    ):
+        (config_directory / extra_config_name).unlink(missing_ok=True)
     shutil.copy2(paths.repository_root / "LICENSE", licenses_root / "Repository-LICENSE.txt")
+
+    return licenses_root, installer_support_root, config_directory
+
+
+def _copy_packaging_support_files(
+    paths: RepositoryPaths,
+    bundle_root: Path,
+    source_root: Path,
+    *,
+    dependency_roots: dict[str, Path],
+    msys2_env_directory: str,
+) -> tuple[Path, Path, Path]:
+    licenses_root, installer_support_root, config_directory = _sync_repo_packaging_files(
+        paths,
+        bundle_root,
+    )
     _ensure_mime_configuration(bundle_root, source_root, config_directory)
+    _generate_squid_html_docs(
+        bundle_root,
+        source_root,
+        dependency_roots=dependency_roots,
+        msys2_env_directory=msys2_env_directory,
+    )
 
     squid_copying_path = source_root / "COPYING"
     if squid_copying_path.is_file():
@@ -1807,6 +2306,9 @@ def _materialize_staged_squid_bundle(
     build_settings = _load_build_settings(context.paths)
     msys2_settings = cast(dict[str, Any], build_settings.get("msys2") or {})
     msys2_env_directory = str(msys2_settings.get("env", "mingw64")).lower()
+    should_strip_native_binaries = (
+        os.name == "nt" and options.configuration == BuildConfiguration.RELEASE
+    )
     stage_root = context.layout.stage_root
     _remove_tree(stage_root)
     stage_root.mkdir(parents=True, exist_ok=True)
@@ -1833,17 +2335,26 @@ def _materialize_staged_squid_bundle(
     runtime_notice_packages: list[dict[str, Any]] = []
     dependency_refs: dict[str, str] = {}
     dependency_roots: dict[str, Path] = {}
-    if options.with_runtime_dlls:
+    if should_strip_native_binaries or options.with_runtime_dlls or options.with_packaging_support:
+        dependency_names = ["mingw-builds"] if should_strip_native_binaries else []
+        if options.with_packaging_support:
+            dependency_names.append("msys2")
+        if options.with_runtime_dlls:
+            dependency_names.extend(
+                _runtime_dependency_names(
+                    build_settings,
+                    dependency_sources=options.dependency_sources,
+                )
+            )
+
         dependency_refs, dependency_roots = _resolve_dependency_metadata(
             context,
             build_profile=options.build_profile,
             configuration=options.configuration,
-            dependency_names=_runtime_dependency_names(
-                build_settings,
-                dependency_sources=options.dependency_sources,
-            ),
+            dependency_names=_deduplicate(dependency_names),
             dependency_sources=options.dependency_sources,
         )
+    if options.with_runtime_dlls:
         bundled_runtime_dlls, conan_runtime_dll_paths_by_dependency = _bundle_native_runtime_dlls(
             stage_root,
             build_settings,
@@ -1861,6 +2372,12 @@ def _materialize_staged_squid_bundle(
             dependency_sources=options.dependency_sources,
         )
 
+    if should_strip_native_binaries:
+        _strip_native_windows_release_binaries(
+            stage_root,
+            strip_executable=_windows_strip_executable_path(dependency_roots),
+        )
+
     if options.with_packaging_support:
         source_root = (
             context.paths.conan_recipe_root / "sources" / f"squid-{release_metadata['version']}"
@@ -1869,13 +2386,15 @@ def _materialize_staged_squid_bundle(
             context.paths,
             stage_root,
             source_root,
+            dependency_roots=dependency_roots,
+            msys2_env_directory=msys2_env_directory,
         )
         tray_notice_packages: list[dict[str, Any]] = []
         if tray_context is not None:
             tray_notice_packages = _collect_tray_notice_bundle(
                 stage_root,
                 tray_context.package_root,
-            )
+        )
         _write_source_manifest(
             context.paths,
             licenses_root,
@@ -1927,6 +2446,32 @@ def _bundle_requires_tray(options: BundlePackageOptions) -> bool:
 
 def _bundle_requires_notices(options: BundlePackageOptions) -> bool:
     return options.require_notices or options.create_portable_zip or options.build_installer
+
+
+def _tray_payload_relative_file_paths(tray_package_root: Path) -> list[Path]:
+    tray_bin_root = tray_package_root / "bin"
+    relative_paths = _relative_file_paths(tray_bin_root)
+    if not relative_paths:
+        msg = f"Expected at least one tray payload file under '{tray_bin_root}'."
+        raise FileNotFoundError(msg)
+
+    return relative_paths
+
+
+def _materialize_installer_harvest_roots(bundle_state: BundlePackageState) -> None:
+    tray_relative_paths = _tray_payload_relative_file_paths(bundle_state.tray_package_root)
+    _remove_tree(bundle_state.installer_core_payload_root)
+    _remove_tree(bundle_state.installer_tray_payload_root)
+    _copy_directory_contents(
+        bundle_state.installer_payload_root,
+        bundle_state.installer_core_payload_root,
+    )
+    _copy_relative_file_paths(
+        bundle_state.installer_payload_root,
+        bundle_state.installer_tray_payload_root,
+        tray_relative_paths,
+    )
+    _remove_relative_file_paths(bundle_state.installer_core_payload_root, tray_relative_paths)
 
 
 def _bundle_prerequisite_reasons(
@@ -2728,7 +3273,8 @@ def build_bundle_plan(options: BundlePackageOptions) -> AutomationPlan:
                     options.configuration.value,
                     "-t:Rebuild",
                     "--nologo",
-                    f"-p:InstallerPayloadRoot={install_payload_root}",
+                    f"-p:InstallerPayloadCoreRoot={context.bundle_state.installer_core_payload_root}",
+                    f"-p:InstallerPayloadTrayRoot={context.bundle_state.installer_tray_payload_root}",
                     f"-p:ProductVersion={product_version}",
                     f"-p:SquidServiceName={options.service_name}",
                 ),
@@ -2793,6 +3339,8 @@ def run_tray_build(options: TrayBuildOptions, runner: PlanRunner, *, execute: bo
         raise FileNotFoundError(msg)
 
     _copy_directory_contents(context.publish_root, context.package_root / "bin")
+    for pdb_path in (context.package_root / "bin").rglob("*.pdb"):
+        pdb_path.unlink()
     shutil.copy2(context.license_path, context.package_root / "licenses" / "LICENSE")
     manifest_path = _harvest_tray_notice_manifest(context.publish_root, context.package_root)
 
@@ -2852,17 +3400,6 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
     context.layout.conan_output_root.mkdir(parents=True, exist_ok=True)
     context.lockfile_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if options.with_tray and not options.bootstrap_only:
-        run_tray_build(
-            TrayBuildOptions(
-                repository_root=context.paths.repository_root,
-                configuration=options.configuration,
-                build_root=context.build_root,
-            ),
-            runner,
-            execute=True,
-        )
-
     release_metadata = _load_json_object(metadata_path)
     with _build_lock(context.layout.build_lock_path, context.layout.conan_output_root):
         if options.clean and not options.bootstrap_only:
@@ -2885,6 +3422,17 @@ def run_squid_build(options: SquidBuildOptions, runner: PlanRunner, *, execute: 
             ):
                 _remove_tree(path_to_remove)
             context.layout.conan_output_root.mkdir(parents=True, exist_ok=True)
+
+        if options.with_tray and not options.bootstrap_only:
+            run_tray_build(
+                TrayBuildOptions(
+                    repository_root=context.paths.repository_root,
+                    configuration=options.configuration,
+                    build_root=context.build_root,
+                ),
+                runner,
+                execute=True,
+            )
 
         runner.run(plan)
         if not options.bootstrap_only:
@@ -3235,6 +3783,24 @@ def run_smoke_test(options: SmokeTestOptions, runner: PlanRunner, *, execute: bo
             label="tray-package",
         )
 
+    staged_config_template_path = install_root / "etc" / "squid.conf.template"
+    if staged_config_template_path.is_file():
+        html_docs_index_path = install_root / "docs" / "html" / "index.html"
+        if not html_docs_index_path.is_file():
+            msg = (
+                "Expected generated HTML docs under "
+                f"'{html_docs_index_path}' whenever packaging support is staged."
+            )
+            raise FileNotFoundError(msg)
+
+        raw_man_root_path = install_root / "share" / "man"
+        if raw_man_root_path.exists():
+            msg = (
+                "Expected raw share/man pages to be pruned from the Windows payload "
+                f"after HTML doc generation, but found '{raw_man_root_path}'."
+            )
+            raise RuntimeError(msg)
+
     version_output = _run_checked_capture(
         (os.fspath(binary_path), "-v"),
         description="squid.exe -v",
@@ -3491,6 +4057,147 @@ def _command_line_config_path(command_line: str) -> str | None:
 
     quoted_path, unquoted_path = match.groups()
     return quoted_path or unquoted_path
+
+
+def _command_line_has_switch(command_line: str, switch: str) -> bool:
+    return re.search(rf"(?:^|\s){re.escape(switch)}(?:\s|$)", command_line) is not None
+
+
+def _http_port_value(address_token: str) -> int | None:
+    if address_token.isdigit():
+        return int(address_token)
+
+    if address_token.startswith("["):
+        match = re.fullmatch(r"\[[^\]]+\]:(\d+)", address_token)
+        if match is None:
+            return None
+        return int(match.group(1))
+
+    if ":" not in address_token:
+        return None
+
+    _, port_text = address_token.rsplit(":", 1)
+    if not port_text.isdigit():
+        return None
+    return int(port_text)
+
+
+def _configured_http_ports(config_path: Path) -> tuple[int, ...]:
+    if not config_path.is_file():
+        msg = f"The Squid configuration '{config_path}' does not exist."
+        raise FileNotFoundError(msg)
+
+    configured_ports: list[int] = []
+    for raw_line in config_path.read_text(encoding="ascii").splitlines():
+        active_line = raw_line.split("#", 1)[0].strip()
+        if not active_line:
+            continue
+
+        match = re.match(r"^http_port\s+(.+)$", active_line)
+        if match is None:
+            continue
+
+        address_token = match.group(1).split(maxsplit=1)[0]
+        port = _http_port_value(address_token)
+        if port is None:
+            msg = (
+                f"Unable to parse the Squid http_port directive in '{config_path}': "
+                f"{raw_line.strip()}"
+            )
+            raise RuntimeError(msg)
+        configured_ports.append(port)
+
+    if not configured_ports:
+        msg = f"The Squid configuration '{config_path}' did not declare an active http_port."
+        raise RuntimeError(msg)
+
+    return tuple(dict.fromkeys(configured_ports))
+
+
+def _rewrite_single_http_port(config_path: Path, port: int) -> None:
+    raw_text = config_path.read_text(encoding="ascii")
+    newline = "\r\n" if "\r\n" in raw_text else "\n"
+    trailing_newline = raw_text.endswith(("\r\n", "\n"))
+    rewritten_lines: list[str] = []
+    replacements = 0
+
+    for raw_line in raw_text.splitlines():
+        active_line = raw_line.split("#", 1)[0]
+        if not re.match(r"^\s*http_port\b", active_line):
+            rewritten_lines.append(raw_line)
+            continue
+
+        match = re.match(r"^(\s*http_port\s+)\S+(.*)$", raw_line)
+        if match is None:
+            msg = f"Unable to rewrite the Squid http_port directive in '{config_path}'."
+            raise RuntimeError(msg)
+
+        rewritten_lines.append(f"{match.group(1)}{port}{match.group(2)}")
+        replacements += 1
+
+    if replacements != 1:
+        msg = (
+            f"Expected exactly one active http_port directive in '{config_path}', "
+            f"found {replacements}."
+        )
+        raise RuntimeError(msg)
+
+    rewritten_text = newline.join(rewritten_lines)
+    if trailing_newline:
+        rewritten_text += newline
+    config_path.write_text(rewritten_text, encoding="ascii")
+
+
+def _allocate_loopback_tcp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+        candidate.bind(("127.0.0.1", 0))
+        return int(candidate.getsockname()[1])
+
+
+def _wait_for_local_tcp_listener(
+    service_name: str,
+    *,
+    port: int,
+    timeout_seconds: int,
+    install_root: Path | None = None,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_errors: dict[str, str] = {}
+
+    while time.monotonic() < deadline:
+        for address in ("127.0.0.1", "::1"):
+            try:
+                with socket.create_connection((address, port), timeout=1):
+                    return
+            except OSError as exc:
+                last_errors[address] = str(exc)
+        time.sleep(1)
+
+    registered, status = _query_service(service_name)
+    diagnostics = _service_timeout_diagnostics(
+        service_name,
+        last_observed_status=status if registered else None,
+        install_root=install_root,
+    )
+    if diagnostics:
+        get_logger("squid4win").error(
+            "Listener diagnostics for '%s' while waiting for local port %s:\n%s",
+            service_name,
+            port,
+            diagnostics,
+        )
+
+    msg = (
+        f"The Squid Windows service '{service_name}' did not accept TCP connections on "
+        f"local http_port {port} within {timeout_seconds} seconds."
+    )
+    if last_errors:
+        msg = (
+            f"{msg} Last connection errors: "
+            + "; ".join(f"{address}: {error}" for address, error in last_errors.items())
+            + "."
+        )
+    raise RuntimeError(msg)
 
 
 def _service_timeout_diagnostics(
@@ -3812,6 +4519,8 @@ def _write_service_runner_validation_summary(
     ]
     if result.service_command_line is not None:
         summary_lines.append(f"- Service command line: `{result.service_command_line}`")
+    if result.validated_http_port is not None:
+        summary_lines.append(f"- Validated HTTP port: `{result.validated_http_port}`")
     if result.cleanup_actions:
         summary_lines.append(f"- Cleanup actions: `{' ; '.join(result.cleanup_actions)}`")
     if result.cleanup_issues:
@@ -3852,6 +4561,13 @@ def run_service_runner_validation(
         _default_service_validation_install_root(validation_token),
         base=paths.repository_root,
     )
+    if " " in os.fspath(install_root):
+        msg = (
+            f"Install root '{install_root}' contains spaces. Squid Windows service startup "
+            "splits the stored CommandLine on whitespace without quote support. "
+            "Use a path without spaces."
+        )
+        raise ValueError(msg)
 
     if not execute:
         logger.info(
@@ -3885,6 +4601,7 @@ def run_service_runner_validation(
     bundle_state: BundlePackageState | None = None
     msi_path: Path | None = None
     service_command_line: str | None = None
+    validated_http_port: int | None = None
     install_attempted = False
     uninstall_completed = False
 
@@ -3902,23 +4619,36 @@ def run_service_runner_validation(
             artifact_root=validation_root,
             installer_project_path=paths.installer_project_path,
         )
-        staged_payload_root = bundle_state.installer_payload_root
+        staged_core_payload_root = bundle_state.installer_core_payload_root
+        staged_tray_payload_root = bundle_state.installer_tray_payload_root
         expected_staged_paths = (
-            staged_payload_root / "installer" / "svc.ps1",
-            staged_payload_root / "installer" / "Assert-SquidServiceName.ps1",
-            staged_payload_root / "etc" / "squid.conf.template",
+            staged_core_payload_root / "installer" / "svc.ps1",
+            staged_core_payload_root / "etc" / "squid.conf.template",
         )
         for expected_path in expected_staged_paths:
             if not expected_path.exists():
-                msg = f"The staged payload '{staged_payload_root}' is missing '{expected_path}'."
+                msg = (
+                    f"The staged installer core payload '{staged_core_payload_root}' is missing "
+                    f"'{expected_path}'."
+                )
                 raise FileNotFoundError(msg)
 
-        staged_config_path = staged_payload_root / "etc" / "squid.conf"
+        if (
+            _bundle_requires_tray(bundle_options)
+            and not (staged_tray_payload_root / _TRAY_EXECUTABLE_NAME).is_file()
+        ):
+            msg = (
+                f"The staged installer tray payload '{staged_tray_payload_root}' is missing "
+                f"'{_TRAY_EXECUTABLE_NAME}'."
+            )
+            raise FileNotFoundError(msg)
+
+        staged_config_path = staged_core_payload_root / "etc" / "squid.conf"
         if staged_config_path.exists():
             msg = (
-                f"The staged payload already contains '{staged_config_path}'. The installer "
-                "contract requires shipping squid.conf.template and materializing squid.conf "
-                "during install."
+                f"The staged installer core payload already contains '{staged_config_path}'. "
+                "The installer contract requires shipping squid.conf.template and "
+                "materializing squid.conf during install."
             )
             raise RuntimeError(msg)
 
@@ -3943,7 +4673,6 @@ def run_service_runner_validation(
 
         expected_installed_paths = (
             install_root / "installer" / "svc.ps1",
-            install_root / "installer" / "Assert-SquidServiceName.ps1",
             install_root / "etc" / "squid.conf",
             install_root / "var" / "cache",
             install_root / "var" / "logs",
@@ -3991,6 +4720,13 @@ def run_service_runner_validation(
                 f"'{actual_registry_command_line}', which did not contain '-f <config>'."
             )
             raise RuntimeError(msg)
+        if not _command_line_has_switch(actual_registry_command_line, "-N"):
+            msg = (
+                f"The installed service registry key '{registry_path}' stored CommandLine="
+                f"'{actual_registry_command_line}', expected it to include '-N' because "
+                "native Windows Squid services must run the service process as the worker."
+            )
+            raise RuntimeError(msg)
         if _normalized_windows_path_text(
             registry_command_line_config_path
         ) != _normalized_windows_path_text(expected_registry_config_path):
@@ -4015,8 +4751,31 @@ def run_service_runner_validation(
             )
             raise RuntimeError(msg)
 
+        config_path = install_root / "etc" / "squid.conf"
+        _stop_service_if_present(service_name, timeout_seconds=options.service_timeout_seconds)
+        validated_http_port = _allocate_loopback_tcp_port()
+        _rewrite_single_http_port(config_path, validated_http_port)
+        configured_http_ports = _configured_http_ports(config_path)
+        if configured_http_ports != (validated_http_port,):
+            msg = (
+                f"The installed Squid configuration at '{config_path}' did not retain "
+                f"the temporary validation http_port {validated_http_port}: "
+                f"{configured_http_ports}"
+            )
+            raise RuntimeError(msg)
+        logger.info(
+            "Rewrote %s to validate the installed Squid service on local http_port %s.",
+            config_path,
+            validated_http_port,
+        )
         _start_service(
             service_name,
+            timeout_seconds=options.service_timeout_seconds,
+            install_root=install_root,
+        )
+        _wait_for_local_tcp_listener(
+            service_name,
+            port=validated_http_port,
             timeout_seconds=options.service_timeout_seconds,
             install_root=install_root,
         )
@@ -4064,6 +4823,7 @@ def run_service_runner_validation(
             msi_path=msi_path,
             service_name=service_name,
             service_command_line=service_command_line,
+            validated_http_port=validated_http_port,
             cleanup_actions=cleanup_result.actions,
             cleanup_issues=cleanup_result.issues,
         )
@@ -4295,6 +5055,8 @@ def run_bundle_package(
         )
 
     install_payload_root = context.bundle_state.installer_payload_root
+    if context.bundle_state.stage_root_exists:
+        _sync_repo_packaging_files(context.paths, context.bundle_state.squid_stage_root)
     context.artifact_root.mkdir(parents=True, exist_ok=True)
     _remove_tree(install_payload_root)
     install_payload_root.mkdir(parents=True, exist_ok=True)
@@ -4342,6 +5104,7 @@ def run_bundle_package(
         )
 
     if options.build_installer:
+        _materialize_installer_harvest_roots(context.bundle_state)
         product_version = options.product_version or _derive_installer_version(
             context.paths.squid_release_metadata_path
         )
@@ -4365,7 +5128,8 @@ def run_bundle_package(
                     options.configuration.value,
                     "-t:Rebuild",
                     "--nologo",
-                    f"-p:InstallerPayloadRoot={install_payload_root}",
+                    f"-p:InstallerPayloadCoreRoot={context.bundle_state.installer_core_payload_root}",
+                    f"-p:InstallerPayloadTrayRoot={context.bundle_state.installer_tray_payload_root}",
                     f"-p:ProductVersion={product_version}",
                     f"-p:SquidServiceName={options.service_name}",
                 ),
@@ -4387,7 +5151,7 @@ def run_bundle_package(
             msg = f"Unable to locate the built MSI under '{project_directory / 'bin'}'."
             raise FileNotFoundError(msg)
 
-        shutil.copy2(built_msi, context.bundle_state.msi_path)
+        _copy2_with_retry(built_msi, context.bundle_state.msi_path)
         if options.sign_msi:
             _run_invocation(
                 runner,

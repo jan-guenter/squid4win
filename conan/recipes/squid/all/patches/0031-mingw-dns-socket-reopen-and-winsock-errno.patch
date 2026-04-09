@@ -1,0 +1,185 @@
+diff --git a/pristine/squid-7.5/compat/os/mswindows.h b/patched/squid-7.5/compat/os/mswindows.h
+index 6bc92b0..7803f29 100644
+--- a/pristine/squid-7.5/compat/os/mswindows.h
++++ b/patched/squid-7.5/compat/os/mswindows.h
+@@ -632,8 +632,12 @@ inline ssize_t
+ recv(int s, void * b, size_t l, int f)
+ {
+     ssize_t result;
+-    if ((result = ::recv(_get_osfhandle(s), (char *)b, l, f)) == SOCKET_ERROR) {
+-        errno = WSAGetLastError();
++    const SOCKET sock = _get_osfhandle(s);
++    if (sock == INVALID_SOCKET) {
++        return -1;
++    }
++    if ((result = ::recv(sock, (char *)b, l, f)) == SOCKET_ERROR) {
++        WIN32_maperror(WSAGetLastError());
+         return -1;
+     } else
+         return result;
+@@ -645,8 +649,12 @@ recvfrom(int s, void * b, size_t l, int f, struct sockaddr * fr, socklen_t * fl)
+ {
+     ssize_t result;
+     int ifl=*fl;
+-    if ((result = ::recvfrom(_get_osfhandle(s), (char *)b, l, f, fr, &ifl)) == SOCKET_ERROR) {
+-        errno = WSAGetLastError();
++    const SOCKET sock = _get_osfhandle(s);
++    if (sock == INVALID_SOCKET) {
++        return -1;
++    }
++    if ((result = ::recvfrom(sock, (char *)b, l, f, fr, &ifl)) == SOCKET_ERROR) {
++        WIN32_maperror(WSAGetLastError());
+         return -1;
+     } else
+         return result;
+
+diff --git a/pristine/squid-7.5/src/dns_internal.cc b/patched/squid-7.5/src/dns_internal.cc
+index cfccdfe..bbbd6ef 100644
+--- a/pristine/squid-7.5/src/dns_internal.cc
++++ b/patched/squid-7.5/src/dns_internal.cc
+@@ -273,6 +273,7 @@ static IOCB idnsSentQueryVC;
+ static int idnsFromKnownNameserver(Ip::Address const &from);
+ static idns_query *idnsFindQuery(unsigned short id);
+ static void idnsGrokReply(const char *buf, size_t sz, int from_ns);
++static void idnsOpenSockets(void);
+ static PF idnsRead;
+ static EVH idnsCheckQueue;
+ static void idnsTickleQueue(void);
+@@ -1037,6 +1038,58 @@ idnsFromKnownNameserver(Ip::Address const &from)
+     return -1;
+ }
+ 
++static void
++idnsOpenSockets(void)
++{
++    Ip::Address addrV6; // since we do not want to alter Config.Addrs.udp_* and do not have one of our own.
++
++    if (!Config.Addrs.udp_outgoing.isNoAddr())
++        addrV6 = Config.Addrs.udp_outgoing;
++    else
++        addrV6 = Config.Addrs.udp_incoming;
++
++    Ip::Address addrV4 = addrV6;
++    addrV4.setIPv4();
++
++    const bool openingIpv6 = DnsSocketB < 0 && Ip::EnableIpv6 && addrV6.isIPv6();
++    const bool openingIpv4 = DnsSocketA < 0 && addrV4.isIPv4();
++
++    if (openingIpv6) {
++        debugs(78, 2, "idnsInit: attempt open DNS socket to: " << addrV6);
++        DnsSocketB = comm_open_listener(SOCK_DGRAM,
++                                        IPPROTO_UDP,
++                                        addrV6,
++                                        COMM_NONBLOCKING,
++                                        "DNS Socket IPv6");
++    }
++
++    if (openingIpv4) {
++        debugs(78, 2, "idnsInit: attempt open DNS socket to: " << addrV4);
++        DnsSocketA = comm_open_listener(SOCK_DGRAM,
++                                        IPPROTO_UDP,
++                                        addrV4,
++                                        COMM_NONBLOCKING,
++                                        "DNS Socket IPv4");
++    }
++
++    if (DnsSocketA < 0 && DnsSocketB < 0)
++        fatal("Could not create a DNS socket");
++
++    /* Ouch... we can't call functions using debug from a debug
++     * statement. Doing so messes up the internal Debug::level
++     */
++    if (openingIpv6 && DnsSocketB >= 0) {
++        comm_local_port(DnsSocketB);
++        debugs(78, Important(16), "DNS IPv6 socket created at " << addrV6 << ", FD " << DnsSocketB);
++        Comm::SetSelect(DnsSocketB, COMM_SELECT_READ, idnsRead, nullptr, 0);
++    }
++    if (openingIpv4 && DnsSocketA >= 0) {
++        comm_local_port(DnsSocketA);
++        debugs(78, Important(64), "DNS IPv4 socket created at " << addrV4 << ", FD " << DnsSocketA);
++        Comm::SetSelect(DnsSocketA, COMM_SELECT_READ, idnsRead, nullptr, 0);
++    }
++}
++
+ static idns_query *
+ idnsFindQuery(unsigned short id)
+ {
+@@ -1363,6 +1416,24 @@ idnsRead(int fd, void *)
+             if (ignoreErrno(xerrno))
+                 break;
+ 
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
++            if (xerrno == 0 || xerrno == EBADF || xerrno == ENOTSOCK) {
++                debugs(50, DBG_IMPORTANT, MYNAME << "FD " << fd <<
++                       " recvfrom failed on Windows; reopening DNS sockets: " <<
++                       (xerrno ? xstrerr(xerrno) : "unknown socket state"));
++                if (fd == DnsSocketA) {
++                    comm_close(DnsSocketA);
++                    DnsSocketA = -1;
++                }
++                if (fd == DnsSocketB) {
++                    comm_close(DnsSocketB);
++                    DnsSocketB = -1;
++                }
++                idnsOpenSockets();
++                break;
++            }
++#endif
++
+ #if _SQUID_LINUX_
+             /* Some Linux systems seem to set the FD for reading and then
+              * return ECONNREFUSED when sendto() fails and generates an ICMP
+@@ -1559,52 +1630,7 @@ Dns::Init(void)
+ {
+     static int init = 0;
+ 
+-    if (DnsSocketA < 0 && DnsSocketB < 0) {
+-        Ip::Address addrV6; // since we do not want to alter Config.Addrs.udp_* and do not have one of our own.
+-
+-        if (!Config.Addrs.udp_outgoing.isNoAddr())
+-            addrV6 = Config.Addrs.udp_outgoing;
+-        else
+-            addrV6 = Config.Addrs.udp_incoming;
+-
+-        Ip::Address addrV4 = addrV6;
+-        addrV4.setIPv4();
+-
+-        if (Ip::EnableIpv6 && addrV6.isIPv6()) {
+-            debugs(78, 2, "idnsInit: attempt open DNS socket to: " << addrV6);
+-            DnsSocketB = comm_open_listener(SOCK_DGRAM,
+-                                            IPPROTO_UDP,
+-                                            addrV6,
+-                                            COMM_NONBLOCKING,
+-                                            "DNS Socket IPv6");
+-        }
+-
+-        if (addrV4.isIPv4()) {
+-            debugs(78, 2, "idnsInit: attempt open DNS socket to: " << addrV4);
+-            DnsSocketA = comm_open_listener(SOCK_DGRAM,
+-                                            IPPROTO_UDP,
+-                                            addrV4,
+-                                            COMM_NONBLOCKING,
+-                                            "DNS Socket IPv4");
+-        }
+-
+-        if (DnsSocketA < 0 && DnsSocketB < 0)
+-            fatal("Could not create a DNS socket");
+-
+-        /* Ouch... we can't call functions using debug from a debug
+-         * statement. Doing so messes up the internal Debug::level
+-         */
+-        if (DnsSocketB >= 0) {
+-            comm_local_port(DnsSocketB);
+-            debugs(78, Important(16), "DNS IPv6 socket created at " << addrV6 << ", FD " << DnsSocketB);
+-            Comm::SetSelect(DnsSocketB, COMM_SELECT_READ, idnsRead, nullptr, 0);
+-        }
+-        if (DnsSocketA >= 0) {
+-            comm_local_port(DnsSocketA);
+-            debugs(78, Important(64), "DNS IPv4 socket created at " << addrV4 << ", FD " << DnsSocketA);
+-            Comm::SetSelect(DnsSocketA, COMM_SELECT_READ, idnsRead, nullptr, 0);
+-        }
+-    }
++    idnsOpenSockets();
+ 
+     assert(nameservers.empty());
+     idnsAddMDNSNameservers();

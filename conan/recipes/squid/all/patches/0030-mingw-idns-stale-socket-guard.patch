@@ -1,0 +1,20 @@
+diff --git a/pristine/squid-7.5/src/dns_internal.cc b/patched/squid-7.5/src/dns_internal.cc
+index 11097e9..79c2660 100644
+--- a/pristine/squid-7.5/src/dns_internal.cc
++++ b/patched/squid-7.5/src/dns_internal.cc
+@@ -1324,6 +1324,15 @@ idnsRead(int fd, void *)
+     int max = INCOMING_DNS_MAX;
+     static char rbuf[SQUID_UDP_SO_RCVBUF];
+     Ip::Address from;
++
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
++    if (fd != DnsSocketA && fd != DnsSocketB) {
++        debugs(78, 3, "idnsRead: ignoring stale DNS socket callback on FD " << fd <<
++               "; current IPv4 FD " << DnsSocketA <<
++               "; current IPv6 FD " << DnsSocketB);
++        return;
++    }
++#endif
+ 
+     debugs(78, 3, "idnsRead: starting with FD " << fd);
+ 

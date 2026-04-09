@@ -1,0 +1,17 @@
+diff --git a/pristine/squid-7.5/src/store_key_md5.cc b/patched/squid-7.5/src/store_key_md5.cc
+index 44f5af3..d115bb7 100644
+--- a/pristine/squid-7.5/src/store_key_md5.cc
++++ b/patched/squid-7.5/src/store_key_md5.cc
+@@ -83,9 +83,9 @@ storeKeyPrivate()
+     // others just simplify searching for keys in a multi-process cache.log
+     static struct {
+         uint64_t count;
+-        pid_t pid;
+-        int32_t kid;
+-    } key = { 0, getpid(), KidIdentifier };
++        uint32_t pid;
++        uint32_t kid;
++    } key = { 0, static_cast<uint32_t>(getpid()), static_cast<uint32_t>(KidIdentifier) };
+     assert(sizeof(key) == SQUID_MD5_DIGEST_LENGTH);
+     ++key.count;
+     return reinterpret_cast<cache_key*>(&key);

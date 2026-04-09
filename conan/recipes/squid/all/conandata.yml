@@ -86,3 +86,47 @@ patches:
       patch_description: "Use SetFilePointerEx for MinGW file truncation on Windows."
       base_path: "."
       strip: 2
+    - patch_file: "patches/0021-mingw-file-rename-win32-replace.patch"
+      patch_description: "Use Win32 replace semantics for MinGW file renames on Windows."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0022-mingw-empty-swap-state-rebuild.patch"
+      patch_description: "Handle empty swap.state rebuild logs in place and close parser-owned files before Windows swap-log replacement."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0023-mingw-service-commandline-after-win32-init.patch"
+      patch_description: "Build the parsed command line after Win32 service startup rewrites argc/argv from the registry."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0024-mingw-select-fdset-iteration.patch"
+      patch_description: "Use Winsock fd_set copies and FD_ISSET-based iteration in the MinGW select loop."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0025-mingw-socket-io-dispatch.patch"
+      patch_description: "Dispatch MinGW socket descriptors through recv/send instead of generic file I/O."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0026-mingw-store-key-private-layout.patch"
+      patch_description: "Keep private store keys at the MD5 digest size when MinGW uses a wider pid_t."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0027-mingw-dns-registry-discovery.patch"
+      patch_description: "Enable the existing Windows registry DNS discovery path for MinGW builds."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0028-mingw-socket-close-wrapper.patch"
+      patch_description: "Use the Winsock-aware close wrapper for MinGW C++ sources so socket descriptors do not leak or desynchronize."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0029-mingw-supported-socket-close-cleanup.patch"
+      patch_description: "On MinGW, close socket-backed CRT descriptors with Winsock first and then release the CRT slot via the supported _close() path."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0030-mingw-idns-stale-socket-guard.patch"
+      patch_description: "Ignore stale DNS socket read callbacks on Windows after the active DNS sockets have been closed or recreated."
+      base_path: "."
+      strip: 2
+    - patch_file: "patches/0031-mingw-dns-socket-reopen-and-winsock-errno.patch"
+      patch_description: "Map MinGW Winsock recv errors back to errno and reopen internal DNS sockets when Windows reports a broken DNS listener."
+      base_path: "."
+      strip: 2

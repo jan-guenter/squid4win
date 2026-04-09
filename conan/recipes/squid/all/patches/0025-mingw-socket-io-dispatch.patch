@@ -1,0 +1,78 @@
+diff --git a/pristine/squid-7.5/src/fd.cc b/patched/squid-7.5/src/fd.cc
+index dc5cef3..01feeb1 100644
+--- a/pristine/squid-7.5/src/fd.cc
++++ b/patched/squid-7.5/src/fd.cc
+@@ -135,12 +135,15 @@ sendmsg(int fd, const msghdr *msg, int flags) /* squid4win-mingw-fd-msghdr */
+ 
+ int default_read_method(int, char *, int);
+ int default_write_method(int, const char *, int);
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+ int socket_read_method(int, char *, int);
+ int socket_write_method(int, const char *, int);
++#endif
++#if _SQUID_WINDOWS_
+ int file_read_method(int, char *, int);
+ int file_write_method(int, const char *, int);
+-#else
++#endif
++#if !_SQUID_WINDOWS_
+ int msghdr_read_method(int, char *, int);
+ int msghdr_write_method(int, const char *, int);
+ #endif
+@@ -207,24 +210,25 @@ fd_close(int fd)
+     F->clear();
+ }
+ 
+-#if _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
+ 
+ int
+ socket_read_method(int fd, char *buf, int len)
+ {
+-    return recv(fd, (void *) buf, len, 0);
++    return recv(fd, buf, len, 0);
+ }
+ 
+ int
+-file_read_method(int fd, char *buf, int len)
++socket_write_method(int fd, const char *buf, int len)
+ {
+-    return _read(fd, buf, len);
++    return send(fd, buf, len, 0);
+ }
+ 
++#if _SQUID_WINDOWS_
+ int
+-socket_write_method(int fd, const char *buf, int len)
++file_read_method(int fd, char *buf, int len)
+ {
+-    return send(fd, (const void *) buf, len, 0);
++    return _read(fd, buf, len);
+ }
+ 
+ int
+@@ -232,8 +236,11 @@ file_write_method(int fd, const char *buf, int len)
+ {
+     return _write(fd, buf, len);
+ }
++#endif
+ 
+-#else
++#endif
++
++#if !_SQUID_WINDOWS_
+ int
+ default_read_method(int fd, char *buf, int len)
+ {
+@@ -303,6 +310,10 @@ fd_open(int fd, unsigned int type, const char *desc)
+ #else
+     switch (type) {
+ 
++    case FD_SOCKET:
++        F->setIo(&socket_read_method, &socket_write_method);
++        break;
++
+     case FD_MSGHDR:
+         F->setIo(&msghdr_read_method, &msghdr_write_method);
+         break;

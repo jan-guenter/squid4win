@@ -1,0 +1,1 @@
+../../../skills/wix-msi-installer/SKILL.md

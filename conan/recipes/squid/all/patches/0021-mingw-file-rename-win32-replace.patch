@@ -1,0 +1,56 @@
+diff --git a/pristine/squid-7.5/src/fs_io.cc b/patched/squid-7.5/src/fs_io.cc
+--- a/pristine/squid-7.5/src/fs_io.cc
++++ b/patched/squid-7.5/src/fs_io.cc
+@@ -15,6 +15,7 @@
+ #include "fs_io.h"
+ #include "globals.h"
+ #include "MemBuf.h"
++#include "win32.h"
+ #include "StatCounters.h"
+ 
+ #include <cerrno>
+@@ -22,7 +23,7 @@
+ static PF diskHandleRead;
+ static PF diskHandleWrite;
+ 
+-#if _SQUID_WINDOWS_ || _SQUID_OS2_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ || _SQUID_OS2_
+ static int
+ diskWriteIsComplete(int fd)
+ {
+@@ -103,7 +104,7 @@
+     }
+ 
+     if (F->flags.write_daemon) {
+-#if _SQUID_WINDOWS_ || _SQUID_OS2_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_ || _SQUID_OS2_
+         /*
+          * on some operating systems, you can not delete or rename
+          * open files, so we won't allow delayed close.
+@@ -450,12 +451,23 @@
+     // ensure c_str() lifetimes even if `to` and `from` share memory
+     SBuf to2(to.rawContent(), to.length());
+ 
+-#if _SQUID_OS2_ || _SQUID_WINDOWS_
++#if _SQUID_WINDOWS_ || _SQUID_MINGW_
++    if (MoveFileExA(
++            from2.c_str(),
++            to2.c_str(),
++            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
++        )) {
++        return true;
++    }
++    WIN32_maperror(GetLastError());
++#elif _SQUID_OS2_
+     remove(to2.c_str());
+-#endif
+-
+     if (rename(from2.c_str(), to2.c_str()) == 0)
+         return true;
++#else
++    if (rename(from2.c_str(), to2.c_str()) == 0)
++        return true;
++#endif
+ 
+     int xerrno = errno;
+     debugs(21, (xerrno == ENOENT ? 2 : DBG_IMPORTANT), "ERROR: Cannot rename " << from << " to " << to << ": " << xstrerr(xerrno));

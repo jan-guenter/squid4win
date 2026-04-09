@@ -106,9 +106,13 @@ The first committed installer contract is:
   config association is persisted separately for the named service. The helper
   must verify the registry-backed `ConfigFile` and `CommandLine` entries after
   registration so the service and spawned Squid processes do not fall back to
-  the compiled default config path. Because upstream service startup splits the
-  stored `CommandLine` on whitespace without quote support, the install root
-  used for service registration must remain space-free.
+  the compiled default config path. On native Windows builds, the stored
+  `CommandLine` must include `-N -f <config>` because Squid does not provide
+  the normal SMP worker-launch path there; without `-N`, the service remains
+  master-only and never binds the configured listeners. Because upstream
+  service startup splits the stored `CommandLine` on whitespace without quote
+  support, the install root used for service registration must remain
+  space-free.
 - `scripts\installer\Manage-SquidService.ps1` stops a running named service
   before removing it so reinstall and runner cleanup stay reliable.
 - `packaging\wix\Product.wxs` must pass the install root to

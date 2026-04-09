@@ -37,6 +37,7 @@ from squid4win.models import (
     DependencySource,
     NativeDependencySourceOptions,
     PackageManagerExportOptions,
+    ProxyRuntimeValidationOptions,
     PublishChocolateyOptions,
     PublishScoopOptions,
     PublishWingetOptions,
@@ -53,6 +54,7 @@ from squid4win.package_managers import (
     run_publish_scoop,
     run_publish_winget,
 )
+from squid4win.proxy_runtime import run_proxy_runtime_validation
 from squid4win.runner import PlanExecutionError, PlanRunner
 from squid4win.skill_frontmatter import lint_repo_owned_skills
 from squid4win.upstream import GitHubReleaseClient
@@ -831,6 +833,65 @@ def service_runner_validation(
         ),
     )
     _run_command(runtime, run_service_runner_validation, options)
+
+
+@app.command(
+    "proxy-runtime-validation",
+    help=(
+        "Run or preview deterministic live-proxy validation with local load and protocol "
+        "scenarios."
+    ),
+)
+def proxy_runtime_validation(
+    repository_root: RepositoryRootOption = None,
+    dry_run: DryRunOption = False,
+    execute_compat: ExecuteCompatOption = False,
+    verbose: VerboseOption = 0,
+    quiet: QuietOption = 0,
+    artifact_root: ArtifactRootOption = None,
+    proxy_url: Annotated[str, typer.Option("--proxy-url")] = "http://127.0.0.1:3128",
+    binary_path: Annotated[Path | None, typer.Option("--binary-path")] = None,
+    install_root: Annotated[Path | None, typer.Option("--install-root")] = None,
+    request_timeout_seconds: Annotated[
+        int,
+        typer.Option("--request-timeout-seconds", min=1, max=300),
+    ] = 20,
+    burst_requests: Annotated[
+        int,
+        typer.Option("--burst-requests", min=8, max=4000),
+    ] = 128,
+    burst_concurrency: Annotated[
+        int,
+        typer.Option("--burst-concurrency", min=1, max=256),
+    ] = 16,
+    include_external: Annotated[
+        bool,
+        typer.Option("--include-external/--skip-external"),
+    ] = True,
+    log_tail_lines: Annotated[
+        int,
+        typer.Option("--log-tail-lines", min=20, max=2000),
+    ] = 200,
+) -> None:
+    runtime = _build_runtime(
+        verbose=verbose,
+        quiet=quiet,
+        dry_run=dry_run,
+        execute_compat=execute_compat,
+    )
+    options = ProxyRuntimeValidationOptions(
+        repository_root=repository_root,
+        artifact_root=artifact_root,
+        proxy_url=proxy_url,
+        binary_path=binary_path,
+        install_root=install_root,
+        request_timeout_seconds=request_timeout_seconds,
+        burst_requests=burst_requests,
+        burst_concurrency=burst_concurrency,
+        include_external=include_external,
+        log_tail_lines=log_tail_lines,
+    )
+    _run_command(runtime, run_proxy_runtime_validation, options)
 
 
 @app.command(

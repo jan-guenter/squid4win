@@ -1,4 +1,5 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <?define ProductName = "Squid4Win" ?>
@@ -18,8 +19,13 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
     <Launch Condition="VersionNT64" Message="This installation package is only supported on 64-bit Windows." />
+    <Launch Condition='NOT (INSTALLFOLDER &gt;&lt; " ")'
+            Message="Install root cannot contain spaces because Squid's Windows service startup does not preserve quoted config paths. Choose a path without spaces, such as C:\Squid4Win." />
 
     <Property Id="ROOTDRIVE" Value="C:\" />
+    <Property Id="INSTALLLEVEL" Value="100" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+    <ui:WixUI Id="WixUI_FeatureTree" />
 
     <StandardDirectory Id="TARGETDIR">
       <Directory Id="INSTALLFOLDER" Name="Squid4Win" />
@@ -31,8 +37,8 @@
 
     <Property Id="SQUID4WIN_SERVICE_NAME" Value="$(var.SquidServiceName)" />
 
-    <ComponentGroup Id="InstallerIntegration" Directory="INSTALLFOLDER">
-      <Component Id="StartMenuShortcutComponent" Guid="*">
+    <ComponentGroup Id="TrayIntegration" Directory="INSTALLFOLDER">
+      <Component Id="TrayShortcutComponent" Guid="*">
         <Shortcut Id="TrayShortcut"
                   Directory="ApplicationShortcutFolder"
                   Name="Squid4Win"
@@ -44,16 +50,46 @@
                       On="uninstall" />
         <RegistryValue Root="HKCU"
                        Key="Software\Squid4Win"
-                       Name="Installed"
+                       Name="TrayShortcutInstalled"
                        Type="integer"
                        Value="1"
                        KeyPath="yes" />
       </Component>
     </ComponentGroup>
 
-    <Feature Id="MainFeature" Title="Squid4Win" Level="1">
-      <ComponentGroupRef Id="InstallPayload" />
-      <ComponentGroupRef Id="InstallerIntegration" />
+    <ComponentGroup Id="TrayAutostartIntegration" Directory="INSTALLFOLDER">
+      <Component Id="TrayAutostartComponent" Guid="*">
+        <RegistryValue Root="HKLM"
+                       Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                       Name="Squid4Win.Tray"
+                       Type="string"
+                       Value="[INSTALLFOLDER]Squid4Win.Tray.exe"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="MainFeature"
+             Title="Squid4Win"
+             Level="1"
+             Display="expand"
+             ConfigurableDirectory="INSTALLFOLDER"
+             AllowAbsent="no">
+      <ComponentGroupRef Id="CorePayload" />
+      <Feature Id="TrayFeature"
+               Title="System tray application"
+               Description="Install the optional Squid4Win tray UI."
+               Level="$(var.TrayFeatureLevel)"
+               AllowAbsent="yes">
+        <ComponentGroupRef Id="TrayPayload" />
+        <ComponentGroupRef Id="TrayIntegration" />
+        <Feature Id="TrayAutostartFeature"
+                 Title="Start tray application at logon"
+                 Description="Start the tray application automatically for all users at Windows logon."
+                 Level="$(var.TrayAutostartFeatureLevel)"
+                 AllowAbsent="yes">
+          <ComponentGroupRef Id="TrayAutostartIntegration" />
+        </Feature>
+      </Feature>
     </Feature>
 
     <!--

@@ -34,9 +34,7 @@ WINDOWS_TOOL_REQUIRES = (
     "msys2/cci.latest",
     "mingw-builds/15.1.0",
 )
-COMMON_CONFIGURE_ARGS = (
-    "--without-netfilter-conntrack",
-)
+COMMON_CONFIGURE_ARGS = ("--without-netfilter-conntrack",)
 CONFIG_LOG_FILENAME = "config.log"
 WINDOWS_CONFIGURE_CACHE: dict[str, str] = {
     "ac_cv_sizeof_void_p": "8",
@@ -55,6 +53,13 @@ WINDOWS_CONFIGURE_CACHE: dict[str, str] = {
     "ac_cv_sizeof_int64_t": "8",
     "ac_cv_sizeof_off_t": "4",
     "ac_cv_sizeof_size_t": "8",
+    "ac_cv_header_stdarg_h": "yes",
+    "ac_cv_header_stdio_h": "yes",
+    "ac_cv_header_syslog_h": "no",
+    "ac_cv_header_tchar_h": "yes",
+    "ac_cv_header_security_h": "yes",
+    "ac_cv_header_sspi_h": "yes",
+    "lt_cv_prog_compiler_rtti_exceptions": "no",
 }
 DEPENDENCY_SETTINGS: dict[str, dict[str, str]] = {
     "libxml2": {
@@ -227,8 +232,7 @@ class SquidConan(ConanFile):
                 self.output.info(f"Reusing existing source tree at {source_root}.")
                 return
             self.output.info(
-                "Refreshing the Squid source tree because the source metadata or "
-                "patch set changed."
+                "Refreshing the Squid source tree because the source metadata or patch set changed."
             )
 
         mkdir(self, self.source_folder)
@@ -279,12 +283,8 @@ class SquidConan(ConanFile):
         )
         pkg_config_lib_dir_entries = self._deduplicate(
             [
-                self._native_windows_path(
-                    msys2_root / msys2_env_directory / "lib" / "pkgconfig"
-                ),
-                self._native_windows_path(
-                    msys2_root / msys2_env_directory / "share" / "pkgconfig"
-                ),
+                self._native_windows_path(msys2_root / msys2_env_directory / "lib" / "pkgconfig"),
+                self._native_windows_path(msys2_root / msys2_env_directory / "share" / "pkgconfig"),
             ]
         )
         pkg_config_path_entries = self._conan_pkg_config_path_entries(
@@ -322,12 +322,9 @@ class SquidConan(ConanFile):
             f"export {tool_name}={self._bash_quote(self._shell_path(tool_path))}"
             for tool_name, tool_path in mingw_tool_paths.items()
         )
+        bash_common_lines.append(f"export PKG_CONFIG={self._bash_quote(pkg_config_binary_path)}")
         bash_common_lines.append(
-            f"export PKG_CONFIG={self._bash_quote(pkg_config_binary_path)}"
-        )
-        bash_common_lines.append(
-            "export PKG_CONFIG_LIBDIR="
-            f'{self._bash_quote(";".join(pkg_config_lib_dir_entries))}'
+            f"export PKG_CONFIG_LIBDIR={self._bash_quote(';'.join(pkg_config_lib_dir_entries))}"
         )
         if pkg_config_path_entries:
             bash_common_lines.append(
@@ -586,23 +583,16 @@ class SquidConan(ConanFile):
     def _log_autoconf_repair_result(self, repair_result: dict[str, object]) -> None:
         repaired_macros = list(cast(list[str], repair_result["repaired_macros"]))
         if repaired_macros:
-            self.output.info(
-                "Repaired generated autoconf macros: "
-                + ", ".join(repaired_macros)
-            )
+            self.output.info("Repaired generated autoconf macros: " + ", ".join(repaired_macros))
 
     def package(self) -> None:
         install_root = Path(self.build_folder) / "package"
         if not install_root.is_dir():
-            raise ConanException(
-                f"Expected the native Squid install root at {install_root}."
-            )
+            raise ConanException(f"Expected the native Squid install root at {install_root}.")
 
         upstream_license_path = Path(self.source_folder) / "COPYING"
         if not upstream_license_path.is_file():
-            raise ConanException(
-                f"Expected the upstream Squid license at {upstream_license_path}."
-            )
+            raise ConanException(f"Expected the upstream Squid license at {upstream_license_path}.")
 
         copy(self, "*", src=os.fspath(install_root), dst=self.package_folder)
         copy(
@@ -656,9 +646,7 @@ class SquidConan(ConanFile):
             patch_path = Path(self.export_sources_folder) / str(
                 normalized_patch_entry["patch_file"]
             )
-            hasher.update(
-                json.dumps(normalized_patch_entry, sort_keys=True).encode("utf-8")
-            )
+            hasher.update(json.dumps(normalized_patch_entry, sort_keys=True).encode("utf-8"))
             hasher.update(patch_path.read_bytes())
         return hasher.hexdigest()
 
@@ -760,9 +748,7 @@ class SquidConan(ConanFile):
 
         if os_name == "Linux":
             if compiler_name not in {"gcc", "clang"}:
-                raise ConanInvalidConfiguration(
-                    "Linux builds require either gcc or clang."
-                )
+                raise ConanInvalidConfiguration("Linux builds require either gcc or clang.")
             if self._option_enabled("enable_win32_service", default=False):
                 raise ConanInvalidConfiguration(
                     "enable_win32_service is only supported on Windows."
@@ -791,7 +777,7 @@ class SquidConan(ConanFile):
         return os.path.abspath(os.fspath(path)).replace("\\", "/")
 
     def _recipe_configure_args(self) -> list[str]:
-        return [
+        configure_args = [
             self._openssl_configure_arg(),
             self._toggle_configure_arg(
                 "enable_win32_service",
@@ -820,6 +806,18 @@ class SquidConan(ConanFile):
             self._list_configure_arg("auth_negotiate_helpers", "auth-negotiate"),
             self._list_configure_arg("external_acl_helpers", "external-acl-helpers"),
         ]
+        if self._is_windows():
+            # Squid's Windows IPC implementation asserts when unlinkd uses IPC_FIFO,
+            # so disable unlinkd in native Windows builds.
+            configure_args.append("--disable-unlinkd")
+            # The bundled SNMP support does not build cleanly on MinGW because
+            # upstream still expects Unix socket headers in lib/snmplib.
+            configure_args.append("--disable-snmp")
+            # MinGW/UCRT socket-backed CRT descriptors can be assigned sparsely,
+            # so the default 2048 FD table is too small for realistic Windows load.
+            configure_args.append("--with-filedescriptors=8192")
+
+        return configure_args
 
     def _openssl_configure_arg(self) -> str:
         if not self._option_enabled("with_openssl"):
@@ -842,11 +840,7 @@ class SquidConan(ConanFile):
         *,
         default: bool | None = None,
     ) -> str:
-        return (
-            enabled_flag
-            if self._option_enabled(option_name, default=default)
-            else disabled_flag
-        )
+        return enabled_flag if self._option_enabled(option_name, default=default) else disabled_flag
 
     def _list_configure_arg(self, option_name: str, feature_name: str) -> str:
         option_value = self._string_option(option_name)
@@ -989,9 +983,7 @@ class SquidConan(ConanFile):
 
     def _bash_path(self) -> str:
         if self._is_windows():
-            bash_path = str(
-                self.conf.get("tools.microsoft.bash:path", default="")
-            ).strip()
+            bash_path = str(self.conf.get("tools.microsoft.bash:path", default="")).strip()
             if not bash_path:
                 raise ConanInvalidConfiguration(
                     "The profile must define tools.microsoft.bash:path for the MSYS2 build."
@@ -1002,9 +994,7 @@ class SquidConan(ConanFile):
         if bash_path:
             return bash_path
 
-        raise ConanInvalidConfiguration(
-            "A bash executable is required for Linux autotools builds."
-        )
+        raise ConanInvalidConfiguration("A bash executable is required for Linux autotools builds.")
 
     @staticmethod
     def _require_squid_executable(install_root: Path) -> Path:
@@ -1046,9 +1036,7 @@ class SquidConan(ConanFile):
 
         for header_line in header_text.splitlines():
             updated_lines.append(
-                self._repair_autoconf_header_line(
-                    header_line, definitions, repaired_macros
-                )
+                self._repair_autoconf_header_line(header_line, definitions, repaired_macros)
             )
 
         updated_header_text = newline.join(updated_lines)
@@ -1098,9 +1086,7 @@ class SquidConan(ConanFile):
         if stripped_line.startswith("/*") and stripped_line.endswith("*/"):
             inner_line = stripped_line[2:-2].strip()
             if inner_line.startswith("#undef "):
-                macro_name, _ = cls._split_macro_token(
-                    inner_line[len("#undef ") :].strip()
-                )
+                macro_name, _ = cls._split_macro_token(inner_line[len("#undef ") :].strip())
                 return macro_name
             return None
 
@@ -1154,9 +1140,7 @@ class SquidConan(ConanFile):
         return macro_name, parameter_text
 
     @classmethod
-    def _parse_define_directive(
-        cls, definition_line: str
-    ) -> tuple[str, str, list[str]] | None:
+    def _parse_define_directive(cls, definition_line: str) -> tuple[str, str, list[str]] | None:
         stripped_line = definition_line.lstrip()
         directive_prefix = "#define "
         if not stripped_line.startswith(directive_prefix):
@@ -1207,9 +1191,7 @@ class SquidConan(ConanFile):
             if parsed_directive is None:
                 continue
 
-            current_name, current_parameter_text, current_value_lines = (
-                parsed_directive
-            )
+            current_name, current_parameter_text, current_value_lines = parsed_directive
             if not definition_line.rstrip().endswith("\\"):
                 commit_current_definition()
                 current_name = None

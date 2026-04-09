@@ -17,6 +17,9 @@ symlinked files that expose these repo-owned skills to Copilot.
   rendering, practical patterns, Mermaid diagrams, and review criteria.
 - `megalinter` - MegaLinter usage, configuration, local runner, CI
   integration, and review guidance for multi-language repositories.
+- `proxy-runtime-validation` - Managed/live Squid runtime validation guidance
+  for the Python proxy harness, local protocol matrix, artifact inspection, and
+  MinGW DNS/socket regression triage.
 - `rich` - Rich guidance for terminal formatting, shared `Console` usage,
   tables, status output, debugging aids, and readable styling.
 - `shellingham` - Shellingham guidance for detecting the surrounding shell
@@ -27,6 +30,10 @@ symlinked files that expose these repo-owned skills to Copilot.
   repo-safe layout practices.
 - `typer` - Typer guidance for type-hinted Python CLIs, subcommands,
   prompts, testing, completion, and packaging-aware UX.
+- `wix-msi-installer` - WiX v4 MSI installer authoring for Windows desktop
+  applications: built-in UI sets, feature selection, Squid service registration
+  via native verbs, per-machine tray autostart, `WixQuietExec` custom actions,
+  and the no-spaces install-root constraint.
 
 ## Maintaining this layout
 

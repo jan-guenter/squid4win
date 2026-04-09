@@ -21,6 +21,9 @@ Repo-specific directives:
   refresh.
 - Build the tray app directly with `.NET 10` from `src\tray\Squid4Win.Tray`; do
   not route it back through Conan packaging, lockfiles, or editables.
+- Keep `dotnet` package restore pinned to the repo-root `NuGet.config` so tray
+  and WiX builds use the committed `nuget.org` source set instead of
+  machine-global feeds, credentials, or disabled-source state.
 - Keep PowerShell only where Windows installer integration genuinely requires
   it, such as MSI custom actions or shipped install-time helper scripts.
 - Keep the installed service helper on the current `squid.exe -k parse`,
@@ -29,10 +32,13 @@ Repo-specific directives:
   runtime startup parameters, while the selected config association is
   persisted separately for the named service. The helper must explicitly verify
   the registry-backed `ConfigFile` and `CommandLine` values so service startup
-  and spawned Squid processes do not fall back to compiled defaults. Because
-  upstream service startup splits the stored `CommandLine` on whitespace
-  without quote support, the install root used for service registration must
-  remain space-free.
+  and spawned Squid processes do not fall back to compiled defaults. On native
+  Windows builds, the stored `CommandLine` must include `-N -f <config>`
+  because Squid does not provide the normal SMP worker-launch path there;
+  without `-N`, the service remains master-only and never binds the configured
+  listeners. Because upstream service startup splits the stored `CommandLine`
+  on whitespace without quote support, the install root used for service
+  registration must remain space-free.
 - Keep `CONAN_HOME` repo-local at `.\.conan2` and prefer repo-relative paths.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
@@ -49,6 +55,10 @@ Repo-specific directives:
   package bins into `build\install\...` so `bundle-package` mirrors them into
   `artifacts\install-root`, and keep the runtime notice manifest aligned when
   shared Conan dependencies add DLLs.
+- Keep packaging-support staging responsible for converting upstream Squid
+  man-page sources into `docs\html\` with a generated `index.html`, and prune
+  the raw `share\man` tree from the Windows payload instead of shipping Unix man
+  pages directly.
 - Treat `.agents\design\*.md` as project memory. If an accepted design changes,
   update the ADR and preserve alternatives/history sections.
 - Treat `skills\` as the canonical home for repo-owned skills.
@@ -67,7 +77,7 @@ Repo-specific directives:
   summaries and sticky PR comments through dedicated report jobs rather than
   ad-hoc duplicated comment scripts.
 - Local target-state validation now includes the Python-owned `squid-build`,
-  `smoke-test`, and `bundle-package` path.
+  `proxy-runtime-validation`, `smoke-test`, and `bundle-package` path.
 - Do not claim clean-host installer behavior or installed-service plus tray
   lifecycle validation after the workflow migration unless that validation is
   explicitly cited.

@@ -124,6 +124,11 @@ The automation baseline is:
   responsible for generating a unique temporary service name, staging an
   isolated validation root, invoking the MSI, and cleaning up leftover runner
    state.
+- Keep
+  `uv run squid4win-automation proxy-runtime-validation`
+  responsible for the managed-or-live proxy runtime matrix and artifact output
+  under `artifacts\proxy-runtime\`; treat public endpoint checks as advisory
+  sanity probes rather than deterministic load proofs.
 - Keep `.github\workflows\service-runner-validation.yml` responsible for the
   isolated Windows runner lifecycle validation path.
 - Keep the Python CLI on execute-by-default semantics so workflow and local

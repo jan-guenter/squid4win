@@ -31,15 +31,16 @@ The repository is being reset toward the target state defined in ADR `0006`:
 The current cited local validation for the reset architecture is:
 
 - local `uv run squid4win-automation squid-build --with-tray --with-runtime-dlls --with-packaging-support`
+- local `uv run squid4win-automation proxy-runtime-validation --binary-path build\install\release\sbin\squid.exe --install-root build\install\release --skip-external`
 - local `uv run squid4win-automation smoke-test --configuration Release --require-notices`
 - local `uv run squid4win-automation bundle-package --configuration Release --create-portable-zip`
 - generated local artifacts at `artifacts\squid4win-portable.zip` and
   `artifacts\squid4win.msi`
 
 That validates the Python-owned build, staging, direct `.NET 10` tray
-integration, smoke-test, and packaging path on a development machine. It does
-not yet prove clean-host installer behavior or installed-service lifecycle
-validation on an isolated runner.
+integration, managed proxy runtime matrix, smoke-test, and packaging path on a
+development machine. It does not yet prove clean-host installer behavior or
+installed-service lifecycle validation on an isolated runner.
 
 ### Target-state validation still pending
 
@@ -56,6 +57,9 @@ The repository should not yet claim:
   as the current quality/distribution companion. ADRs `0001` through `0004`
   remain historical context after the architecture reset.
 - Keep `CONAN_HOME` repo-local at `.\.conan2`.
+- Keep the repo-root `NuGet.config` authoritative for `dotnet` restore so tray
+  and WiX builds do not inherit user-global package sources, credentials, or
+  disabled-feed state.
 - Keep `config\squid-version.json`, `conan\squid-release.json`, and
   `conan\recipes\squid\all\conandata.yml` aligned when the Squid pin changes. Prefer
   `uv run squid4win-automation upstream-version`; keep
@@ -117,10 +121,16 @@ instead of rewriting the committed default lockfile.
 
 On Windows, when a selected Conan dependency emits shared runtime DLLs, the
 Python staging path now copies those DLLs from the Conan package bins into
-`build\install\<configuration>` next to the staged executables. The
-`bundle-package` path then mirrors that staged tree into `artifacts\install-root`,
-so the portable payload and MSI payload inherit the same Conan-built runtime
-DLL adjacency.
+`build\install\<configuration>` next to the staged Squid executables. Release
+native `.exe` and `.dll` files in that staged bundle are then stripped with the
+Conan-provided `mingw-builds` `strip.exe` before `bundle-package` mirrors the
+tree into `artifacts\install-root`, so the portable payload and MSI payload do
+not ship embedded MinGW DWARF sections.
+
+When packaging support is enabled, the Python staging path also converts the
+upstream Squid man-page sources into Windows-friendly HTML manuals under
+`docs\html\` (with `docs\html\index.html` as the entry point) and prunes the
+raw `share\man` tree from the staged Windows payload.
 
 Some checked-in `scripts\*.ps1` files still remain for installer-time behavior,
 optional signing, and historical update fallbacks. Keep them narrow and do not
@@ -144,9 +154,23 @@ service keeps Squid-controlled runtime startup parameters, while the selected
 config association is persisted separately for the named service. The helper
 now verifies the registry-backed `ConfigFile` and `CommandLine` values
 explicitly so service startup and spawned Squid processes do not fall back to
-Squid's compiled default config path. Because upstream service startup splits
-the stored `CommandLine` on whitespace without quote support, the install root
-used for service registration must remain space-free.
+Squid's compiled default config path. On native Windows builds, the stored
+`CommandLine` must include `-N -f <config>` because Squid does not provide the
+usual SMP worker-launch path there; without `-N`, the service remains a
+master-only process and never binds the configured listeners. Because upstream
+service startup splits the stored `CommandLine` on whitespace without quote
+support, the install root used for service registration must remain space-free.
+
+### Windows runtime config notes
+
+The baseline template keeps `eui_lookup off` because current Windows builds do
+not support ARP / MAC / EUI lookups.
+
+If you route HTTPS `CONNECT` traffic through parent proxies, note that Squid 7
+treats `CONNECT` as non-hierarchical. `cache_peer_access` still filters
+candidate peers, but it does not force parent use by itself. Pair the relevant
+ACLs with `nonhierarchical_direct off` and explicit `never_direct` rules such
+as `never_direct allow <acl>` followed by `never_direct deny all`.
 
 Likewise, any remaining tray-related Conan packaging or editable flows should
 be treated as migration leftovers or compatibility shims, not as the future
@@ -162,15 +186,20 @@ Plan future contributor and CI work around:
 - Python 3.14
 - `uv`
 - .NET 10 SDK
+- internet access to `https://api.nuget.org/v3/index.json` for tray and WiX
+  package restore through the repo-local `NuGet.config`
 - internet access to ConanCenter so the native Squid recipe can restore its
   managed MSYS2 and MinGW toolchain inputs
 
 Contributor and CI automation should use `pyproject.toml`, `uv.lock`, Python
 3.14, and `uv` as the primary repo-level automation path. The core automation
-commands — `squid-build`, `tray-build`, `bundle-package`, `smoke-test`,
-`service-runner-validation`, and `conan-lockfile-update` — are now native
-Python orchestration. `service-runner-validation` is intended for isolated
-admin-capable Windows runners rather than shared development machines.
+commands — `squid-build`, `tray-build`, `proxy-runtime-validation`,
+`bundle-package`, `smoke-test`, `service-runner-validation`, and
+`conan-lockfile-update` — are now native Python orchestration.
+`proxy-runtime-validation` writes markdown, JSON, and log artifacts under
+`artifacts\proxy-runtime\` for managed or live-proxy runtime checks.
+`service-runner-validation` is intended for isolated admin-capable Windows
+runners rather than shared development machines.
 
 ## Repository map
 

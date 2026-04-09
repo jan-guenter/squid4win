@@ -5,31 +5,46 @@
     <InstallerPlatform>x64</InstallerPlatform>
     <HarvestDirectoryGenerateGuidsNow>true</HarvestDirectoryGenerateGuidsNow>
     <HarvestDirectoryAutogenerateGuids>false</HarvestDirectoryAutogenerateGuids>
-    <InstallerPayloadRoot Condition="'$(InstallerPayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\install-root</InstallerPayloadRoot>
+    <HarvestDirectorySuppressSpecificWarnings Condition="'$(HarvestDirectorySuppressSpecificWarnings)' == ''">5151</HarvestDirectorySuppressSpecificWarnings>
+    <InstallerPayloadCoreRoot Condition="'$(InstallerPayloadCoreRoot)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\install-root-core</InstallerPayloadCoreRoot>
+    <InstallerPayloadTrayRoot Condition="'$(InstallerPayloadTrayRoot)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\install-root-tray</InstallerPayloadTrayRoot>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0.0</ProductVersion>
     <SquidServiceName Condition="'$(SquidServiceName)' == ''">Squid4Win</SquidServiceName>
+    <TrayFeatureLevel Condition="'$(TrayFeatureLevel)' == ''">1</TrayFeatureLevel>
+    <TrayAutostartFeatureLevel Condition="'$(TrayAutostartFeatureLevel)' == ''">200</TrayAutostartFeatureLevel>
     <DefineConstants>
-      InstallerPayloadRoot=$(InstallerPayloadRoot);
+      InstallerPayloadCoreRoot=$(InstallerPayloadCoreRoot);
+      InstallerPayloadTrayRoot=$(InstallerPayloadTrayRoot);
       ProductVersion=$(ProductVersion);
-      SquidServiceName=$(SquidServiceName)
+      SquidServiceName=$(SquidServiceName);
+      TrayFeatureLevel=$(TrayFeatureLevel);
+      TrayAutostartFeatureLevel=$(TrayAutostartFeatureLevel)
     </DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="WixToolset.Heat" Version="4.0.5" PrivateAssets="all" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="4.0.5" />
     <PackageReference Include="WixToolset.Util.wixext" Version="4.0.5" />
   </ItemGroup>
 
   <ItemGroup>
-    <HarvestDirectory Include="$(InstallerPayloadRoot)">
-      <ComponentGroupName>InstallPayload</ComponentGroupName>
+    <HarvestDirectory Include="$(InstallerPayloadCoreRoot)">
+      <ComponentGroupName>CorePayload</ComponentGroupName>
       <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
-      <PreprocessorVariable>var.InstallerPayloadRoot</PreprocessorVariable>
+      <PreprocessorVariable>var.InstallerPayloadCoreRoot</PreprocessorVariable>
+      <SuppressRootDirectory>true</SuppressRootDirectory>
+    </HarvestDirectory>
+    <HarvestDirectory Include="$(InstallerPayloadTrayRoot)">
+      <ComponentGroupName>TrayPayload</ComponentGroupName>
+      <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
+      <PreprocessorVariable>var.InstallerPayloadTrayRoot</PreprocessorVariable>
       <SuppressRootDirectory>true</SuppressRootDirectory>
     </HarvestDirectory>
   </ItemGroup>
 
   <ItemGroup>
-    <BindPath Include="$(InstallerPayloadRoot)" />
+    <BindPath Include="$(InstallerPayloadCoreRoot)" />
+    <BindPath Include="$(InstallerPayloadTrayRoot)" />
   </ItemGroup>
 </Project>

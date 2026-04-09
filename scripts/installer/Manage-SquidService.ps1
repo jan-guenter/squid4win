@@ -10,17 +10,33 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$serviceNameHelperPath = @(
-    (Join-Path $PSScriptRoot 'Assert-SquidServiceName.ps1'),
-    (Join-Path $PSScriptRoot '..\Assert-SquidServiceName.ps1')
-) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if (-not $serviceNameHelperPath) {
-    throw "Unable to locate Assert-SquidServiceName.ps1 next to $PSCommandPath or in its parent directory."
-}
-. $serviceNameHelperPath
 # Squid's native Windows service code keys ConfigFile/CommandLine beneath
 # PACKAGE_NAME, which is currently "Squid Web Proxy".
 $script:SquidServiceRegistryProductName = 'Squid Web Proxy'
+
+function Assert-SquidServiceName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Name,
+        [string]$ParameterName = 'ServiceName'
+    )
+
+    $resolvedName = $Name.Trim()
+    if ([string]::IsNullOrWhiteSpace($resolvedName)) {
+        throw "$ParameterName must contain at least one alphanumeric character."
+    }
+
+    if ($resolvedName.Length -gt 32) {
+        throw "$ParameterName '$resolvedName' must be 32 characters or fewer because Squid's -n option rejects longer Windows service names."
+    }
+
+    if ($resolvedName -notmatch '^[A-Za-z0-9]+$') {
+        throw "$ParameterName '$resolvedName' must be alphanumeric because Squid's -n option rejects punctuation characters such as '-'."
+    }
+
+    return $resolvedName
+}
 
 function Get-SquidServiceRegistryPath {
     param(
@@ -42,7 +58,10 @@ function Get-SquidServiceCommandLine {
         throw "Squid Windows service command lines do not support config paths containing whitespace because upstream service startup splits the registry CommandLine on whitespace. Use an install root without spaces."
     }
 
-    return "-f $normalizedConfigPath"
+    # Native Windows Squid service mode cannot rely on SMP worker launching, so
+    # the stored service command line must force the service process itself to
+    # run as the worker that opens the listening sockets.
+    return "-N -f $normalizedConfigPath"
 }
 
 function Get-NormalizedPath {
@@ -172,7 +191,7 @@ function Initialize-SquidConfiguration {
     $configDirectory = Join-Path $Root 'etc'
     $configPath = Join-Path $configDirectory 'squid.conf'
     if (Test-Path -LiteralPath $configPath) {
-        return $configPath
+        return (Repair-SquidConfiguration -ConfigPath $configPath)
     }
 
     $templatePath = Join-Path $configDirectory 'squid.conf.template'
@@ -184,7 +203,35 @@ function Initialize-SquidConfiguration {
     $templateContent = Get-Content -Raw -LiteralPath $templatePath
     $resolvedContent = $templateContent.Replace('__SQUID4WIN_INSTALL_ROOT__', $normalizedInstallRoot)
     Set-Content -LiteralPath $configPath -Value $resolvedContent -Encoding ascii
-    return $configPath
+    return (Repair-SquidConfiguration -ConfigPath $configPath)
+}
+
+function Repair-SquidConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigPath
+    )
+
+    $content = Get-Content -LiteralPath $ConfigPath
+    $updated = $false
+    $repairedContent = foreach ($line in $content) {
+        if ($line -match '^\s*unlinkd_program\b') {
+            $updated = $true
+            '# squid4win: removed obsolete unlinkd_program because Windows builds disable unlinkd.'
+            "# $($line.Trim())"
+            continue
+        }
+
+        $line
+    }
+
+    if (-not $updated) {
+        return $ConfigPath
+    }
+
+    Set-Content -LiteralPath $ConfigPath -Value $repairedContent -Encoding ascii
+    Write-Host "Removed obsolete unlinkd_program directives from $ConfigPath."
+    return $ConfigPath
 }
 
 function Set-SquidServiceRegistryConfiguration {

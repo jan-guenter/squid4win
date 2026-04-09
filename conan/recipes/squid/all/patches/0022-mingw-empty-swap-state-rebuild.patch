@@ -1,0 +1,123 @@
+diff --git a/pristine/squid-7.5/src/fs/ufs/RebuildState.h b/patched/squid-7.5/src/fs/ufs/RebuildState.h
+--- a/pristine/squid-7.5/src/fs/ufs/RebuildState.h
++++ b/patched/squid-7.5/src/fs/ufs/RebuildState.h
+@@ -74,6 +74,7 @@
+     bool evictStaleAndContinue(const cache_key *candidateKey, const time_t maxRef, int &staleCount);
+     int getNextFile(sfileno *, int *size);
+     bool fromLog;
++    bool usingTmpSwapLog;
+     bool _done;
+     // TODO: (callback) should be hidden behind a proper human readable name
+     void (callback)(void *cbdata);
+@@ -84,4 +85,3 @@
+ } /* namespace Fs */
+ 
+ #endif /* SQUID_SRC_FS_UFS_REBUILDSTATE_H */
+-
+diff --git a/pristine/squid-7.5/src/fs/ufs/RebuildState.cc b/patched/squid-7.5/src/fs/ufs/RebuildState.cc
+--- a/pristine/squid-7.5/src/fs/ufs/RebuildState.cc
++++ b/patched/squid-7.5/src/fs/ufs/RebuildState.cc
+@@ -41,6 +41,7 @@
+     entry(nullptr),
+     td(nullptr),
+     fromLog(true),
++    usingTmpSwapLog(false),
+     _done(false),
+     cbdata(nullptr)
+ {
+@@ -54,6 +55,7 @@
+     int clean = 0; //TODO: change to bool
+     int zeroLengthLog = 0;
+     FILE *fp = sd->openTmpSwapLog(&clean, &zeroLengthLog);
++    usingTmpSwapLog = fp != nullptr;
+ 
+     if (fp && !zeroLengthLog)
+         LogParser = Fs::Ufs::UFSSwapLogParser::GetUFSSwapLogParser(fp);
+@@ -80,10 +82,13 @@
+ 
+ Fs::Ufs::RebuildState::~RebuildState()
+ {
+-    sd->closeTmpSwapLog();
+-
+     if (LogParser)
+         delete LogParser;
++
++    LogParser = nullptr;
++
++    if (usingTmpSwapLog)
++        sd->closeTmpSwapLog();
+ }
+ 
+ void
+@@ -471,4 +476,3 @@
+ {
+     return _done;
+ }
+-
+diff --git a/pristine/squid-7.5/src/fs/ufs/UFSSwapDir.cc b/patched/squid-7.5/src/fs/ufs/UFSSwapDir.cc
+--- a/pristine/squid-7.5/src/fs/ufs/UFSSwapDir.cc
++++ b/patched/squid-7.5/src/fs/ufs/UFSSwapDir.cc
+@@ -873,6 +873,41 @@
+     }
+ 
+     *zero_flag = log_sb.st_size == 0 ? 1 : 0;
++    if (*zero_flag) {
++        memset(&clean_sb, '\0', sizeof(struct stat));
++
++        if (::stat(clean_path.c_str(), &clean_sb) < 0)
++            *clean_flag = 0;
++        else if (clean_sb.st_mtime < log_sb.st_mtime)
++            *clean_flag = 0;
++        else
++            *clean_flag = 1;
++
++        safeunlink(clean_path.c_str(), 1);
++
++        if (swaplog_fd < 0) {
++            swaplog_fd = file_open(swaplog_path.c_str(), O_WRONLY | O_CREAT | O_BINARY);
++            if (swaplog_fd < 0) {
++                int xerrno = errno;
++                debugs(50, DBG_IMPORTANT, "ERROR: while opening swap log" << swaplog_path << ": " << xstrerr(xerrno));
++                fatalf("Failed to open swap log " SQUIDSBUFPH, SQUIDSBUFPRINT(swaplog_path));
++            }
++        }
++
++        {
++            const StoreSwapLogHeader header;
++            MemBuf buf;
++            buf.init(header.record_size, header.record_size);
++            buf.append(reinterpret_cast<const char*>(&header), sizeof(header));
++            // Pad to keep in sync with UFSSwapDir::writeCleanStart().
++            memset(buf.space(), 0, header.gapSize());
++            buf.appended(header.gapSize());
++            file_write(swaplog_fd, -1, buf.content(), buf.contentSize(),
++                       nullptr, nullptr, buf.freeFunc());
++        }
++
++        return nullptr;
++    }
+     /* close the existing write-only FD */
+ 
+     if (swaplog_fd >= 0)
+@@ -1384,4 +1419,3 @@
+     debugs(36, 3, "Cleaned " << k << " unused files from " << p1);
+     return k;
+ }
+-
+diff --git a/pristine/squid-7.5/src/fs/ufs/UFSSwapLogParser.h b/patched/squid-7.5/src/fs/ufs/UFSSwapLogParser.h
+--- a/pristine/squid-7.5/src/fs/ufs/UFSSwapLogParser.h
++++ b/patched/squid-7.5/src/fs/ufs/UFSSwapLogParser.h
+@@ -25,7 +25,7 @@
+ 
+     UFSSwapLogParser(FILE *fp):log(fp),log_entries(-1), record_size(0) {
+     }
+-    virtual ~UFSSwapLogParser() {};
++    virtual ~UFSSwapLogParser() { Close(); }
+ 
+     static UFSSwapLogParser *GetUFSSwapLogParser(FILE *fp);
+ 
+@@ -42,4 +42,3 @@
+ } //namespace Ufs
+ } //namespace Fs
+ #endif /* SQUID_SRC_FS_UFS_UFSSWAPLOGPARSER_H */
+-

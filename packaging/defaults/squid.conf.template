@@ -2,6 +2,8 @@
 # The installer materializes this template into etc\squid.conf on first install.
 
 visible_hostname squid4win
+# Current Windows builds do not support ARP/MAC/EUI lookups.
+eui_lookup off
 http_port 3128
 
 acl localnet src 10.0.0.0/8
@@ -15,6 +17,14 @@ http_access allow localhost
 http_access allow localnet
 http_access deny all
 
+# Squid 7 treats HTTPS CONNECT requests as non-hierarchical. If you add
+# cache_peer rules for CONNECT traffic, cache_peer_access only narrows the
+# candidate parents; it does not force parent use by itself. Pair the
+# relevant ACLs with:
+#   nonhierarchical_direct off
+#   never_direct allow <peer_routed_acl>
+#   never_direct deny all
+
 cache_dir ufs __SQUID4WIN_INSTALL_ROOT__/var/cache 100 16 256
 coredump_dir __SQUID4WIN_INSTALL_ROOT__/var/cache
 
@@ -23,7 +33,6 @@ cache_log stdio:__SQUID4WIN_INSTALL_ROOT__/var/logs/cache.log
 cache_store_log none
 pid_filename __SQUID4WIN_INSTALL_ROOT__/var/run/squid.pid
 mime_table __SQUID4WIN_INSTALL_ROOT__/etc/mime.conf
-unlinkd_program __SQUID4WIN_INSTALL_ROOT__/libexec/unlinkd.exe
 icon_directory __SQUID4WIN_INSTALL_ROOT__/share/icons
 error_directory __SQUID4WIN_INSTALL_ROOT__/share/errors/templates
 err_page_stylesheet __SQUID4WIN_INSTALL_ROOT__/etc/errorpage.css

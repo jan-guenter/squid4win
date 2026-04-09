@@ -63,7 +63,7 @@
     "PYTHONDONTWRITEBYTECODE": "1",
     "PIP_DISABLE_PIP_VERSION_CHECK": "1"
   },
-  "initializeCommand": "node -e \"const fs=require('fs'); const os=require('os'); const path=require('path'); const gitconfig=path.join(os.homedir(), '.gitconfig'); if (!fs.existsSync(gitconfig)) fs.closeSync(fs.openSync(gitconfig, 'a'));\"",
+  "initializeCommand": "test -f \"$HOME/.gitconfig\" || touch \"$HOME/.gitconfig\"",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
   "postCreateCommand": "uv run --no-project /opt/post_install.py"

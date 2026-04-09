@@ -105,7 +105,8 @@ The target architecture is:
   repo-owned documentation guidance under `skills\`, which may be symlinked
   back into `.agents\skills\` for discovery.
 - Current cited local validation now includes the Python-owned `squid-build`,
-  `smoke-test`, and `bundle-package` path, including local portable zip and MSI
+  `proxy-runtime-validation`, `smoke-test`, and `bundle-package` path,
+  including local runtime harness artifacts plus portable zip and MSI
   generation. Workflow YAMLs have been migrated from PowerShell validator entry
   points to Python CLI commands. Clean-host installer and isolated
   installed-service lifecycle validation on a dedicated Windows runner are still
@@ -118,9 +119,12 @@ The target architecture is:
   config association is persisted separately for the named service. The helper
   now verifies the registry-backed `ConfigFile` and `CommandLine` entries so
   service startup and spawned Squid processes do not fall back to the compiled
-  default config path. Because upstream service startup splits the stored
-  `CommandLine` on whitespace without quote support, the install root used for
-  service registration must remain space-free.
+  default config path. On native Windows builds, the stored `CommandLine` must
+  include `-N -f <config>` because Squid does not provide the normal SMP
+  worker-launch path there; without `-N`, the service remains master-only and
+  never binds the configured listeners. Because upstream service startup splits
+  the stored `CommandLine` on whitespace without quote support, the install
+  root used for service registration must remain space-free.
 
 ## Alternatives considered
 

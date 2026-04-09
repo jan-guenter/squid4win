@@ -9,15 +9,19 @@ description = "Python automation foundation for squid4win build and release orch
 license = { file = "LICENSE" }
 requires-python = ">=3.14,<3.15"
 dependencies = [
+  "brotli>=1.1.0,<2",
   # Keep Conan aligned with the existing automation baseline until the migration is complete.
   "click>=8.1.8,<9",
   "conan==2.27.0",
+  "h2>=4.3.0,<5",
   "httpx>=0.28.1,<0.29",
+  "hypercorn>=0.18.0,<0.19",
   "jinja2>=3.1.6,<4",
   "pydantic>=2.12.0,<3",
   "pyyaml>=6.0.2,<7",
   "rich>=14.2.0,<15",
   "shellingham>=1.5.4,<2",
+  "trustme>=1.2.1,<2",
   "typer>=0.19.2,<0.20",
 ]
 

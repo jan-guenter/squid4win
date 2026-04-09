@@ -1,0 +1,40 @@
+diff --git a/pristine/squid-7.5/compat/os/mswindows.h b/patched/squid-7.5/compat/os/mswindows.h
+--- a/pristine/squid-7.5/compat/os/mswindows.h
++++ b/patched/squid-7.5/compat/os/mswindows.h
+@@ -400,13 +400,31 @@ close(int fd)
+     SOCKET sock = _get_osfhandle(fd);
+ 
+     if (::getsockopt(sock, SOL_SOCKET, SO_TYPE, l_so_type, &l_so_type_siz) == 0) {
+-        int result = 0;
++        int socketError = 0;
+         if (closesocket(sock) == SOCKET_ERROR) {
+-            errno = WSAGetLastError();
+-            result = 1;
++            socketError = WSAGetLastError();
+         }
++#if _SQUID_MINGW_
++        errno = 0;
++        const int crtCloseResult = _close(fd);
++        const int crtCloseError = errno;
++        if (socketError != 0) {
++            errno = socketError;
++            return -1;
++        }
++        if (crtCloseResult != 0 && crtCloseError != EBADF) {
++            errno = crtCloseError;
++            return -1;
++        }
++        return 0;
++#else
+         _free_osfhnd(fd);
+         _osfile(fd) = 0;
+-        return result;
++        if (socketError != 0) {
++            errno = socketError;
++            return -1;
++        }
++        return 0;
++#endif
+     } else
+         return _close(fd);
+ }
