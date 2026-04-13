@@ -26,7 +26,7 @@ squid4win-automation = "squid4win.cli:main"
 
 [dependency-groups]
 dev = [
-  "ruff>=0.15.8,<0.16",
+  "ruff>=0.15.10,<0.16",
   "ty>=0.0.27,<0.1",
 ]
 
