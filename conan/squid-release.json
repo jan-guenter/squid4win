@@ -1,11 +1,11 @@
 {
   "repository": "squid-cache/squid",
-  "version": "7.5",
-  "tag": "SQUID_7_5",
-  "published_at": "2026-03-13T07:47:28Z",
+  "version": "7.6",
+  "tag": "SQUID_7_6",
+  "published_at": "2026-06-08T08:50:18Z",
   "assets": {
-    "source_archive": "https://github.com/squid-cache/squid/releases/download/SQUID_7_5/squid-7.5.tar.xz",
-    "source_signature": "https://github.com/squid-cache/squid/releases/download/SQUID_7_5/squid-7.5.tar.xz.asc",
-    "source_archive_sha256": "f6058907db0150d2f5d228482b5a9e5678920cf368ae0ccbcecceb2ff4c35106"
+    "source_archive": "https://github.com/squid-cache/squid/releases/download/SQUID_7_6/squid-7.6.tar.xz",
+    "source_signature": "https://github.com/squid-cache/squid/releases/download/SQUID_7_6/squid-7.6.tar.xz.asc",
+    "source_archive_sha256": "852178fdc37c5b0786a934fc990c7d2fffc82acf19b2284be209b96431d25992"
   }
 }

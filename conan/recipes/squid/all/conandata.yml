@@ -1,11 +1,11 @@
 sources:
-  "7.5":
-    url: "https://github.com/squid-cache/squid/releases/download/SQUID_7_5/squid-7.5.tar.xz"
-    sha256: "f6058907db0150d2f5d228482b5a9e5678920cf368ae0ccbcecceb2ff4c35106"
+  "7.6":
+    url: "https://github.com/squid-cache/squid/releases/download/SQUID_7_6/squid-7.6.tar.xz"
+    sha256: "852178fdc37c5b0786a934fc990c7d2fffc82acf19b2284be209b96431d25992"
     strip_root: true
 
 patches:
-  "7.5":
+  "7.6":
     - patch_file: "patches/0001-mingw-cert-generator-compat.patch"
       patch_description: "Fix MinGW certificate helper and certificate DB support."
       base_path: "."
